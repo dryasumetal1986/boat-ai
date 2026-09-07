@@ -4,9 +4,11 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-st.set_page_config(page_title="競艇 AI 予想", page_icon="🚤", layout="centered")
+# ページ設定（ブラウザのタブ名も変更）
+st.set_page_config(page_title="やっちゃんの競艇AI予想ツール", page_icon="🚤", layout="centered")
 
-st.title("🚤 競艇 AI 予想")
+# メインタイトル変更
+st.title("🚤 やっちゃんの競艇AI予想ツール")
 st.caption("公式サイトからリアルタイム出走表を自動取得・分析")
 
 st.divider()
@@ -31,7 +33,6 @@ def get_race_list(jcd, rno, date_str):
             
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 選手名のクラス（is-fs18 または is-fs14）を検索
         names = []
         name_elements = soup.find_all("div", class_="is-fs18")
         if not name_elements:
@@ -44,7 +45,6 @@ def get_race_list(jcd, rno, date_str):
                 if len(names) == 6:
                     break
         
-        # 取得できた場合は枠番とセットにする
         if len(names) == 6:
             racers = []
             for i, name in enumerate(names):
@@ -54,7 +54,6 @@ def get_race_list(jcd, rno, date_str):
                 })
             return pd.DataFrame(racers)
             
-        # 簡易抽出で見つからない場合のフォールバック解析
         tbodies = soup.find_all("tbody")
         racers = []
         for idx, tbody in enumerate(tbodies):
@@ -62,7 +61,6 @@ def get_race_list(jcd, rno, date_str):
             words = text.split()
             for word in words:
                 if word in ["A1", "A2", "B1", "B2"]:
-                    # 級別の直前にある単語を選手名とみなす
                     i = words.index(word)
                     if i > 0:
                         racers.append({

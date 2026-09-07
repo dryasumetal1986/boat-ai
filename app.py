@@ -4,12 +4,42 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-# ページ設定（ブラウザのタブ名も変更）
+# ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想ツール", page_icon="🚤", layout="centered")
 
-# メインタイトル変更
-st.title("🚤 やっちゃんの競艇AI予想ツール")
-st.caption("公式サイトからリアルタイム出走表を自動取得・分析")
+# --- カスタムCSS（フォントサイズ調整＆コンパクト化） ---
+st.markdown("""
+    <style>
+    /* メインタイトルのフォントサイズ調整 */
+    .main-title {
+        font-size: 1.6rem !important;
+        font-weight: bold;
+        margin-bottom: 0.2rem;
+        white-space: nowrap;
+    }
+    /* 見出し（h2, h3）のサイズ調整 */
+    h2, h3 {
+        font-size: 1.2rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    /* サブタイトルのサイズ調整 */
+    .caption-text {
+        font-size: 0.8rem;
+        color: #888888;
+        margin-bottom: 1rem;
+    }
+    /* 余白を詰めてコンパクトに */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 1.5rem !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# タイトル表示
+st.markdown('<div class="main-title">🚤 やっちゃんの競艇AI予想ツール</div>', unsafe_allow_html=True)
+st.markdown('<div class="caption-text">公式サイトからリアルタイム出走表を自動取得・分析</div>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -88,7 +118,7 @@ st.info(f"📅 本日の日付: {date_display} (日本時間)")
 
 col1, col2 = st.columns(2)
 with col1:
-    venue = st.selectbox("開催会場", list(VENUE_CODES.keys()), index=9)
+    venue = st.selectbox("開催会場", list(VENUE_CODES.keys()), index=5) # 浜名湖(index 5)
 with col2:
     race_num = st.selectbox("レース", [f"{i}R" for i in range(1, 13)])
 

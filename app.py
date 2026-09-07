@@ -3,14 +3,14 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+import itertools
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想ツール", page_icon="🚤", layout="centered")
 
-# --- タイトルサイズ調整CSS（スマホでも画面内に収まる設定） ---
+# --- タイトルサイズ調整CSS ---
 st.markdown("""
     <style>
-    /* タイトルの文字サイズ調整 */
     h1 {
         font-size: 1.8rem !important;
         line-height: 1.3 !important;
@@ -21,7 +21,7 @@ st.markdown("""
 
 # タイトル表示
 st.title("🚤 やっちゃんの競艇AI予想ツール")
-st.caption("公式サイトからリアルタイム出走表を自動取得・分析")
+st.caption("公式サイトからリアルタイム出走表を自動取得・AI分析")
 
 st.divider()
 
@@ -32,6 +32,7 @@ VENUE_CODES = {
     "下関": "19", "若松": "20", "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
+# --- 公式サイトからのデータ＆級別取得関数 ---
 def get_race_list(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {
@@ -44,42 +45,24 @@ def get_race_list(jcd, rno, date_str):
             return None
             
         soup = BeautifulSoup(res.text, "html.parser")
-        
-        names = []
-        name_elements = soup.find_all("div", class_="is-fs18")
-        if not name_elements:
-            name_elements = soup.find_all("span", class_="is-fs18")
-            
-        for el in name_elements:
-            t = el.get_text(strip=True)
-            if t and len(t) <= 6 and t not in names:
-                names.append(t)
-                if len(names) == 6:
-                    break
-        
-        if len(names) == 6:
-            racers = []
-            for i, name in enumerate(names):
-                racers.append({
-                    "枠": f"{i+1}号艇",
-                    "選手名": name
-                })
-            return pd.DataFrame(racers)
-            
         tbodies = soup.find_all("tbody")
+        
         racers = []
         for idx, tbody in enumerate(tbodies):
             text = tbody.get_text(separator=" ", strip=True)
             words = text.split()
+            
+            # 級別(A1, A2, B1, B2)を探す
             for word in words:
                 if word in ["A1", "A2", "B1", "B2"]:
                     i = words.index(word)
-                    if i > 0:
-                        racers.append({
-                            "枠": f"{len(racers)+1}号艇",
-                            "選手名": words[i-1],
-                            "級別": word
-                        })
+                    name = words[i-1] if i > 0 else "不明"
+                    
+                    racers.append({
+                        "枠": len(racers) + 1,
+                        "選手名": name,
+                        "級別": word
+                    })
                     break
             if len(racers) == 6:
                 break
@@ -87,6 +70,52 @@ def get_race_list(jcd, rno, date_str):
         return pd.DataFrame(racers) if len(racers) == 6 else None
     except Exception:
         return None
+
+# --- AI予想スコア計算エンジン ---
+def calculate_ai_predictions(df, investment):
+    # コース基本スコア（インコース有利）
+    course_scores = {1: 50, 2: 30, 3: 25, 4: 20, 5: 15, 6: 10}
+    # 級別追加スコア
+    rank_scores = {"A1": 30, "A2": 20, "B1": 10, "B2": 0}
+    
+    # 各艇の総合スコア計算
+    scores = {}
+    for _, row in df.iterrows():
+        w = row["枠"]
+        rank = row["級別"]
+        score = course_scores.get(w, 10) + rank_scores.get(rank, 0)
+        scores[w] = score
+        
+    # 全3連単（120通り）の組み合わせスコア計算
+    boats = [1, 2, 3, 4, 5, 6]
+    combos = list(itertools.permutations(boats, 3))
+    
+    combo_scores = []
+    for c in combos:
+        # 1着のスコアを重視する重み付け
+        total_score = (scores[c[0]] * 1.5) + (scores[c[1]] * 1.0) + (scores[c[2]] * 0.7)
+        combo_scores.append((c, total_score))
+        
+    # スコアが高い順にソート
+    combo_scores.sort(key=lambda x: x[1], reverse=True)
+    
+    # 買い目の抽出 (本命2点、対抗1点、穴1点)
+    top_combos = [combo_scores[0], combo_scores[1], combo_scores[2], combo_scores[5]]
+    labels = ["本命 🔥", "本命 🔥", "対抗 ⚔️", "穴 ⚡"]
+    ratios = [0.4, 0.3, 0.2, 0.1]
+    
+    bet_list = []
+    for i in range(4):
+        c, _ = top_combos[i]
+        buy_str = f"{c[0]} - {c[1]} - {c[2]}"
+        amount = int(investment * ratios[i] // 100 * 100)
+        bet_list.append({
+            "区分": labels[i],
+            "買い目（3連単）": buy_str,
+            "推奨購入額": f"{amount:,} 円"
+        })
+        
+    return pd.DataFrame(bet_list)
 
 # --- 1. 条件設定 ---
 st.subheader("⚙️ レース条件設定")
@@ -119,22 +148,19 @@ if st.button("🤖 リアルタイム出走表を取得して予想", type="prim
     if df_racers is None or df_racers.empty:
         st.warning(f"⚠️ {date_display} の {venue} {race_num} の自動解析に失敗しました。時間をおいて再試行するか、会場・レースをご確認ください。")
     else:
-        st.success(f"【{venue} {race_num}】の出走表を取得しました！")
+        st.success(f"【{venue} {race_num}】の出走表を取得・AI分析完了！")
         
-        st.subheader("📋 リアルタイム出走表")
-        st.dataframe(df_racers, hide_index=True, use_container_width=True)
+        # 画面用表記の調整
+        df_display = df_racers.copy()
+        df_display["枠"] = df_display["枠"].apply(lambda x: f"{x}号艇")
+        
+        st.subheader("📋 リアルタイム出走表 (級別データ付)")
+        st.dataframe(df_display, hide_index=True, use_container_width=True)
 
         st.divider()
 
-        st.subheader("🎯 推奨買い目 & 資金配分")
-        b1_amount = int(investment * 0.4 // 100 * 100)
-        b2_amount = int(investment * 0.3 // 100 * 100)
-        b3_amount = int(investment * 0.2 // 100 * 100)
-        b4_amount = int(investment * 0.1 // 100 * 100)
+        # AI計算による買い目生成
+        df_bets = calculate_ai_predictions(df_racers, investment)
 
-        bet_data = {
-            "区分": ["本命 🔥", "本命 🔥", "対抗 ⚔️", "穴 ⚡"],
-            "買い目（3連単）": ["1 - 2 - 3", "1 - 3 - 2", "1 - 2 - 4", "2 - 1 - 3"],
-            "推奨購入額": [f"{b1_amount:,} 円", f"{b2_amount:,} 円", f"{b3_amount:,} 円", f"{b4_amount:,} 円"]
-        }
-        st.table(pd.DataFrame(bet_data))
+        st.subheader("🎯 リアルタイムAI推奨買い目 & 資金配分")
+        st.table(df_bets)

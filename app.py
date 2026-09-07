@@ -4,7 +4,6 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-# ページ設定
 st.set_page_config(page_title="競艇 AI 予想", page_icon="🚤", layout="centered")
 
 st.title("🚤 競艇 AI 予想")
@@ -12,7 +11,6 @@ st.caption("公式サイトからリアルタイム出走表を自動取得・�
 
 st.divider()
 
-# 会場コードマップ
 VENUE_CODES = {
     "桐生": "01", "戸田": "02", "江戸川": "03", "平和島": "04", "多摩川": "05", "浜名湖": "06",
     "蒲郡": "07", "常滑": "08", "津": "09", "三国": "10", "びわこ": "11", "住之江": "12",
@@ -20,51 +18,69 @@ VENUE_CODES = {
     "下関": "19", "若松": "20", "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
-# --- 公式サイトからのデータ取得関数 ---
 def get_race_list(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200:
             return None
             
         soup = BeautifulSoup(res.text, "html.parser")
-        tables = soup.find_all("table")
-        if len(tables) < 3:
-            return None
+        
+        # 選手名のクラス（is-fs18 または is-fs14）を検索
+        names = []
+        name_elements = soup.find_all("div", class_="is-fs18")
+        if not name_elements:
+            name_elements = soup.find_all("span", class_="is-fs18")
             
+        for el in name_elements:
+            t = el.get_text(strip=True)
+            if t and len(t) <= 6 and t not in names:
+                names.append(t)
+                if len(names) == 6:
+                    break
+        
+        # 取得できた場合は枠番とセットにする
+        if len(names) == 6:
+            racers = []
+            for i, name in enumerate(names):
+                racers.append({
+                    "枠": f"{i+1}号艇",
+                    "選手名": name
+                })
+            return pd.DataFrame(racers)
+            
+        # 簡易抽出で見つからない場合のフォールバック解析
+        tbodies = soup.find_all("tbody")
         racers = []
-        tbody_list = tables[2].find_all("tbody")
-        for idx, tbody in enumerate(tbody_list[:6]):
-            row_num = idx + 1
+        for idx, tbody in enumerate(tbodies):
             text = tbody.get_text(separator=" ", strip=True)
             words = text.split()
-            
-            name = "取得失敗"
-            rank = "-"
-            for i, word in enumerate(words):
+            for word in words:
                 if word in ["A1", "A2", "B1", "B2"]:
-                    rank = word
+                    # 級別の直前にある単語を選手名とみなす
+                    i = words.index(word)
                     if i > 0:
-                        name = words[i-1]
+                        racers.append({
+                            "枠": f"{len(racers)+1}号艇",
+                            "選手名": words[i-1],
+                            "級別": word
+                        })
                     break
-            
-            racers.append({
-                "枠": f"{row_num}号艇",
-                "選手名": name,
-                "級別": rank
-            })
-            
-        return pd.DataFrame(racers) if racers else None
+            if len(racers) == 6:
+                break
+                
+        return pd.DataFrame(racers) if len(racers) == 6 else None
     except Exception:
         return None
 
 # --- 1. 条件設定 ---
 st.subheader("⚙️ レース条件設定")
 
-# 日本時間 (JST) を設定
 JST = timezone(timedelta(hours=+9), 'JST')
 now_jst = datetime.now(JST)
 today_str = now_jst.strftime("%Y%m%d")
@@ -91,9 +107,9 @@ if st.button("🤖 リアルタイム出走表を取得して予想", type="prim
         df_racers = get_race_list(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.warning(f"⚠️ {date_display} の {venue} {race_num} は開催されていないか、データがまだ公開されていません。")
+        st.warning(f"⚠️ {date_display} の {venue} {race_num} の自動解析に失敗しました。時間をおいて再試行するか、会場・レースをご確認ください。")
     else:
-        st.success(f"【{venue} {race_num}】の本物出走表を取得しました！")
+        st.success(f"【{venue} {race_num}】の出走表を取得しました！")
         
         st.subheader("📋 リアルタイム出走表")
         st.dataframe(df_racers, hide_index=True, use_container_width=True)

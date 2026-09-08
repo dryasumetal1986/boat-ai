@@ -1,14 +1,18 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import date
+from datetime import date, timedelta
+
 
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想 PRO",
-    page_icon="🚤"
+    page_icon="🚤",
+    layout="wide"
 )
 
+
 API = "https://boatraceopenapi.github.io/api/v1"
+
 
 STADIUMS = {
     1: "桐生",
@@ -90,6 +94,105 @@ def get_race(data, stadium, race_no):
     )
 
 
+def get_course_stats(target_date):
+
+    stats = {}
+
+    for day in range(1, 15):
+
+        d = target_date - timedelta(days=day)
+
+        if d < date(2026, 1, 1):
+            continue
+
+        try:
+            data = get_data(d)
+        except:
+            continue
+
+        stadiums = data.get(
+            "programs",
+            {}
+        ).get(
+            "stadiums",
+            {}
+        )
+
+        for stadium in stadiums.values():
+
+            races = stadium.get(
+                "races",
+                {}
+            )
+
+            for race in races.values():
+
+                result = race.get(
+                    "result",
+                    {}
+                )
+
+                result_racers = result.get(
+                    "racers",
+                    {}
+                )
+
+                if not result_racers:
+                    continue
+
+                for racer in result_racers.values():
+
+                    player_number = str(
+                        racer.get(
+                            "number",
+                            ""
+                        )
+                    )
+
+                    course = racer.get(
+                        "course_number"
+                    )
+
+                    place = racer.get(
+                        "place_number"
+                    )
+
+                    if not player_number:
+                        continue
+
+                    try:
+                        course = int(course)
+                    except:
+                        continue
+
+                    if course < 1 or course > 6:
+                        continue
+
+                    key = (
+                        player_number,
+                        course
+                    )
+
+                    if key not in stats:
+
+                        stats[key] = {
+                            "出走": 0,
+                            "1着": 0
+                        }
+
+                    stats[key]["出走"] += 1
+
+                    try:
+                        place = int(place)
+                    except:
+                        place = 0
+
+                    if place == 1:
+                        stats[key]["1着"] += 1
+
+    return stats
+
+
 def make_table(race):
 
     racers = race.get(
@@ -127,6 +230,12 @@ def make_table(race):
             "選手名": r.get(
                 "name",
                 "不明"
+            ),
+            "選手番号": str(
+                r.get(
+                    "number",
+                    ""
+                )
             ),
             "級別": r.get(
                 "rank_number",
@@ -167,30 +276,80 @@ def make_table(race):
     return pd.DataFrame(rows)
 
 
-def score(row):
+def add_course_stats(df, stats):
+
+    course_rates = []
+    course_starts = []
+
+    for _, row in df.iterrows():
+
+        player = str(
+            row["選手番号"]
+        )
+
+        course = int(
+            row["枠"]
+        )
+
+        key = (
+            player,
+            course
+        )
+
+        item = stats.get(
+            key,
+            {}
+        )
+
+        starts = item.get(
+            "出走",
+            0
+        )
+
+        wins = item.get(
+            "1着",
+            0
+        )
+
+        if starts > 0:
+
+            rate = (
+                wins
+                / starts
+                * 100
+            )
+
+        else:
+
+            rate = 0
+
+        course_rates.append(
+            round(rate, 1)
+        )
+
+        course_starts.append(
+            starts
+        )
+
+    df["コース1着率"] = course_rates
+
+    df["コース出走数"] = course_starts
+
+    return df
+
+
+def calculate_score(row):
 
     s = 0
 
     s += row["全国勝率"] * 10
+
     s += row["全国2連率"] * 0.25
+
     s += row["当地勝率"] * 5
+
     s += row["モーター2連率"] * 0.12
 
-    lane = int(row["枠"])
-
-    bonus = {
-        1: 20,
-        2: 8,
-        3: 6,
-        4: 7,
-        5: 2,
-        6: 0
-    }
-
-    s += bonus.get(
-        lane,
-        0
-    )
 
     st_time = row["平均ST"]
 
@@ -208,6 +367,65 @@ def score(row):
         elif st_time >= 0.22:
             s -= 4
 
+
+    lane = int(
+        row["枠"]
+    )
+
+    lane_bonus = {
+        1: 20,
+        2: 8,
+        3: 6,
+        4: 7,
+        5: 2,
+        6: 0
+    }
+
+    s += lane_bonus.get(
+        lane,
+        0
+    )
+
+
+    course_rate = row[
+        "コース1着率"
+    ]
+
+    if course_rate >= 50:
+        s += 12
+
+    elif course_rate >= 40:
+        s += 9
+
+    elif course_rate >= 30:
+        s += 6
+
+    elif course_rate >= 20:
+        s += 3
+
+    elif course_rate > 0:
+        s += 1
+
+
+    exhibition = row[
+        "展示タイム"
+    ]
+
+    if exhibition > 0:
+
+        if exhibition <= 6.70:
+            s += 6
+
+        elif exhibition <= 6.75:
+            s += 4
+
+        elif exhibition <= 6.80:
+            s += 2
+
+        elif exhibition >= 6.90:
+            s -= 2
+
+
     return s
 
 
@@ -215,19 +433,25 @@ st.title(
     "🚤 やっちゃんの競艇AI予想 PRO"
 )
 
+
 st.write(
     "全国24場対応の競艇予想支援アプリ"
 )
 
+
 st.warning(
     "非公式APIを利用しています。"
+    "最新情報は必ず公式BOATRACEで確認してください。"
 )
+
 
 st.subheader(
-    "レースを選択"
+    "📅 レースを選択"
 )
 
+
 c1, c2, c3 = st.columns(3)
+
 
 with c1:
 
@@ -237,12 +461,14 @@ with c1:
         min_value=date(2026, 1, 1)
     )
 
+
 with c2:
 
     stadium_name = st.selectbox(
         "競艇場",
         list(STADIUMS.values())
     )
+
 
 with c3:
 
@@ -256,10 +482,12 @@ with c3:
 
 stadium_no = 1
 
+
 for n, name in STADIUMS.items():
 
     if name == stadium_name:
         stadium_no = n
+        break
 
 
 if st.button(
@@ -270,7 +498,7 @@ if st.button(
     try:
 
         with st.spinner(
-            "データ取得中..."
+            "🚤 レースデータ取得中..."
         ):
 
             data = get_data(
@@ -283,7 +511,9 @@ if st.button(
             "データ取得に失敗しました"
         )
 
-        st.code(str(e))
+        st.code(
+            str(e)
+        )
 
         st.stop()
 
@@ -304,7 +534,9 @@ if st.button(
         st.stop()
 
 
-    df = make_table(race)
+    df = make_table(
+        race
+    )
 
 
     if df.empty:
@@ -316,13 +548,30 @@ if st.button(
         st.stop()
 
 
+    with st.spinner(
+        "📊 過去14日分のコース成績を分析中..."
+    ):
+
+        course_stats = get_course_stats(
+            target_date
+        )
+
+
+    df = add_course_stats(
+        df,
+        course_stats
+    )
+
+
     df["AIスコア"] = df.apply(
-        score,
+        calculate_score,
         axis=1
     )
 
 
-    maximum = df["AIスコア"].max()
+    maximum = df[
+        "AIスコア"
+    ].max()
 
 
     if maximum > 0:
@@ -342,6 +591,7 @@ if st.button(
         "AI1着評価",
         ascending=False
     )
+
 
     df = df.reset_index(
         drop=True
@@ -366,11 +616,12 @@ if st.button(
         "選手名",
         "級別",
         "全国勝率",
-        "全国2連率",
         "当地勝率",
         "モーター2連率",
         "平均ST",
         "展示タイム",
+        "コース1着率",
+        "コース出走数",
         "AI1着評価"
     ]
 
@@ -382,6 +633,11 @@ if st.button(
     )
 
 
+    st.subheader(
+        "🏆 AI注目選手"
+    )
+
+
     top = df.iloc[0]
 
 
@@ -390,7 +646,10 @@ if st.button(
         + str(int(top["枠"]))
         + "号艇 "
         + str(top["選手名"])
-        + " AI評価 "
+        + "　コース1着率 "
+        + str(top["コース1着率"])
+        + "%"
+        + "　AI評価 "
         + str(top["AI1着評価"])
     )
 
@@ -404,6 +663,9 @@ if st.button(
             + str(int(second["枠"]))
             + "号艇 "
             + str(second["選手名"])
+            + "　コース1着率 "
+            + str(second["コース1着率"])
+            + "%"
         )
 
 
@@ -416,18 +678,31 @@ if st.button(
             + str(int(third["枠"]))
             + "号艇 "
             + str(third["選手名"])
+            + "　コース1着率 "
+            + str(third["コース1着率"])
+            + "%"
         )
 
 
     if len(df) >= 3:
 
-        a = int(df.iloc[0]["枠"])
-        b = int(df.iloc[1]["枠"])
-        c = int(df.iloc[2]["枠"])
+        a = int(
+            df.iloc[0]["枠"]
+        )
+
+        b = int(
+            df.iloc[1]["枠"]
+        )
+
+        c = int(
+            df.iloc[2]["枠"]
+        )
+
 
         st.subheader(
             "🎯 推奨3連単"
         )
+
 
         st.write(
             "本線 "
@@ -438,6 +713,7 @@ if st.button(
             + str(c)
         )
 
+
         st.write(
             "押さえ "
             + str(a)
@@ -447,6 +723,7 @@ if st.button(
             + str(b)
         )
 
+
         st.write(
             "穴 "
             + str(b)
@@ -455,6 +732,53 @@ if st.button(
             + "-"
             + str(c)
         )
+
+
+    st.subheader(
+        "🧠 AI分析項目"
+    )
+
+
+    st.write(
+        "・全国勝率"
+    )
+
+    st.write(
+        "・全国2連率"
+    )
+
+    st.write(
+        "・当地勝率"
+    )
+
+    st.write(
+        "・モーター2連率"
+    )
+
+    st.write(
+        "・平均ST"
+    )
+
+    st.write(
+        "・展示タイム"
+    )
+
+    st.write(
+        "・選手別コース1着率"
+    )
+
+    st.write(
+        "・過去14日間のコース出走数"
+    )
+
+
+    st.divider()
+
+
+    st.caption(
+        "AI評価は独自計算による予想値です。"
+        "的中や利益を保証するものではありません。"
+    )
 
 
 else:

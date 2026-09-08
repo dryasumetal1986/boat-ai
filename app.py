@@ -178,14 +178,16 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 出走表データ取得（リトライ機能追加） ---
-def get_detailed_racers(jcd, rno, date_str, retries=1):
+# --- 出走表データ取得（高速化・リトライ機能） ---
+def get_detailed_racers(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     for i in range(retries + 1):
         try:
-            res = requests.get(url, headers=headers, timeout=5) # タイムアウトを少し伸ばす
+            res = requests.get(url, headers=headers, timeout=4)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 tbodies = soup.find_all("tbody")
@@ -218,29 +220,20 @@ def get_detailed_racers(jcd, rno, date_str, retries=1):
                         "モーター2連率(%)": motor_2ren
                     })
                     if len(racers) == 6: break
-                return pd.DataFrame(racers) if len(racers) == 6 else None
-            else:
-                # ステータスコードが200以外の場合はリトライ
-                if i < retries:
-                    time.sleep(0.5) # 少し待ってからリトライ
-                    continue
-                else:
-                    return None
-        except requests.exceptions.RequestException:
-            # 通信エラーの場合はリトライ
-            if i < retries:
-                time.sleep(0.5)
-                continue
-            else:
-                return None
+                if len(racers) == 6:
+                    return pd.DataFrame(racers)
+        except Exception:
+            pass
+        if i < retries:
+            time.sleep(0.3)
+    return None
 
 # --- 本日の開催場一覧を取得 ---
-@st.cache_data(ttl=10800) # 3時間に延長
+@st.cache_data(ttl=10800)
 def check_active_venues(date_str):
     active_dict = {}
     def check_single(v_tuple):
         name, code = v_tuple
-        # ここではリトライしない（速度優先）
         df = get_detailed_racers(code, "1", date_str, retries=0)
         return name, (df is not None and not df.empty)
 
@@ -251,7 +244,7 @@ def check_active_venues(date_str):
             
     return active_dict
 
-# 最もおすすめのレースを判定
+# 開催情報の読み込み
 active_venues = check_active_venues(today_str)
 active_list = [v for v, act in active_venues.items() if act]
 
@@ -299,13 +292,13 @@ for v_name in VENUE_CODES.keys():
         """
 grid_html += '</div>'
 
-# HTMLでカード一覧を表示
+# HTMLでカード一覧を表示（★unsafe_allow_html=Trueで正しくレンダリング）
 st.markdown(grid_html, unsafe_allow_html=True)
 
 # --- 会場選択エリア ---
 st.divider()
 st.markdown("##### 📍 予想する会場を選択してください")
-# セレクトボックスで会場を選択
+
 selected_v = st.selectbox(
     "会場選択",
     active_list if active_list else list(VENUE_CODES.keys()),
@@ -313,22 +306,23 @@ selected_v = st.selectbox(
 )
 st.session_state.selected_venue = selected_v
 
-# レースと投資金額
 col_r, col_m = st.columns(2)
 with col_r:
     race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
 with col_m:
     investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
 
-# --- 直前情報取得（リトライ機能付き） ---
-def get_before_info(jcd, rno, date_str, retries=1):
+# --- 直前情報取得（展示タイム混雑対策強化） ---
+def get_before_info(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常", "status": "Error"}
     
     for i in range(retries + 1):
         try:
-            res = requests.get(url, headers=headers, timeout=5) # タイムアウトを少し伸ばす
+            res = requests.get(url, headers=headers, timeout=4)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
@@ -354,33 +348,14 @@ def get_before_info(jcd, rno, date_str, retries=1):
                 if len(tenji_list) == 6: 
                     info["tenji"] = tenji_list
                     info["status"] = "OK"
-                
-                if info["status"] == "OK":
                     return info
-                else:
-                    # ステータスがOKでない（展示タイムが取れていない）場合はリトライ
-                    if i < retries:
-                        time.sleep(0.5)
-                        continue
-                    else:
-                        return info
-            else:
-                # ステータスコードが200以外の場合はリトライ
-                if i < retries:
-                    time.sleep(0.5)
-                    continue
-                else:
-                    return info
-        except requests.exceptions.RequestException:
-            # 通信エラーの場合はリトライ
-            if i < retries:
-                time.sleep(0.5)
-                continue
-            else:
-                return info
+        except Exception:
+            pass
+        if i < retries:
+            time.sleep(0.3)
     return info
 
-# --- AI分析 ---
+# --- AI分析ロジック ---
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
@@ -487,12 +462,11 @@ if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想す�
     rno = race_num.replace("R", "")
     
     with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
-        # 安定取得のためリトライ1回追加
-        df_racers = get_detailed_racers(jcd, rno, today_str, retries=1)
-        weather_info = get_before_info(jcd, rno, today_str, retries=1)
+        df_racers = get_detailed_racers(jcd, rno, today_str, retries=2)
+        weather_info = get_before_info(jcd, rno, today_str, retries=2)
     
     if df_racers is None or df_racers.empty or weather_info["status"] != "OK":
-        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、展示タイムがまだ発表されていない可能性があります。投票締切直前はアクセス集中により失敗しやすいため、再度お試しください。")
+        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、展示タイムがまだ発表されていない可能性があります。")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
         

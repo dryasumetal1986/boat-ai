@@ -9,12 +9,17 @@ import re
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- 画像風カスタムCSSデザイン ---
+# --- スマホ・PC両対応のカスタムCSSデザイン ---
 st.markdown("""
     <style>
-    /* 全体背景とフォント */
+    /* 全体背景 */
     .stApp {
         background-color: #F4F6F9;
+    }
+    
+    /* 見出しテキストの色固定（見切れ・背景と同化を防止） */
+    h1, h2, h3, .stSubheader {
+        color: #111111 !important;
     }
     
     /* ヘッダーカード */
@@ -49,28 +54,35 @@ st.markdown("""
         font-size: 0.75rem;
     }
     
-    /* 会場グリッド風ボタン */
+    /* 会場ボタンをスマホでも横並び（4列）にする設定 */
+    [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        width: 23% !important; /* 横に4つ並べる */
+        min-width: 0 !important;
+        flex: none !important;
+    }
+    
+    /* 会場ボタンのデザイン */
     div.stButton > button {
-        width: 100%;
-        height: 68px !important;
+        width: 100% !important;
+        height: 48px !important;
         background-color: #FFFFFF !important;
-        color: #333333 !important;
-        border: 1px solid #DCE1E7 !important;
+        color: #222222 !important;
+        border: 1px solid #C0C8D0 !important;
         border-radius: 6px !important;
         font-weight: bold !important;
-        font-size: 0.9rem !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        transition: all 0.2s ease !important;
-        padding: 4px !important;
+        font-size: 0.85rem !important;
+        padding: 2px !important;
+        margin: 0 !important;
     }
     div.stButton > button:hover {
         border-color: #0F1E36 !important;
-        color: #0F1E36 !important;
-        background-color: #F0F4F8 !important;
-    }
-    div.stButton > button:focus {
-        border-color: #D4AF37 !important;
-        box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.4) !important;
+        background-color: #E2E8F0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -81,18 +93,18 @@ now_jst = datetime.now(JST)
 today_str = now_jst.strftime("%Y%m%d")
 date_display = now_jst.strftime("%m月%d日")
 
-# --- タイトル＆トップのカード表示（画像風デザイン） ---
+# --- タイトル＆トップのカード表示 ---
 st.markdown(f'<div class="top-header">🚤 {date_display} のAIピックアップレース</div>', unsafe_allow_html=True)
 st.markdown("""
 <div class="top-bg">
-    <div style="display: flex; gap: 10px;">
+    <div style="display: flex; gap: 8px;">
         <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">注目</span> <strong style="font-size:1.1rem; color:#111;">江戸川 7R</strong><br>
-            <span style="font-size:0.8rem; color:#666;">締切 13:56</span>
+            <span class="tag-blue">注目</span> <strong style="font-size:1.0rem; color:#111;">江戸川 7R</strong><br>
+            <span style="font-size:0.75rem; color:#666;">締切 13:56</span>
         </div>
         <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">注目</span> <strong style="font-size:1.1rem; color:#111;">蒲郡 12R</strong><br>
-            <span style="font-size:0.8rem; color:#666;">締切 20:38</span>
+            <span class="tag-blue">注目</span> <strong style="font-size:1.0rem; color:#111;">蒲郡 12R</strong><br>
+            <span style="font-size:0.75rem; color:#666;">締切 20:38</span>
         </div>
     </div>
 </div>
@@ -138,19 +150,18 @@ if "selected_venue" not in st.session_state:
 
 st.subheader("🏁 開催場を選択")
 
-# --- 24会場を4列のパネル（グリッド）配置 ---
+# --- 24会場を4列に敷き詰め（横並び固定） ---
 venues = list(VENUE_CODES.keys())
 cols = st.columns(4)
 
 for idx, v_name in enumerate(venues):
     col = cols[idx % 4]
-    # クリックしたら選択会場を切り替え
     if col.button(v_name, key=f"btn_{v_name}"):
         st.session_state.selected_venue = v_name
 
-# --- 選択後のレース・条件指定 ---
+# --- 選択後の詳細指定 ---
 st.divider()
-st.markdown(f"### 📍 選択中: **{st.session_state.selected_venue}**")
+st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
 
 col_r, col_m = st.columns(2)
 with col_r:

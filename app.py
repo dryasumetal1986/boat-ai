@@ -33,45 +33,136 @@ def get_data(d):
 
 def n(x, default=0.0):
     try:
+        if x is None or x == "":
+            return default
         return float(x)
     except Exception:
         return default
 
 
 def get_race(data, sid, rno):
-    return data["programs"]["stadiums"][sid]["races"][str(rno)]
+    return (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+        .get(sid, {})
+        .get("races", {})
+        .get(str(rno), {})
+    )
+
+
+def normalize_racers(obj):
+    """
+    APIのracersが
+    ・リスト
+    ・辞書
+    のどちらでも処理できるようにする
+    """
+
+    if isinstance(obj, list):
+        return [
+            x for x in obj
+            if isinstance(x, dict)
+        ]
+
+    if isinstance(obj, dict):
+        out = []
+
+        for key, value in obj.items():
+
+            if isinstance(value, dict):
+                item = dict(value)
+
+                if "entry_number" not in item:
+                    try:
+                        item["entry_number"] = int(key)
+                    except Exception:
+                        pass
+
+                out.append(item)
+
+        return out
+
+    return []
 
 
 def pmap(race):
+    """
+    直前情報を枠番ベースで取得する。
+    APIのデータ形式が違っても落ちないようにする。
+    """
+
     out = {}
 
-    for p in race.get("preview", {}).get("racers", []):
-        c = p.get("course_number")
+    preview = race.get("preview", {})
 
-        if c is not None:
-            out[str(c)] = p
+    if not isinstance(preview, dict):
+        return out
+
+    racers = normalize_racers(
+        preview.get("racers", [])
+    )
+
+    for p in racers:
+
+        if not isinstance(p, dict):
+            continue
+
+        entry = p.get("entry_number")
+        course = p.get("course_number")
+
+        if entry is None and course is not None:
+            entry = course
+
+        if entry is None:
+            continue
+
+        out[str(entry)] = p
 
     return out
 
 
 def make_rows(race):
+
     pm = pmap(race)
+
+    racers = normalize_racers(
+        race.get("racers", [])
+    )
+
     rows = []
 
-    for x in race.get("racers", []):
+    for x in racers:
+
+        if not isinstance(x, dict):
+            continue
 
         entry = x.get("entry_number")
 
         if entry is None:
             continue
 
-        p = pm.get(str(entry), {})
+        p = pm.get(
+            str(entry),
+            {}
+        )
+
+        if not isinstance(p, dict):
+            p = {}
+
+        course = p.get(
+            "course_number",
+            entry
+        )
+
+        try:
+            course = int(course)
+        except Exception:
+            course = int(entry)
 
         rows.append({
-            "枠": entry,
-            "コース": int(
-                p.get("course_number", entry)
-            ),
+            "枠": int(entry),
+            "コース": course,
             "選手": x.get("name", ""),
             "番号": x.get("number", ""),
             "級": x.get("rank_number", ""),
@@ -96,6 +187,9 @@ def make_rows(race):
         key=lambda x: x["枠"]
     )
 
+    if not rows:
+        return []
+
     st_order = sorted(
         rows,
         key=lambda x:
@@ -108,10 +202,16 @@ def make_rows(race):
         x["展示"] if x["展示"] > 0 else 99
     )
 
-    for i, x in enumerate(st_order, 1):
+    for i, x in enumerate(
+        st_order,
+        1
+    ):
         x["ST順位"] = i
 
-    for i, x in enumerate(ex_order, 1):
+    for i, x in enumerate(
+        ex_order,
+        1
+    ):
         x["展示順位"] = i
 
     return rows
@@ -127,9 +227,14 @@ def history(target, days=10):
 
     total = 0
 
-    for k in range(1, days + 1):
+    for k in range(
+        1,
+        days + 1
+    ):
 
-        d = target - timedelta(days=k)
+        d = target - timedelta(
+            days=k
+        )
 
         data = get_data(d)
 
@@ -142,13 +247,34 @@ def history(target, days=10):
             .get("stadiums", {})
         )
 
+        if not isinstance(
+            stadiums,
+            dict
+        ):
+            continue
+
         for sid, sd in stadiums.items():
 
-            for race in sd.get(
-                "races", {}
-            ).values():
+            races = sd.get(
+                "races",
+                {}
+            )
 
-                rr = (
+            if not isinstance(
+                races,
+                dict
+            ):
+                continue
+
+            for race in races.values():
+
+                if not isinstance(
+                    race,
+                    dict
+                ):
+                    continue
+
+                rr = normalize_racers(
                     race
                     .get("result", {})
                     .get("racers", [])
@@ -159,55 +285,79 @@ def history(target, days=10):
 
                 pm = pmap(race)
 
-                ex_order = sorted(
-                    [
+                ex_list = []
+                st_list = []
+
+                for entry, p in pm.items():
+
+                    if not isinstance(
+                        p,
+                        dict
+                    ):
+                        continue
+
+                    ex_list.append(
                         (
-                            c,
+                            entry,
                             n(
                                 p.get(
                                     "exhibition_time"
                                 )
                             )
                         )
-                        for c, p in pm.items()
-                    ],
-                    key=lambda z:
-                    z[1] if z[1] > 0 else 99
-                )
+                    )
 
-                st_order = sorted(
-                    [
+                    st_list.append(
                         (
-                            c,
+                            entry,
                             n(
                                 p.get(
                                     "start_timing"
                                 )
                             )
                         )
-                        for c, p in pm.items()
-                    ],
+
+                    )
+
+                ex_list.sort(
+                    key=lambda z:
+                    z[1] if z[1] > 0 else 99
+                )
+
+                st_list.sort(
                     key=lambda z:
                     z[1] if z[1] > 0 else 99
                 )
 
                 ex_rank = {
                     c: i
-                    for i, (c, _) in
-                    enumerate(ex_order, 1)
+                    for i, (c, _) in enumerate(
+                        ex_list,
+                        1
+                    )
                 }
 
                 st_rank = {
                     c: i
-                    for i, (c, _) in
-                    enumerate(st_order, 1)
+                    for i, (c, _) in enumerate(
+                        st_list,
+                        1
+                    )
                 }
 
                 for r in rr:
 
-                    numid = r.get("number")
-                    place = r.get("place_number")
-                    course = r.get("course_number")
+                    numid = r.get(
+                        "number"
+                    )
+
+                    place = r.get(
+                        "place_number"
+                    )
+
+                    course = r.get(
+                        "course_number"
+                    )
 
                     if (
                         numid is None
@@ -216,7 +366,11 @@ def history(target, days=10):
                     ):
                         continue
 
-                    course = int(course)
+                    try:
+                        course = int(course)
+                        place = int(place)
+                    except Exception:
+                        continue
 
                     key = (
                         str(numid),
@@ -236,8 +390,11 @@ def history(target, days=10):
                     pc[key][0] += 1
                     vc[(sid, course)][0] += 1
 
-                    if place in (1, 2, 3):
-
+                    if place in (
+                        1,
+                        2,
+                        3
+                    ):
                         pc[key][place] += 1
                         vc[
                             (sid, course)
@@ -249,12 +406,18 @@ def history(target, days=10):
 
                         a = (
                             sid,
-                            ex_rank.get(c, 6)
+                            ex_rank.get(
+                                c,
+                                6
+                            )
                         )
 
                         b = (
                             sid,
-                            st_rank.get(c, 6)
+                            st_rank.get(
+                                c,
+                                6
+                            )
                         )
 
                         ve.setdefault(
@@ -271,7 +434,6 @@ def history(target, days=10):
                         vs[b][0] += 1
 
                         if place == 1:
-
                             ve[a][1] += 1
                             vs[b][1] += 1
 
@@ -286,7 +448,12 @@ def history(target, days=10):
     }
 
 
-def hist_rate(dic, key, pos, base):
+def hist_rate(
+    dic,
+    key,
+    pos,
+    base
+):
 
     a = dic.get(key)
 
@@ -304,7 +471,13 @@ def hist_rate(dic, key, pos, base):
     )
 
 
-def ai(rows, sid, h, wind=0, wave=0):
+def ai(
+    rows,
+    sid,
+    h,
+    wind=0,
+    wave=0
+):
 
     ans = []
 
@@ -339,7 +512,10 @@ def ai(rows, sid, h, wind=0, wave=0):
 
         c = max(
             1,
-            min(6, int(x["コース"]))
+            min(
+                6,
+                int(x["コース"])
+            )
         )
 
         p1 = base1[c - 1]
@@ -369,7 +545,8 @@ def ai(rows, sid, h, wind=0, wave=0):
 
             p1 *= max(
                 0.75,
-                1.10 - x["ST"] * 3
+                1.10
+                - x["ST"] * 3
             )
 
         if x["展示"] > 0:
@@ -377,7 +554,9 @@ def ai(rows, sid, h, wind=0, wave=0):
             p1 *= max(
                 0.82,
                 1.08
-                - (x["展示"] - 6.7) * 0.8
+                - (
+                    x["展示"] - 6.7
+                ) * 0.8
             )
 
         player_rate = hist_rate(
@@ -392,7 +571,9 @@ def ai(rows, sid, h, wind=0, wave=0):
 
         p1 *= (
             0.75
-            + player_rate / 0.20 * 0.25
+            + player_rate
+            / 0.20
+            * 0.25
         )
 
         venue_rate = hist_rate(
@@ -408,27 +589,58 @@ def ai(rows, sid, h, wind=0, wave=0):
         p1 *= (
             0.80
             + venue_rate
-            / max(base1[c - 1], 0.01)
+            / max(
+                base1[c - 1],
+                0.01
+            )
             * 0.20
         )
 
-        p1 *= [
+        ex_rank = x.get(
+            "展示順位",
+            6
+        )
+
+        st_rank = x.get(
+            "ST順位",
+            6
+        )
+
+        ex_bonus = [
             1.12,
             1.07,
             1.03,
             0.98,
             0.94,
             0.90
-        ][x["展示順位"] - 1]
+        ]
 
-        p1 *= [
+        st_bonus = [
             1.08,
             1.05,
             1.02,
             0.99,
             0.95,
             0.92
-        ][x["ST順位"] - 1]
+        ]
+
+        ex_rank = max(
+            1,
+            min(6, ex_rank)
+        )
+
+        st_rank = max(
+            1,
+            min(6, st_rank)
+        )
+
+        p1 *= ex_bonus[
+            ex_rank - 1
+        ]
+
+        p1 *= st_bonus[
+            st_rank - 1
+        ]
 
         if wind >= 5:
 
@@ -484,7 +696,7 @@ def ai(rows, sid, h, wind=0, wave=0):
             for x in ans
         )
 
-        if s:
+        if s > 0:
 
             for x in ans:
                 x[key] /= s
@@ -495,6 +707,9 @@ def ai(rows, sid, h, wind=0, wave=0):
 def combos(rows):
 
     out = []
+
+    if len(rows) < 6:
+        return out
 
     for a, b, c in permutations(
         range(6),
@@ -512,10 +727,9 @@ def combos(rows):
 
         out.append({
             "買い目":
-            f'{rows[a]["枠"]}-'
-            f'{rows[b]["枠"]}-'
-            f'{rows[c]["枠"]}',
-
+                f'{rows[a]["枠"]}-'
+                f'{rows[b]["枠"]}-'
+                f'{rows[c]["枠"]}',
             "確率": score
         })
 
@@ -530,7 +744,7 @@ def combos(rows):
         for x in out
     )
 
-    if total:
+    if total > 0:
 
         for x in out:
             x["確率"] = (
@@ -544,10 +758,16 @@ def combos(rows):
 
 def actual(race):
 
-    rr = (
-        race
-        .get("result", {})
-        .get("racers", [])
+    result = race.get(
+        "result",
+        {}
+    )
+
+    rr = normalize_racers(
+        result.get(
+            "racers",
+            []
+        )
     )
 
     if len(rr) < 3:
@@ -566,151 +786,29 @@ def actual(race):
             )
         )
 
-        return tuple(
-            str(
-                rr[i][
-                    "course_number"
-                ]
+        ans = []
+
+        for i in range(3):
+
+            course = rr[i].get(
+                "course_number"
             )
-            for i in range(3)
-        )
+
+            if course is None:
+                return None
+
+            ans.append(
+                str(course)
+            )
+
+        return tuple(ans)
 
     except Exception:
         return None
 
 
-@st.cache_data(ttl=1800)
-def backtest(target, count=30):
-
-    races = []
-
-    for ago in range(1, 11):
-
-        d = target - timedelta(
-            days=ago
-        )
-
-        data = get_data(d)
-
-        if not data:
-            continue
-
-        stadiums = (
-            data
-            .get("programs", {})
-            .get("stadiums", {})
-        )
-
-        for sid, sd in stadiums.items():
-
-            for rn, race in sd.get(
-                "races",
-                {}
-            ).items():
-
-                if not actual(race):
-                    continue
-
-                if len(make_rows(race)) != 6:
-                    continue
-
-                races.append(
-                    (
-                        d,
-                        sid,
-                        int(rn),
-                        race
-                    )
-                )
-
-        if len(races) >= count:
-            break
-
-    races.sort(
-        key=lambda z:
-        (z[0], z[2]),
-        reverse=True
-    )
-
-    results = []
-
-    for d, sid, rn, race in races[:count]:
-
-        train = history(
-            d,
-            10
-        )
-
-        rows = make_rows(
-            race
-        )
-
-        res = race.get(
-            "result",
-            {}
-        )
-
-        pred = ai(
-            rows,
-            sid,
-            train,
-            n(res.get("wind_speed")),
-            n(res.get("wave_height"))
-        )
-
-        cb = combos(pred)
-        act = actual(race)
-
-        if not act:
-            continue
-
-        actual_str = "-".join(act)
-
-        first = max(
-            pred,
-            key=lambda x:
-            x["1着率"]
-        )["枠"]
-
-        second = max(
-            pred,
-            key=lambda x:
-            x["2着率"]
-        )["枠"]
-
-        third = max(
-            pred,
-            key=lambda x:
-            x["3着率"]
-        )["枠"]
-
-        top = [
-            x["買い目"]
-            for x in cb
-        ]
-
-        results.append({
-            "日付": d,
-            "場": sid,
-            "R": rn,
-            "1着予測": first,
-            "2着予測": second,
-            "3着予測": third,
-            "実際": actual_str,
-            "1点": top[0],
-            "TOP5":
-            actual_str in top[:5],
-            "TOP10":
-            actual_str in top[:10]
-        })
-
-    return pd.DataFrame(
-        results
-    )
-
-
 # =========================
-# メイン画面
+# メイン
 # =========================
 
 st.title(
@@ -722,10 +820,12 @@ st.caption(
     "展示/ST・3連単120通り"
 )
 
+
 target = st.date_input(
     "レース日",
     date.today()
 )
+
 
 data = get_data(
     target
@@ -747,7 +847,11 @@ stadiums = (
     .get("stadiums", {})
 )
 
-if not stadiums:
+
+if not isinstance(
+    stadiums,
+    dict
+) or not stadiums:
 
     st.warning(
         "場データがありません。"
@@ -767,7 +871,11 @@ races = stadiums[sid].get(
     {}
 )
 
-if not races:
+
+if not isinstance(
+    races,
+    dict
+) or not races:
 
     st.warning(
         "レースデータがありません。"
@@ -776,14 +884,33 @@ if not races:
     st.stop()
 
 
+race_numbers = []
+
+for x in races.keys():
+
+    try:
+        race_numbers.append(
+            int(x)
+        )
+    except Exception:
+        pass
+
+
+race_numbers.sort()
+
+
+if not race_numbers:
+
+    st.warning(
+        "レース番号がありません。"
+    )
+
+    st.stop()
+
+
 rno = st.selectbox(
     "レース",
-    sorted(
-        [
-            int(x)
-            for x in races
-        ]
-    )
+    race_numbers
 )
 
 
@@ -794,10 +921,30 @@ race = get_race(
 )
 
 
+if not race:
+
+    st.error(
+        "レースデータを取得できませんでした。"
+    )
+
+    st.stop()
+
+
+# =========================
+# 直前情報・結果
+# =========================
+
 res = race.get(
     "result",
     {}
 )
+
+if not isinstance(
+    res,
+    dict
+):
+    res = {}
+
 
 wind = n(
     res.get("wind_speed")
@@ -813,13 +960,26 @@ st.write(
 )
 
 
+# =========================
 # 選手データ
+# =========================
+
 rows = make_rows(
     race
 )
 
+
+if not rows:
+
+    st.error(
+        "選手データを取得できませんでした。"
+    )
+
+    st.stop()
+
+
 st.subheader(
-    "選手データ"
+    "👤 選手データ"
 )
 
 st.dataframe(
@@ -828,11 +988,19 @@ st.dataframe(
 )
 
 
-# 学習
-h = history(
-    target,
-    10
-)
+# =========================
+# 過去学習
+# =========================
+
+with st.spinner(
+    "過去10日間のデータを学習中..."
+):
+
+    h = history(
+        target,
+        10
+    )
+
 
 st.info(
     "📚 過去10日間・全24場で学習した"
@@ -840,7 +1008,10 @@ st.info(
 )
 
 
+# =========================
 # AI
+# =========================
+
 pred = ai(
     rows,
     sid,
@@ -849,9 +1020,11 @@ pred = ai(
     wave
 )
 
+
 st.subheader(
     "🤖 AI評価"
 )
+
 
 show = pd.DataFrame([
 
@@ -859,24 +1032,31 @@ show = pd.DataFrame([
         "枠": x["枠"],
         "コース": x["コース"],
         "選手": x["選手"],
-        "全国勝率": x["全国勝率"],
-        "当地勝率": x["当地勝率"],
+        "全国勝率":
+            x["全国勝率"],
+        "当地勝率":
+            x["当地勝率"],
         "モーター2連率":
-        x["モーター2連率"],
+            x["モーター2連率"],
+        "ST":
+            x["ST"],
+        "展示":
+            x["展示"],
         "1着率":
-        f'{x["1着率"] * 100:.1f}%',
+            f'{x["1着率"] * 100:.1f}%',
         "2着率":
-        f'{x["2着率"] * 100:.1f}%',
+            f'{x["2着率"] * 100:.1f}%',
         "3着率":
-        f'{x["3着率"] * 100:.1f}%',
+            f'{x["3着率"] * 100:.1f}%',
         "ST順位":
-        x["ST順位"],
+            x["ST順位"],
         "展示順位":
-        x["展示順位"]
+            x["展示順位"]
     }
 
     for x in pred
 ])
+
 
 st.dataframe(
     show,
@@ -884,48 +1064,64 @@ st.dataframe(
 )
 
 
+# =========================
 # 3連単
+# =========================
+
 cb = combos(
     pred
 )
 
-st.subheader(
-    "🎯 3連単AIランキング TOP10"
-)
 
-st.dataframe(
+if cb:
 
-    pd.DataFrame([
+    st.subheader(
+        "🎯 3連単AIランキング TOP10"
+    )
+
+    top10 = pd.DataFrame([
 
         {
-            "順位": i + 1,
-            "買い目": x["買い目"],
+            "順位":
+                i + 1,
+            "買い目":
+                x["買い目"],
             "AI確率":
-            f'{x["確率"]:.2f}%'
+                f'{x["確率"]:.2f}%'
         }
 
-        for i, x
-        in enumerate(cb[:10])
-    ]),
+        for i, x in enumerate(
+            cb[:10]
+        )
 
-    use_container_width=True
-)
+    ])
+
+    st.dataframe(
+        top10,
+        use_container_width=True
+    )
+
+    st.success(
+        f"🔥 本命：{cb[0]['買い目']}"
+    )
+
+    if len(cb) >= 2:
+
+        st.info(
+            f"🥈 対抗：{cb[1]['買い目']}"
+        )
+
+    if len(cb) >= 5:
+
+        st.warning(
+            f"🎲 穴：{cb[4]['買い目']}"
+        )
 
 
-st.success(
-    f"🔥 本命：{cb[0]['買い目']}"
-)
-
-st.info(
-    f"🥈 対抗：{cb[1]['買い目']}"
-)
-
-st.warning(
-    f"🎲 穴：{cb[4]['買い目']}"
-)
-
-
+# =========================
 # 実際の結果
+# =========================
+
 ar = actual(
     race
 )
@@ -940,139 +1136,8 @@ if ar:
         " → ".join(ar)
     )
 
+else:
 
-# =========================
-# バックテスト
-# =========================
-
-st.divider()
-
-st.subheader(
-    "📊 AIバックテスト"
-)
-
-st.write(
-    "過去30レースを検証します。"
-)
-
-
-if st.button(
-    "🚀 過去30レースを検証する"
-):
-
-    with st.spinner(
-        "過去レースを取得して検証中..."
-    ):
-
-        bt = backtest(
-            target,
-            30
-        )
-
-    if bt.empty:
-
-        st.warning(
-            "検証できるレースがありません。"
-        )
-
-    else:
-
-        total = len(bt)
-
-        first = (
-            (
-                bt["1着予測"]
-                ==
-                bt["実際"]
-                .str
-                .split("-")
-                .str[0]
-            )
-            .mean()
-            * 100
-        )
-
-        second = (
-            (
-                bt["2着予測"]
-                ==
-                bt["実際"]
-                .str
-                .split("-")
-                .str[1]
-            )
-            .mean()
-            * 100
-        )
-
-        third = (
-            (
-                bt["3着予測"]
-                ==
-                bt["実際"]
-                .str
-                .split("-")
-                .str[2]
-            )
-            .mean()
-            * 100
-        )
-
-        one = (
-            (
-                bt["1点"]
-                ==
-                bt["実際"]
-            )
-            .mean()
-            * 100
-        )
-
-        top5 = (
-            bt["TOP5"]
-            .mean()
-            * 100
-        )
-
-        top10 = (
-            bt["TOP10"]
-            .mean()
-            * 100
-        )
-
-        st.success(
-            f"検証レース数：{total}レース"
-        )
-
-        st.write(
-            f"🥇 1着的中率：{first:.1f}%"
-        )
-
-        st.write(
-            f"🥈 2着的中率：{second:.1f}%"
-        )
-
-        st.write(
-            f"🥉 3着的中率：{third:.1f}%"
-        )
-
-        st.write(
-            f"🎯 3連単1点：{one:.1f}%"
-        )
-
-        st.write(
-            f"🎯 3連単TOP5：{top5:.1f}%"
-        )
-
-        st.write(
-            f"🎯 3連単TOP10：{top10:.1f}%"
-        )
-
-        st.subheader(
-            "検証結果"
-        )
-
-        st.dataframe(
-            bt,
-            use_container_width=True
+    st.caption(
+        "🏁 このレースはまだ確定結果がありません。"
     )

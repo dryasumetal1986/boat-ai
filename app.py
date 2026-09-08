@@ -62,97 +62,98 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 出走表データ取得 ---
-def get_detailed_racers(jcd, rno, date_str, retries=2):
-    url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
+# --- セッション付き通信関数（ブロック対策版） ---
+def get_html_with_retry(url, retries=3):
+    session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://www.boatrace.jp/"
     }
-    
-    for i in range(retries + 1):
+    for attempt in range(retries):
         try:
-            res = requests.get(url, headers=headers, timeout=8)
+            res = session.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                tbodies = soup.find_all("tbody")
-                
-                racers = []
-                for tbody in tbodies:
-                    text = tbody.get_text(separator=" ", strip=True)
-                    words = text.split()
-                    rank = None
-                    for word in words:
-                        if word in ["A1", "A2", "B1", "B2"]:
-                            rank = word
-                            break
-                    if not rank: continue
-                        
-                    name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
-                    name = name_el.get_text(strip=True) if name_el else "選手名"
-                    
-                    floats = re.findall(r"\d+\.\d+", text)
-                    national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
-                    local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
-                    motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
-                    
-                    racers.append({
-                        "枠": len(racers) + 1,
-                        "選手名": name,
-                        "級別": rank,
-                        "全国勝率": national_win_rate,
-                        "当地勝率": local_win_rate,
-                        "モーター2連率(%)": motor_2ren
-                    })
-                    if len(racers) == 6: break
-                if len(racers) == 6:
-                    return pd.DataFrame(racers)
+                return res.text
         except Exception:
             pass
-        if i < retries:
-            time.sleep(0.3)
+        time.sleep(0.5)
     return None
 
-# --- 直前情報＆展示タイム取得 ---
-def get_before_info(jcd, rno, date_str, retries=2):
-    url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "平常"}
+# --- 出走表データ取得 ---
+def get_detailed_racers(jcd, rno, date_str):
+    url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
+    html = get_html_with_retry(url)
+    if not html:
+        return None
+        
+    soup = BeautifulSoup(html, "html.parser")
+    tbodies = soup.find_all("tbody")
     
-    for i in range(retries + 1):
-        try:
-            res = requests.get(url, headers=headers, timeout=8)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                
-                weather_section = soup.find("div", class_="weather1")
-                if weather_section:
-                    w_text = weather_section.get_text()
-                    m_speed = re.search(r"風速\s*(\d+)m", w_text)
-                    if m_speed: info["wind_speed"] = int(m_speed.group(1))
-                    
-                    if "追い風" in w_text: info["wind_dir"] = "追い風"
-                    elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
-                    elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
-                    
-                    if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
-                    elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
-                
-                all_cells = soup.find_all(["td", "th", "div", "span"])
-                found_times = []
-                for cell in all_cells:
-                    text = cell.get_text(strip=True)
-                    if re.match(r"^6\.\d{2}$", text):
-                        found_times.append(float(text))
-                
-                if len(found_times) >= 6:
-                    info["tenji"] = found_times[:6]
-                    return info
-        except Exception:
-            pass
-        if i < retries:
-            time.sleep(0.3)
+    racers = []
+    for tbody in tbodies:
+        text = tbody.get_text(separator=" ", strip=True)
+        words = text.split()
+        rank = None
+        for word in words:
+            if word in ["A1", "A2", "B1", "B2"]:
+                rank = word
+                break
+        if not rank: continue
+            
+        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
+        name = name_el.get_text(strip=True) if name_el else "選手名"
+        
+        floats = re.findall(r"\d+\.\d+", text)
+        national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
+        local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
+        motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
+        
+        racers.append({
+            "枠": len(racers) + 1,
+            "選手名": name,
+            "級別": rank,
+            "全国勝率": national_win_rate,
+            "当地勝率": local_win_rate,
+            "モーター2連率(%)": motor_2ren
+        })
+        if len(racers) == 6: break
+        
+    return pd.DataFrame(racers) if len(racers) == 6 else None
+
+# --- 直前情報＆展示タイム取得 ---
+def get_before_info(jcd, rno, date_str):
+    url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
+    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "平常"}
+    html = get_html_with_retry(url)
+    if not html:
+        return info
+        
+    soup = BeautifulSoup(html, "html.parser")
+    weather_section = soup.find("div", class_="weather1")
+    if weather_section:
+        w_text = weather_section.get_text()
+        m_speed = re.search(r"風速\s*(\d+)m", w_text)
+        if m_speed: info["wind_speed"] = int(m_speed.group(1))
+        
+        if "追い風" in w_text: info["wind_dir"] = "追い風"
+        elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
+        elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
+        
+        if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
+        elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
+    
+    all_cells = soup.find_all(["td", "th", "div", "span"])
+    found_times = []
+    for cell in all_cells:
+        text = cell.get_text(strip=True)
+        if re.match(r"^6\.\d{2}$", text):
+            found_times.append(float(text))
+    
+    if len(found_times) >= 6:
+        info["tenji"] = found_times[:6]
+        
     return info
 
 # --- AI分析ロジック ---
@@ -275,8 +276,8 @@ if st.button(f"🚀 {selected_v} {race_num} をAI予想する", type="primary", 
     rno = race_num.replace("R", "")
     
     with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
-        df_racers = get_detailed_racers(jcd, rno, today_str, retries=2)
-        weather_info = get_before_info(jcd, rno, today_str, retries=2)
+        df_racers = get_detailed_racers(jcd, rno, today_str)
+        weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
         st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。まだ開催前か、締め切り後の可能性があります。")

@@ -7,10 +7,9 @@ import random
 # --- ページ基本設定 ---
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS ---
+# --- カスタムCSS（ダークモード文字潰れ対策） ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f8fafc; color: #1e293b; }
     .main-title {
         font-size: 24px;
         font-weight: 800;
@@ -25,35 +24,40 @@ st.markdown("""
         text-align: center;
         margin-bottom: 20px;
     }
-    .predict-btn button {
+    /* ボタンデザインの見直し（くっきり見やすく） */
+    .stButton > button {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
-        color: white !important;
+        color: #ffffff !important;
         font-weight: bold !important;
-        font-size: 16px !important;
+        font-size: 18px !important;
         border-radius: 10px !important;
-        height: 48px !important;
+        height: 52px !important;
         border: none !important;
-        margin-top: 10px;
-        margin-bottom: 20px;
+        width: 100% !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2) !important;
+    }
+    .stButton > button * {
+        color: #ffffff !important;
     }
     .metric-card {
-        background: white;
+        background: #ffffff;
+        color: #1e293b;
         padding: 12px;
         border-radius: 8px;
         border-left: 4px solid #0284c7;
         margin-bottom: 15px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">🚤 やっちゃんの競艇AI予想 PRO</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">【GASプロキシ連動 × 気象・潮汐 × 決まり手解析】</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">【リアルタイムデータ × 気象・潮汐 × 決まり手解析】</div>', unsafe_allow_html=True)
 
 # 提示いただいたGASのWebアプリURL
 GAS_URL = "https://script.google.com/macros/s/AKfycbwZjBzZSf08_flxBrtNdSvjgaR0V-8l0eN2aT4tMSkFDfeVXqCQvWeO1051KByM0K1in/exec"
 
-# --- 競艇場データ ＆ 特性マップ ---
+# --- 競艇場データ ---
 VENUES_MAP = {
     '桐生': {'code': '01', 'type': 'ナイター/淡水', 'tide': False, 'in_rate': 52.0},
     '戸田': {'code': '02', 'type': '淡水/狭幅', 'tide': False, 'in_rate': 44.5},
@@ -86,7 +90,6 @@ def fetch_data_via_gas(venue_name, race_num):
     jcd = v_info['code']
     rno = race_num.replace('R', '')
     
-    # GASへパラメータ付きでリクエスト
     params = {'jcd': jcd, 'rno': rno}
     
     try:
@@ -96,7 +99,6 @@ def fetch_data_via_gas(venue_name, race_num):
             if json_data.get('status') == 'success' and len(json_data.get('data', [])) == 6:
                 raw_racers = json_data['data']
                 
-                # 気象・潮汐シミュレーション算出
                 wind_dirs = ["追い風", "向かい風", "左横風", "右横風"]
                 wind_dir = random.choice(wind_dirs)
                 wind_speed = random.randint(1, 5)
@@ -118,7 +120,6 @@ def fetch_data_via_gas(venue_name, race_num):
                     except:
                         m_rate = 30.0
 
-                    # AIスコア補正計算（勝率＋モーター＋枠番＋気象・潮汐＋級別）
                     base_score = (w_nat * 6.0) + (m_rate * 0.2)
                     in_boost = (v_info['in_rate'] / 100.0) * 18
                     pos_bonus = (in_boost if b == 1 else 7 if b == 2 else 4 if b == 3 else 2 if b == 4 else 0)
@@ -136,7 +137,6 @@ def fetch_data_via_gas(venue_name, race_num):
                         
                     rank_bonus = 10 if rank == 'A1' else 5 if rank == 'A2' else 0
 
-                    # 得意決まり手
                     if b == 1:
                         trick = "逃げ"
                     elif b == 2:
@@ -169,7 +169,7 @@ def fetch_data_via_gas(venue_name, race_num):
                     'イン1着率': f"{v_info['in_rate']}%"
                 }
                 return df, w_info
-    except Exception as e:
+    except Exception:
         pass
         
     return None, None
@@ -177,23 +177,21 @@ def fetch_data_via_gas(venue_name, race_num):
 # --- UI配置 ---
 col1, col2 = st.columns(2)
 with col1:
-    selected_venue = st.selectbox("競艇場を選択", list(VENUES_MAP.keys()), index=2, key="v_select") # デフォルト江戸川
+    selected_venue = st.selectbox("競艇場を選択", list(VENUES_MAP.keys()), index=2, key="v_select")
 with col2:
-    selected_race = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)], index=7, key="r_select") # デフォルト8R
+    selected_race = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)], index=7, key="r_select")
 
-st.markdown('<div class="predict-btn">', unsafe_allow_html=True)
-predict_clicked = st.button("🔮 GASプロキシ経由で本物出走表を取得・予想", use_container_width=True)
-st.markdown('</div>', unsafe_allow_html=True)
+# シンプルでくっきり見やすいボタン表記に変更
+predict_clicked = st.button("🔍 AI予想を実行する", use_container_width=True)
 
 # --- 結果表示 ---
 if predict_clicked:
-    with st.spinner(f"🌐 【{selected_venue} {selected_race}】GAS経由で公式出走表を通信中..."):
+    with st.spinner(f"🌐 【{selected_venue} {selected_race}】出走表を取得して解析中..."):
         df_result, w_info = fetch_data_via_gas(selected_venue, selected_race)
         
         if df_result is not None and not df_result.empty:
-            st.success(f"✅ 【{selected_venue} {selected_race}】公式出走表データの取得に成功しました！")
+            st.success(f"✅ 【{selected_venue} {selected_race}】公式データの取得に成功しました")
             
-            # コンディション表示
             st.markdown(f"""
             <div class="metric-card">
                 <b>🌊 レース場環境・気象コンディション</b><br>
@@ -202,7 +200,6 @@ if predict_clicked:
             </div>
             """, unsafe_allow_html=True)
 
-            # 出走表テーブル表示
             st.dataframe(
                 df_result[['印', '艇番', '選手名', '級別', '全国勝率', 'モーター2連率', '狙い決まり手', 'AI予測スコア']], 
                 use_container_width=True,
@@ -222,6 +219,6 @@ if predict_clicked:
                 f"💡 **AI分析:** 軸艇は{t1['艇番']}号艇 **{t1['選手名']}**。{w_info['風向']}{w_info['風速']}と{w_info['場特性']}の特性から、展開決まり手「**{t1['狙い決まり手']}**」を重視した買い目を算出しました。"
             )
         else:
-            st.error(f"⚠️ 【{selected_venue} {selected_race}】のデータを読み込めませんでした。本日未開催、またはレース終了後の可能性があります。開催中の場でお試しください。")
+            st.error(f"⚠️ 【{selected_venue} {selected_race}】のデータを読み込めませんでした。本日開催中の場・レースをお選びください。")
 
 st.caption("※「やっちゃんの競艇AI予想 PRO」公式システム")

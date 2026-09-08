@@ -10,36 +10,39 @@ from concurrent.futures import ThreadPoolExecutor
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（画像UIの完全再現・文字消え防止） ---
+# --- カスタムCSS（画像UIの完全再現・文字崩れ・HTMLコード漏れ防止） ---
 st.markdown("""
     <style>
+    /* 全体背景 */
     .stApp {
-        background-color: #F2F4F7;
+        background-color: #F0F2F5;
     }
-    h1, h2, h3, .stSubheader {
+    
+    /* 文字色の設定 */
+    h1, h2, h3, .stSubheader, p {
         color: #111111 !important;
     }
     
-    /* 上部ヘッダー */
+    /* 上部ヘッダーカード */
     .top-header {
         background: linear-gradient(135deg, #D4AF37, #AA7C11);
         color: #111;
         font-weight: bold;
         text-align: center;
-        padding: 8px;
+        padding: 10px;
         border-radius: 8px 8px 0 0;
-        font-size: 1.0rem;
+        font-size: 1.1rem;
     }
     .top-bg {
         background-color: #0F1E36;
-        padding: 10px;
+        padding: 12px;
         border-radius: 0 0 8px 8px;
         margin-bottom: 20px;
     }
     .featured-card {
         background: white;
         border-radius: 6px;
-        padding: 8px 4px;
+        padding: 10px 6px;
         text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
@@ -47,47 +50,49 @@ st.markdown("""
         background-color: #D4AF37;
         color: #111;
         font-weight: bold;
-        padding: 1px 5px;
+        padding: 2px 6px;
         border-radius: 3px;
-        font-size: 0.65rem;
+        font-size: 0.7rem;
+        margin-right: 2px;
     }
     .tag-blue {
         background-color: #6C8EA4;
         color: white;
-        padding: 1px 5px;
+        padding: 2px 6px;
         border-radius: 3px;
-        font-size: 0.65rem;
+        font-size: 0.7rem;
+        margin-right: 2px;
     }
 
-    /* 24会場グリッドレイアウト */
+    /* 24会場グリッド配置 */
     .venue-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 6px;
-        margin-bottom: 20px;
+        margin-bottom: 25px;
     }
     
-    /* 会場カード（開催中） */
+    /* 会場カード（開催中・白地） */
     .venue-card-active {
         background-color: #FFFFFF;
         border: 1px solid #C7D2FE;
         border-radius: 6px;
         padding: 6px 2px;
         text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        min-height: 75px;
+        min-height: 78px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .venue-card-active .tag {
         background-color: #6C8EA4;
         color: white;
-        font-size: 0.6rem;
+        font-size: 0.65rem;
         padding: 1px 4px;
         border-radius: 3px;
-        margin-bottom: 2px;
+        margin-bottom: 3px;
     }
     .venue-card-active .name {
         font-size: 0.85rem;
@@ -95,19 +100,19 @@ st.markdown("""
         color: #111;
     }
     .venue-card-active .sub {
-        font-size: 0.65rem;
+        font-size: 0.68rem;
         color: #4B5563;
-        margin-top: 2px;
+        margin-top: 3px;
     }
 
-    /* 会場カード（非開催：画像風の薄グレー） */
+    /* 会場カード（非開催・薄グレー） */
     .venue-card-inactive {
         background-color: #E5E7EB;
         border: 1px solid #D1D5DB;
         border-radius: 6px;
         padding: 6px 2px;
         text-align: center;
-        min-height: 75px;
+        min-height: 78px;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -118,12 +123,16 @@ st.markdown("""
         color: #9CA3AF;
     }
 
-    /* Streamlit標準ボタンのスタイル調整 */
-    div.stButton > button {
-        width: 100% !important;
+    /* セレクトボックスのラベル非表示と幅調整 */
+    [data-testid="stSelectbox"] label, [data-testid="stNumberInput"] label {
+        display: none !important;
+    }
+    [data-testid="column"] {
+        align-self: flex-start !important;
+    }
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        height: 42px !important;
         border-radius: 6px !important;
-        height: 38px !important;
-        font-weight: bold !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -157,7 +166,7 @@ VENUE_CHARACTERISTICS = {
     "宮島": {"water": "海水", "in_adj": 0, "makuri_adj": 3, "desc": "【海水/潮汐激甚】干満差大きく満潮イン・干潮まくり顕著。"},
     "児島": {"water": "海水", "in_adj": 0, "makuri_adj": 2, "desc": "【海水/潮干満】干潮時のダッシュまくり警戒。"},
     "三国": {"water": "淡水", "in_adj": -3, "makuri_adj": 3, "desc": "【淡水/強風注意】風向きでイン流されやすい。"},
-    "浜名湖": {"water": "汽水", "in_adj": -5, "makuri_adj": 4, "desc": "【汽水/広大】潮と風でセンターまくり差し決定。"},
+    "浜名湖": {"water": "汽水", "in_adj": -5, "makuri_adj": 4, "desc": "【汽水/広大}潮と風でセンターまくり差し決定。"},
     "多摩川": {"water": "淡水", "in_adj": -5, "makuri_adj": 4, "desc": "【淡水/日本一静水面】全速ターン決定、差し有効。"},
     "桐生": {"water": "淡水", "in_adj": -5, "makuri_adj": 5, "desc": "【淡水/高標高】出足鈍りダッシュ旋回頻出。"},
     "びわこ": {"water": "淡水", "in_adj": -8, "makuri_adj": 6, "desc": "【淡水/ウネリ難所】1M狭くイン流されやすい。"},
@@ -226,17 +235,17 @@ def check_active_venues(date_str):
             
     return active_dict
 
-# 最もおすすめのレースを判定
+# データ取得
 active_venues = check_active_venues(today_str)
 active_list = [v for v, act in active_venues.items() if act]
 
-# デフォルト選択会場
+# デフォルト選択
 if "selected_venue" not in st.session_state:
     st.session_state.selected_venue = active_list[0] if active_list else "大村"
 
-# --- トップヘッダー ---
-st.markdown(f'<div class="top-header">🚤 {date_display} の無料公開レース</div>', unsafe_allow_html=True)
-st.markdown(f"""
+# --- トップヘッダー（HTML表示） ---
+top_html = f"""
+<div class="top-header">🚤 {date_display} の無料公開レース</div>
 <div class="top-bg">
     <div style="display: flex; gap: 6px;">
         <div class="featured-card" style="flex: 1;">
@@ -249,11 +258,12 @@ st.markdown(f"""
         </div>
     </div>
 </div>
-""", unsafe_allow_html=True)
+"""
+st.markdown(top_html, unsafe_allow_html=True)
 
 st.subheader("本日 のレース")
 
-# --- 画像風のグリッド生成 ---
+# --- 画像風の24会場グリッド（HTML表示） ---
 grid_html = '<div class="venue-grid">'
 for v_name in VENUE_CODES.keys():
     is_active = active_venues.get(v_name, False)
@@ -261,190 +271,127 @@ for v_name in VENUE_CODES.keys():
         grid_html += f"""
         <div class="venue-card-active">
             <span class="tag">一般</span>
-            <div class="name">{v_name}</div>
-            <div class="sub">1R 開催中</div>
-        </div>
-        """
-    else:
-        grid_html += f"""
-        <div class="venue-card-inactive">
-            <div class="name">{v_name}</div>
-        </div>
-        """
-grid_html += '</div>'
+            <div class="name">{v_name}何度も修正にお付き合いいただき、本当に申し訳ありません！画像を見ると、意図しないHTMLコード（`div`タグなど）が画面にそのまま表示されてしまい、レイアウトが完全に崩れてしまっています。
 
-# HTMLでカード一覧を表示
-st.markdown(grid_html, unsafe_allow_html=True)
+原因は、トップヘッダーや24会場グリッドなどのHTMLコードを表示する際に、Streamlitの関数（`st.markdown(html, unsafe_allow_html=True)`）を使用せず、誤って文字としてそのまま出力してしまっているためです。また、セレクトボックスの表示位置もズレてしまっています。
 
-# --- 会場選択セレクトボックス ---
-st.divider()
-selected_v = st.selectbox("📍 予想する会場を選択してください", active_list if active_list else list(VENUE_CODES.keys()))
-st.session_state.selected_venue = selected_v
+意図した画像通りのデザイン（上部にヘッダー、その下に綺麗な24会場グリッド、その下に会場選択セレクトボックス）になるよう、HTML出力とセレクトボックスの表示ロジックを完全に修正した確定版コードを作成しました。
 
-col_r, col_m = st.columns(2)
-with col_r:
-    race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
-with col_m:
-    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
+以下のコードを丸ごとコピーして、GitHubの `app.py` に上書き保存してください。これで画面崩れは解消され、文字切れのない綺麗なタイル表示になります。
 
-# --- 直前情報 ---
-def get_before_info(jcd, rno, date_str):
-    url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
-    try:
-        res = requests.get(url, headers=headers, timeout=4)
-        if res.status_code != 200: return info
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        weather_section = soup.find("div", class_="weather1")
-        if weather_section:
-            w_text = weather_section.get_text()
-            m_speed = re.search(r"風速\s*(\d+)m", w_text)
-            if m_speed: info["wind_speed"] = int(m_speed.group(1))
-            
-            if "追い風" in w_text: info["wind_dir"] = "追い風"
-            elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
-            elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
-            
-            if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
-            elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
-            
-        tenji_list = []
-        td_tenji = soup.find_all("td", class_="is-fs14")
-        for td in td_tenji:
-            val = td.get_text(strip=True)
-            if re.match(r"^\d\.\d{2}$", val):
-                tenji_list.append(float(val))
-        if len(tenji_list) == 6: info["tenji"] = tenji_list
-        return info
-    except Exception:
-        return info
+```python
+import streamlit as st
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta, timezone
+import itertools
+import re
+from concurrent.futures import ThreadPoolExecutor
 
-# --- AI分析 ---
-def calculate_predictions(df, venue, weather_info, investment):
-    course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
-    v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
-    
-    tide_status = weather_info["tide"]
-    tide_in_adj = 0
-    tide_makuri_adj = 0
-    
-    if v_param["water"] in ["海水", "汽水"]:
-        if "満潮" in tide_status:
-            tide_in_adj = +6
-            tide_makuri_adj = -4
-        elif "干潮" in tide_status:
-            tide_in_adj = -4
-            tide_makuri_adj = +6
-            
-    course_base[1] += (v_param["in_adj"] + tide_in_adj)
-    course_base[2] += (tide_in_adj * 0.5)
-    course_base[3] += (v_param["makuri_adj"] + tide_makuri_adj) * 0.5
-    course_base[4] += (v_param["makuri_adj"] + tide_makuri_adj) * 0.7
-    
-    rank_bonus = {"A1": 25, "A2": 15, "B1": 5, "B2": 0}
-    w_speed = weather_info["wind_speed"]
-    w_dir = weather_info["wind_dir"]
-    wind_course_adj = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
-    
-    if w_speed >= 3:
-        if w_dir == "追い風":
-            wind_course_adj[1] -= (w_speed * 1.5)
-            wind_course_adj[2] += (w_speed * 2.0)
-            wind_course_adj[3] += (w_speed * 1.5)
-        elif w_dir == "向かい風":
-            wind_course_adj[1] -= (w_speed * 2.0)
-            wind_course_adj[3] += (w_speed * 1.5)
-            wind_course_adj[4] += (w_speed * 2.5)
+# ページ設定
+st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-    min_tenji = min(weather_info["tenji"])
-    scores = {}
-    attack_power = {}
+# --- カスタムCSS（画像UIの完全再現・文字崩れ・HTMLコード漏れ防止） ---
+st.markdown("""
+    <style>
+    /* 全体背景 */
+    .stApp {
+        background-color: #F0F2F5;
+    }
     
-    for idx, row in df.iterrows():
-        w = int(row["枠"])
-        rank = row["級別"]
-        nat_win = row["全国勝率"]
-        loc_win = row["当地勝率"]
-        motor = row["モーター2連率(%)"]
-        t_time = weather_info["tenji"][idx] if idx < len(weather_info["tenji"]) else 6.80
-        
-        tenji_score = max(0, (6.90 - t_time) * 30)
-        if t_time == min_tenji: tenji_score += 10
+    /* 文字色の設定 */
+    h1, h2, h3, .stSubheader, p {
+        color: #111111 !important;
+    }
+    
+    /* 上部ヘッダーカード */
+    .top-header {
+        background: linear-gradient(135deg, #D4AF37, #AA7C11);
+        color: #111;
+        font-weight: bold;
+        text-align: center;
+        padding: 10px;
+        border-radius: 8px 8px 0 0;
+        font-size: 1.1rem;
+    }
+    .top-bg {
+        background-color: #0F1E36;
+        padding: 12px;
+        border-radius: 0 0 8px 8px;
+        margin-bottom: 20px;
+    }
+    .featured-card {
+        background: white;
+        border-radius: 6px;
+        padding: 10px 6px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .tag-gold {
+        background-color: #D4AF37;
+        color: #111;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        margin-right: 2px;
+    }
+    .tag-blue {
+        background-color: #6C8EA4;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        margin-right: 2px;
+    }
 
-        course_fitness = 0
-        if w == 1: course_fitness = (nat_win * 3) + (loc_win * 2)
-        elif w in [2, 3]: course_fitness = (nat_win * 3) + (motor * 0.2)
-        elif w in [4, 5, 6]: course_fitness = (nat_win * 2.5) + tenji_score
+    /* 24会場グリッド配置 */
+    .venue-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 25px;
+    }
+    
+    /* 会場カード（開催中・白地） */
+    .venue-card-active {
+        background-color: #FFFFFF;
+        border: 1px solid #C7D2FE;
+        border-radius: 6px;
+        padding: 6px 2px;
+        text-align: center;
+        min-height: 78px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .venue-card-active .tag {
+        background-color: #6C8EA4;
+        color: white;
+        font-size: 0.65rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+        margin-bottom: 3px;
+    }
+    .venue-card-active .name {
+        font-size: 0.85rem;
+        font-weight: bold;
+        color: #111;
+    }
+    .venue-card-active .sub {
+        font-size: 0.68rem;
+        color: #4B5563;
+        margin-top: 3px;
+    }
 
-        total = (course_base.get(w, 5) + wind_course_adj.get(w, 0) + 
-                 rank_bonus.get(rank, 0) + (nat_win * 3) + (loc_win * 2) + 
-                 (motor * 0.3) + tenji_score + course_fitness)
-        
-        scores[w] = total
-        attack_power[w] = (nat_win * 2) + tenji_score + ((v_param["makuri_adj"] + tide_makuri_adj) * 2)
-        
-    combos = list(itertools.permutations([1, 2, 3, 4, 5, 6], 3))
-    combo_scores = []
-    center_attack = max(attack_power[3], attack_power[4])
-    is_makuri_tenkai = (center_attack > attack_power[1] + 3) or (w_dir == "向かい風" and w_speed >= 4) or ("干潮" in tide_status and v_param["water"] in ["海水", "汽水"])
-    
-    for c in combos:
-        eval_score = (scores[c[0]] * 1.6) + (scores[c[1]] * 1.0) + (scores[c[2]] * 0.6)
-        if is_makuri_tenkai:
-            if c[0] in [3, 4]: eval_score *= 1.3
-            if c[1] in [2, 4, 5]: eval_score *= 1.15
-        else:
-            if c[0] == 1 and c[1] in [2, 3]: eval_score *= 1.25
-        combo_scores.append((c, eval_score))
-        
-    combo_scores.sort(key=lambda x: x[1], reverse=True)
-    
-    top_combos = [combo_scores[0], combo_scores[1], combo_scores[2], combo_scores[5]]
-    labels = ["本命 🔥", "本命 🔥", "対抗 ⚔️", "潮位穴 ⚡"]
-    ratios = [0.4, 0.3, 0.2, 0.1]
-    
-    bet_list = []
-    for i in range(4):
-        c, _ = top_combos[i]
-        buy_str = f"{c[0]} - {c[1]} - {c[2]}"
-        amount = int(investment * ratios[i] // 100 * 100)
-        stars = "★★★★★" if i == 0 else ("★★★★☆" if i == 1 else "★★★☆☆")
-        bet_list.append({
-            "区分": labels[i],
-            "買い目（3連単）": buy_str,
-            "期待度": stars,
-            "推奨金額": f"{amount:,} 円"
-        })
-        
-    tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-    return pd.DataFrame(bet_list), tenkai_msg, v_desc
-
-# --- 予想実行 ---
-if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想する", type="primary", use_container_width=True):
-    venue = st.session_state.selected_venue
-    jcd = VENUE_CODES[venue]
-    rno = race_num.replace("R", "")
-    
-    with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
-        df_racers = get_detailed_racers(jcd, rno, today_str)
-        weather_info = get_before_info(jcd, rno, today_str)
-    
-    if df_racers is None or df_racers.empty:
-        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、終了している可能性があります。")
-    else:
-        df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
-        
-        st.info(f"🏟️ **会場特性**: {v_desc}\n\n🌀 **コンディション**: {weather_info['wind_dir']} {weather_info['wind_speed']}m / {weather_info['tide']}")
-        
-        df_display = df_racers.copy()
-        df_display["枠"] = df_display["枠"].apply(lambda x: f"{x}号艇")
-        df_display["展示タイム"] = weather_info["tenji"]
-        
-        st.subheader("📋 出走表・展示")
-        st.dataframe(df_display, hide_index=True, use_container_width=True)
-
-        st.subheader("🎯 AI推奨買い目")
-        st.caption(f"展開予測: **{tenkai_msg}**")
-        st.table(df_bets)
+    /* 会場カード（非開催・薄グレー） */
+    .venue-card-inactive {
+        background-color: #E5E7EB;
+        border: 1px solid #D1D5DB;
+        border-radius: 6px;
+        padding: 6px 2px;
+        text-align: center;
+        min-height: 78px;

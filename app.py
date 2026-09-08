@@ -6,12 +6,11 @@ from datetime import datetime, timedelta, timezone
 import itertools
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（デザイン・文字サイズ調整） ---
+# --- カスタムCSS ---
 st.markdown("""
     <style>
     .stApp {
@@ -20,7 +19,6 @@ st.markdown("""
     h1, h2, h3, .stSubheader, p, span {
         color: #0F172A !important;
     }
-    /* タイトルの文字サイズ調整 */
     .main-title {
         font-size: 1.4rem !important;
         font-weight: 800;
@@ -32,7 +30,6 @@ st.markdown("""
         color: #64748B !important;
         margin-bottom: 12px;
     }
-    /* ピックアップカード風デザイン */
     .pickup-card {
         background-color: #EFF6FF;
         border-left: 4px solid #2563EB;
@@ -84,21 +81,19 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- セッション付き通信関数 ---
-def get_html_with_retry(url, retries=3):
+# --- 通信関数 ---
+def get_html_with_retry(url):
     session = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Referer": "https://www.boatrace.jp/"
     }
-    for attempt in range(retries):
-        try:
-            res = session.get(url, headers=headers, timeout=8)
-            if res.status_code == 200:
-                return res.text
-        except Exception:
-            pass
-        time.sleep(0.3)
+    try:
+        res = session.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            return res.text
+    except Exception:
+        pass
     return None
 
 # --- 出走表データ取得 ---
@@ -175,47 +170,6 @@ def get_before_info(jcd, rno, date_str):
         info["tenji"] = found_times[:6]
         
     return info
-
-# --- 本日のイン逃げ濃厚レース検索機能 ---
-@st.cache_data(ttl=3600)
-def find_top_in_escapes(date_str):
-    top_races = []
-    # イン強豪会場を中心にスキャン
-    strong_in_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎", "唐津"]
-    
-    def scan_race(args):
-        venue, r = args
-        jcd = VENUE_CODES[venue]
-        df = get_detailed_racers(jcd, str(r), date_str)
-        if df is not None and not df.empty:
-            r1 = df.iloc[0]
-            # 1号艇がA1級かつ勝率6.5以上の場合をピックアップ
-            if r1["級別"] == "A1" and r1["全国勝率"] >= 6.50:
-                v_adj = VENUE_CHARACTERISTICS.get(venue, {}).get("in_adj", 0)
-                score = (r1["全国勝率"] * 10) + v_adj
-                return {
-                    "venue": venue,
-                    "race": f"{r}R",
-                    "racer": r1["選手名"],
-                    "win_rate": r1["全国勝率"],
-                    "rank": r1["級別"],
-                    "score": score
-                }
-        return None
-
-    tasks = []
-    for v in strong_in_venues:
-        for r in range(1, 13):
-            tasks.append((v, r))
-            
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = executor.map(scan_race, tasks)
-        for res in results:
-            if res:
-                top_races.append(res)
-                
-    top_races.sort(key=lambda x: x["score"], reverse=True)
-    return top_races[:3]  # 上位3件を厳選
 
 # --- AI分析ロジック ---
 def calculate_predictions(df, venue, weather_info, investment):
@@ -321,20 +275,29 @@ def calculate_predictions(df, venue, weather_info, investment):
 st.markdown('<p class="main-title">🚤 やっちゃんの競艇AI予想</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="sub-date">日付: {date_display}</p>', unsafe_allow_html=True)
 
-# --- 本日のイン逃げ鉄板ピックアップ ---
-with st.expander("🔥 本日のイン逃げ濃厚ピックアップレース", expanded=True):
-    with st.spinner("本日の鉄板レースを探しています..."):
-        pickups = find_top_in_escapes(today_str)
-        if pickups:
-            for p in pickups:
-                st.markdown(f"""
-                <div class="pickup-card">
-                    <b>🎯 {p['venue']} {p['race']}</b> | 1号艇: <b>{p['racer']}</b> ({p['rank']}) 勝率:<b>{p['win_rate']}</b><br>
-                    <span style="color:#2563EB; font-weight:bold;">🔥 イン逃げ信頼度 ★★★★★</span>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.write("※本日該当する鉄板レースは検索中か、終了しています。")
+# --- ピックアップ検索（ワンクリック軽量版） ---
+with st.expander("🔥 本日のイン逃げ濃厚候補チェック（高速版）", expanded=False):
+    st.caption("ボタンを押すと主要イン有利会場（大村・徳山・芦屋・下関）の直近レースをサクッと確認します。")
+    if st.button("🔍 鉄板レースを即時検索"):
+        found = False
+        target_venues = ["大村", "徳山", "芦屋", "下関", "住之江"]
+        for v in target_venues:
+            jcd = VENUE_CODES[v]
+            for r in range(1, 13):
+                df_chk = get_detailed_racers(jcd, str(r), today_str)
+                if df_chk is not None and not df_chk.empty:
+                    r1 = df_chk.iloc[0]
+                    if r1["級別"] == "A1" and r1["全国勝率"] >= 6.50:
+                        st.markdown(f"""
+                        <div class="pickup-card">
+                            <b>🎯 {v} {r}R</b> | 1号艇: <b>{r1['選手名']}</b> ({r1['級別']}) 勝率:<b>{r1['全国勝率']}</b><br>
+                            <span style="color:#2563EB; font-weight:bold;">🔥 イン逃げ信頼度 ★★★★★</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        found = True
+                        break
+        if not found:
+            st.info("現在すぐ買える鉄板レースは見つかりませんでした。下の選択欄から個別に予想してください。")
 
 st.divider()
 

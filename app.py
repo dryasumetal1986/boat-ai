@@ -5,13 +5,12 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import itertools
 import re
-from concurrent.futures import ThreadPoolExecutor
 import time
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（デザイン補正） ---
+# --- カスタムCSS ---
 st.markdown("""
     <style>
     .stApp {
@@ -19,14 +18,6 @@ st.markdown("""
     }
     h1, h2, h3, .stSubheader, p, span {
         color: #111111 !important;
-    }
-    div[data-testid="column"] > div {
-        background-color: #FFFFFF;
-        border: 1px solid #D1D5DB;
-        border-radius: 8px;
-        padding: 8px 4px;
-        text-align: center;
-        margin-bottom: 6px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -71,7 +62,7 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 出走表データ取得（正規表現強化・PC版ヘッダー固定） ---
+# --- 出走表データ取得 ---
 def get_detailed_racers(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {
@@ -121,69 +112,7 @@ def get_detailed_racers(jcd, rno, date_str, retries=2):
             time.sleep(0.3)
     return None
 
-# --- 本日の開催場一覧を取得 ---
-@st.cache_data(ttl=10800)
-def check_active_venues(date_str):
-    active_dict = {}
-    def check_single(v_tuple):
-        name, code = v_tuple
-        df = get_detailed_racers(code, "1", date_str, retries=0)
-        return name, (df is not None and not df.empty)
-
-    with ThreadPoolExecutor(max_workers=12) as executor:
-        results = executor.map(check_single, VENUE_CODES.items())
-        for name, is_active in results:
-            active_dict[name] = is_active
-            
-    return active_dict
-
-# 開催情報の読み込み
-active_venues = check_active_venues(today_str)
-active_list = [v for v, act in active_venues.items() if act]
-
-if "selected_venue" not in st.session_state:
-    st.session_state.selected_venue = active_list[0] if active_list else "びわこ"
-
-# --- トップ案内 ---
-st.title("🚤 やっちゃんの競艇AI予想")
-st.caption(f"日付: {date_display}")
-
-# --- 24会場一覧 ---
-st.subheader("本日の開催一覧")
-
-venues = list(VENUE_CODES.keys())
-cols_per_row = 4
-
-for i in range(0, len(venues), cols_per_row):
-    cols = st.columns(cols_per_row)
-    for j in range(cols_per_row):
-        if i + j < len(venues):
-            v_name = venues[i + j]
-            is_active = active_venues.get(v_name, False)
-            with cols[j]:
-                if is_active:
-                    st.markdown(f"**🔵 {v_name}**\n\n<span style='font-size:0.75rem; color:#2563EB;'>開催中</span>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<span style='color:#9CA3AF;'>{v_name}</span>", unsafe_allow_html=True)
-
-# --- 会場選択エリア ---
-st.divider()
-st.subheader("📍 予想する会場を選択してください")
-
-selected_v = st.selectbox(
-    "会場を選択",
-    active_list if active_list else list(VENUE_CODES.keys()),
-    index=active_list.index(st.session_state.selected_venue) if st.session_state.selected_venue in active_list else 0
-)
-st.session_state.selected_venue = selected_v
-
-col_r, col_m = st.columns(2)
-with col_r:
-    race_num = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)])
-with col_m:
-    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
-
-# --- 直前情報＆展示タイム取得（全タグ抽出による絶対取得ロジック） ---
+# --- 直前情報＆展示タイム取得 ---
 def get_before_info(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {
@@ -197,7 +126,6 @@ def get_before_info(jcd, rno, date_str, retries=2):
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
-                # 気象データ
                 weather_section = soup.find("div", class_="weather1")
                 if weather_section:
                     w_text = weather_section.get_text()
@@ -211,16 +139,13 @@ def get_before_info(jcd, rno, date_str, retries=2):
                     if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
                     elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
                 
-                # 展示タイム取得（クラス名指定に頼らず 6.XX 形式の数値を全検索して抽出）
                 all_cells = soup.find_all(["td", "th", "div", "span"])
                 found_times = []
                 for cell in all_cells:
                     text = cell.get_text(strip=True)
-                    # 展示タイム特有の「6.50〜6.99」の数字パターン
                     if re.match(r"^6\.\d{2}$", text):
                         found_times.append(float(text))
                 
-                # 6個以上見つかった場合は最初の6艇分を使用
                 if len(found_times) >= 6:
                     info["tenji"] = found_times[:6]
                     return info
@@ -330,10 +255,23 @@ def calculate_predictions(df, venue, weather_info, investment):
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
     return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
 
+# --- メイン画面構成 ---
+st.title("🚤 やっちゃんの競艇AI予想")
+st.caption(f"日付: {date_display}")
+
+st.subheader("📍 レースを選択してください")
+
+selected_v = st.selectbox("会場を選択", list(VENUE_CODES.keys()))
+
+col_r, col_m = st.columns(2)
+with col_r:
+    race_num = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)])
+with col_m:
+    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
+
 # --- 予想実行 ---
-if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想する", type="primary", use_container_width=True):
-    venue = st.session_state.selected_venue
-    jcd = VENUE_CODES[venue]
+if st.button(f"🚀 {selected_v} {race_num} をAI予想する", type="primary", use_container_width=True):
+    jcd = VENUE_CODES[selected_v]
     rno = race_num.replace("R", "")
     
     with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
@@ -341,9 +279,9 @@ if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想す�
         weather_info = get_before_info(jcd, rno, today_str, retries=2)
     
     if df_racers is None or df_racers.empty:
-        st.error(f"❌ {venue} {race_num} の出走表を取得できませんでした。時間をおいて再試行してください。")
+        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。まだ開催前か、締め切り後の可能性があります。")
     else:
-        df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
+        df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, selected_v, weather_info, investment)
         
         st.info(f"🏟️ **会場特性**: {v_desc}\n\n🌀 **コンディション**: {weather_info['wind_dir']} {weather_info['wind_speed']}m / {weather_info['tide']}")
         

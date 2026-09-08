@@ -17,7 +17,7 @@ st.markdown("""
         background-color: #F4F6F9;
     }
     
-    /* 見出しテキストの色固定（見切れ・背景と同化を防止） */
+    /* 見出しテキストの色固定 */
     h1, h2, h3, .stSubheader {
         color: #111111 !important;
     }
@@ -46,6 +46,14 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border: 1px solid #e0e0e0;
     }
+    .tag-gold {
+        background-color: #D4AF37;
+        color: #111;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
     .tag-blue {
         background-color: #6C8EA4;
         color: white;
@@ -62,7 +70,7 @@ st.markdown("""
         gap: 4px !important;
     }
     [data-testid="stHorizontalBlock"] > div {
-        width: 23% !important; /* 横に4つ並べる */
+        width: 23% !important;
         min-width: 0 !important;
         flex: none !important;
     }
@@ -92,23 +100,6 @@ JST = timezone(timedelta(hours=+9), 'JST')
 now_jst = datetime.now(JST)
 today_str = now_jst.strftime("%Y%m%d")
 date_display = now_jst.strftime("%m月%d日")
-
-# --- タイトル＆トップのカード表示 ---
-st.markdown(f'<div class="top-header">🚤 {date_display} のAIピックアップレース</div>', unsafe_allow_html=True)
-st.markdown("""
-<div class="top-bg">
-    <div style="display: flex; gap: 8px;">
-        <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">注目</span> <strong style="font-size:1.0rem; color:#111;">江戸川 7R</strong><br>
-            <span style="font-size:0.75rem; color:#666;">締切 13:56</span>
-        </div>
-        <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">注目</span> <strong style="font-size:1.0rem; color:#111;">蒲郡 12R</strong><br>
-            <span style="font-size:0.75rem; color:#666;">締切 20:38</span>
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
 
 VENUE_CODES = {
     "桐生": "01", "戸田": "02", "江戸川": "03", "平和島": "04", "多摩川": "05", "浜名湖": "06",
@@ -144,32 +135,7 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# 選択状態の保持
-if "selected_venue" not in st.session_state:
-    st.session_state.selected_venue = "大村"
-
-st.subheader("🏁 開催場を選択")
-
-# --- 24会場を4列に敷き詰め（横並び固定） ---
-venues = list(VENUE_CODES.keys())
-cols = st.columns(4)
-
-for idx, v_name in enumerate(venues):
-    col = cols[idx % 4]
-    if col.button(v_name, key=f"btn_{v_name}"):
-        st.session_state.selected_venue = v_name
-
-# --- 選択後の詳細指定 ---
-st.divider()
-st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
-
-col_r, col_m = st.columns(2)
-with col_r:
-    race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
-with col_m:
-    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
-
-# --- 1. 出走表データ取得 ---
+# --- 出走表データ取得 ---
 def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -211,7 +177,82 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
-# --- 2. 直前情報 ---
+# --- 最もイン逃げ率（1号艇期待度）が高い会場・レースの自動判定機能 ---
+@st.cache_data(ttl=3600)  # 1時間キャッシュで高速化
+def find_best_in_race(date_str):
+    best_venue = "大村"
+    best_rno = "1"
+    highest_score = -1.0
+    best_racer = "不明"
+
+    # 主要なイン強力会場を中心に各場の1Rを検索
+    check_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎"]
+    
+    for v in check_venues:
+        jcd = VENUE_CODES[v]
+        df = get_detailed_racers(jcd, "1", date_str)
+        if df is not None and not df.empty:
+            r1 = df.iloc[0]
+            # 会場イン補正 + 1号艇の勝率・級別スコア
+            in_adj = VENUE_CHARACTERISTICS[v]["in_adj"]
+            rank_score = 20 if r1["級別"] == "A1" else (10 if r1["級別"] == "A2" else 0)
+            score = (r1["全国勝率"] * 10) + (r1["当地勝率"] * 5) + in_adj + rank_score
+            
+            if score > highest_score:
+                highest_score = score
+                best_venue = v
+                best_racer = r1["選手名"]
+
+    return best_venue, best_rno, best_racer, highest_score
+
+# ピックアップの動的取得
+best_v, best_r, best_name, best_score = find_best_in_race(today_str)
+
+# --- タイトル＆トップのAIピックアップ表示 ---
+st.markdown(f'<div class="top-header">🚤 {date_display} のAIピックアップレース</div>', unsafe_allow_html=True)
+st.markdown(f"""
+<div class="top-bg">
+    <div style="display: flex; gap: 8px;">
+        <div class="featured-card" style="flex: 1;">
+            <span class="tag-gold">イン逃げ本命⚡</span><br>
+            <strong style="font-size:1.0rem; color:#111;">{best_v} {best_r}R</strong><br>
+            <span style="font-size:0.75rem; color:#333;">1号艇: {best_name}</span>
+        </div>
+        <div class="featured-card" style="flex: 1;">
+            <span class="tag-blue">高補正水面🌊</span><br>
+            <strong style="font-size:1.0rem; color:#111;">徳山 1R</strong><br>
+            <span style="font-size:0.75rem; color:#666;">イン期待度高</span>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# 選択状態の保持
+if "selected_venue" not in st.session_state:
+    st.session_state.selected_venue = best_v
+
+st.subheader("🏁 開催場を選択")
+
+# --- 24会場を4列に敷き詰め（横並び固定） ---
+venues = list(VENUE_CODES.keys())
+cols = st.columns(4)
+
+for idx, v_name in enumerate(venues):
+    col = cols[idx % 4]
+    if col.button(v_name, key=f"btn_{v_name}"):
+        st.session_state.selected_venue = v_name
+
+# --- 選択後の詳細指定 ---
+st.divider()
+st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
+
+col_r, col_m = st.columns(2)
+with col_r:
+    race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
+with col_m:
+    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
+
+# --- 直前情報 ---
 def get_before_info(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -245,7 +286,7 @@ def get_before_info(jcd, rno, date_str):
     except Exception:
         return info
 
-# --- 3. AI分析ロジック ---
+# --- AI分析ロジック ---
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})

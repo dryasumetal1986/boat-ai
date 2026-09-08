@@ -1,6 +1,7 @@
 import streamlit as st,requests,pandas as pd
 from datetime import date,timedelta,datetime
 from zoneinfo import ZoneInfo
+from itertools import permutations
 
 st.set_page_config(page_title="やっちゃんの競艇AI予想 PRO",page_icon="🚤",layout="wide")
 API="https://boatraceopenapi.github.io/api/v1"
@@ -168,26 +169,54 @@ def final_score(r,w,no,ws):
     s=(r["全国勝率"]*10*ws["win"]+r["全国2連率"]*.25+
        r["当地勝率"]*5+r["モーター2連率"]*.12*ws["motor"])
     stt=r["平均ST"]
-    if stt>0:s+=(12 if stt<=.12 else 8 if stt<=.15 else 4 if stt<=.18 else -4 if stt>=.22 else 0)*ws["st"]
+    if stt>0:
+        s+=(12 if stt<=.12 else 8 if stt<=.15 else 4 if stt<=.18 else -4 if stt>=.22 else 0)*ws["st"]
     lane=int(r["枠"])
     s+={1:20,2:8,3:6,4:7,5:2,6:0}[lane]*ws["course"]
     cr=r.get("コース1着率",0)
     s+=12 if cr>=50 else 9 if cr>=40 else 6 if cr>=30 else 3 if cr>=20 else 1 if cr>0 else 0
     ex=r["展示タイム"]
-    if ex>0:s+=(6 if ex<=6.70 else 4 if ex<=6.75 else 2 if ex<=6.80 else -2 if ex>=6.90 else 0)*ws["ex"]
+    if ex>0:
+        s+=(6 if ex<=6.70 else 4 if ex<=6.75 else 2 if ex<=6.80 else -2 if ex>=6.90 else 0)*ws["ex"]
     return round(s+weather_bonus(r,w)+stadium_bonus(no,lane),1)
+
+# 120通りの3連単をAI採点
+def trifecta_ai(df):
+    scores={int(r["枠"]):float(r["学習AI"]) for _,r in df.iterrows()}
+    result=[]
+
+    for a,b,c in permutations(scores.keys(),3):
+        sa=scores[a]
+        sb=scores[b]
+        sc=scores[c]
+
+        # 1着・2着・3着の位置による重み
+        score=sa*1.00+sb*.70+sc*.45
+
+        # 1着と2着の差が大きい場合を少し評価
+        if sa>sb:score+=(sa-sb)*.08
+
+        # 2着と3着の差
+        if sb>sc:score+=(sb-sc)*.04
+
+        result.append({
+            "3連単":f"{a}-{b}-{c}",
+            "AIスコア":round(score,1)
+        })
+
+    return pd.DataFrame(result).sort_values(
+        "AIスコア",ascending=False
+    ).reset_index(drop=True)
 
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
 st.write("実レース結果からAIの重みを自動調整する検証型AI")
 st.warning("非公式APIを利用しています。最新情報は公式BOATRACEでも確認してください。")
 
-# 日本時間の「今日」を取得
 today=datetime.now(ZoneInfo("Asia/Tokyo")).date()
 
-# 日付が変わった時だけ自動で当日にする
-if st.session_state.get("_日付更新確認") != today:
-    st.session_state["開催日"] = today
-    st.session_state["_日付更新確認"] = today
+if st.session_state.get("_日付更新確認")!=today:
+    st.session_state["開催日"]=today
+    st.session_state["_日付更新確認"]=today
 
 c1,c2,c3=st.columns(3)
 
@@ -202,7 +231,11 @@ with c2:
     sname=st.selectbox("競艇場",list(STADIUMS.values()))
 
 with c3:
-    rno=st.selectbox("レース",range(1,13),format_func=lambda x:f"{x}R")
+    rno=st.selectbox(
+        "レース",
+        range(1,13),
+        format_func=lambda x:f"{x}R"
+    )
 
 sno=list(STADIUMS)[list(STADIUMS.values()).index(sname)]
 
@@ -212,15 +245,20 @@ if st.button("🚀 AI予想を実行",type="primary"):
             data=get_data(td)
     except Exception as e:
         st.error("データ取得に失敗しました")
-        st.code(str(e));st.stop()
+        st.code(str(e))
+        st.stop()
 
     race=get_race(data,sno,rno)
+
     if race is None:
-        st.error("このレースのデータがありません");st.stop()
+        st.error("このレースのデータがありません")
+        st.stop()
 
     df=make_df(race)
+
     if df.empty:
-        st.error("出走表がありません");st.stop()
+        st.error("出走表がありません")
+        st.stop()
 
     w=weather(race)
 
@@ -228,59 +266,213 @@ if st.button("🚀 AI予想を実行",type="primary"):
         ws=learn_weights(td)
 
     st.subheader("🧠 過去14日AI学習結果")
+
     a,b,c=st.columns(3)
-    with a:st.metric("検証レース数",str(ws["races"]))
-    with b:st.metric("1着予測的中率",str(ws["accuracy"])+"%")
-    with c:st.metric("全国勝率の学習係数",str(ws["win"]))
-    st.write(f"コース係数：{ws['course']}　モーター係数：{ws['motor']}　ST係数：{ws['st']}　展示係数：{ws['ex']}")
+
+    with a:
+        st.metric("検証レース数",str(ws["races"]))
+
+    with b:
+        st.metric("1着予測的中率",str(ws["accuracy"])+"%")
+
+    with c:
+        st.metric("全国勝率の学習係数",str(ws["win"]))
+
+    st.write(
+        f"コース係数：{ws['course']}　"
+        f"モーター係数：{ws['motor']}　"
+        f"ST係数：{ws['st']}　"
+        f"展示係数：{ws['ex']}"
+    )
 
     with st.spinner("📊 コース実績を計算中..."):
         hist=make_learning_data(td)
 
-    df["コース1着率"]=0.0;df["コース出走数"]=0
+    df["コース1着率"]=0.0
+    df["コース出走数"]=0
 
     if not hist.empty:
         for i in df.index:
-            h=hist[(hist["選手番号"]==str(df.loc[i,"選手番号"]))&(hist["枠"]==int(df.loc[i,"枠"]))]
+            h=hist[
+                (hist["選手番号"]==str(df.loc[i,"選手番号"]))&
+                (hist["枠"]==int(df.loc[i,"枠"]))
+            ]
+
             df.loc[i,"コース出走数"]=len(h)
-            if len(h):df.loc[i,"コース1着率"]=round(h["1着"].mean()*100,1)
+
+            if len(h):
+                df.loc[i,"コース1着率"]=round(
+                    h["1着"].mean()*100,1
+                )
 
     df["基本AI"]=df.apply(basic_score,axis=1)
-    df["風波補正"]=df.apply(lambda r:weather_bonus(r,w),axis=1)
-    df["場補正"]=df["枠"].apply(lambda x:stadium_bonus(sno,int(x)))
-    df["学習AI"]=df.apply(lambda r:final_score(r,w,sno,ws),axis=1)
+    df["風波補正"]=df.apply(
+        lambda r:weather_bonus(r,w),axis=1
+    )
+    df["場補正"]=df["枠"].apply(
+        lambda x:stadium_bonus(sno,int(x))
+    )
+    df["学習AI"]=df.apply(
+        lambda r:final_score(r,w,sno,ws),
+        axis=1
+    )
 
     mx=df["学習AI"].max()
-    df["AI1着評価"]=(df["学習AI"]/mx*100).round(1) if mx>0 else 0
-    df=df.sort_values("AI1着評価",ascending=False).reset_index(drop=True)
 
-    st.subheader(f"🌬️ {sname} {rno}R コンディション")
+    df["AI1着評価"]=(
+        df["学習AI"]/mx*100
+    ).round(1) if mx>0 else 0
+
+    df=df.sort_values(
+        "AI1着評価",
+        ascending=False
+    ).reset_index(drop=True)
+
+    st.subheader(
+        f"🌬️ {sname} {rno}R コンディション"
+    )
+
     a,b,c,d,e=st.columns(5)
-    with a:st.metric("風速",f"{w['wind']} m")
-    with b:st.metric("風向",direction(w["direction"]))
-    with c:st.metric("波高",f"{w['wave']} cm")
-    with d:st.metric("気温",f"{w['air']} ℃")
-    with e:st.metric("水温",f"{w['water']} ℃")
+
+    with a:
+        st.metric("風速",f"{w['wind']} m")
+
+    with b:
+        st.metric("風向",direction(w["direction"]))
+
+    with c:
+        st.metric("波高",f"{w['wave']} cm")
+
+    with d:
+        st.metric("気温",f"{w['air']} ℃")
+
+    with e:
+        st.metric("水温",f"{w['water']} ℃")
 
     st.subheader("🤖 AI評価")
-    show=["枠","選手名","級別","全国勝率","全国2連率","当地勝率","モーター2連率","平均ST","展示タイム","コース1着率","コース出走数","基本AI","風波補正","場補正","学習AI","AI1着評価"]
-    st.dataframe(df[show],use_container_width=True,hide_index=True)
+
+    show=[
+        "枠","選手名","級別","全国勝率",
+        "全国2連率","当地勝率","モーター2連率",
+        "平均ST","展示タイム","コース1着率",
+        "コース出走数","基本AI","風波補正",
+        "場補正","学習AI","AI1着評価"
+    ]
+
+    st.dataframe(
+        df[show],
+        use_container_width=True,
+        hide_index=True
+    )
 
     st.subheader("🏆 AI順位")
+
     for i in range(min(3,len(df))):
         r=df.iloc[i]
-        st.write(f"{['🥇 本命','🥈 対抗','🥉 穴'][i]} {int(r['枠'])}号艇 {r['選手名']}　AI {r['AI1着評価']}")
+        st.write(
+            f"{['🥇 本命','🥈 対抗','🥉 穴'][i]} "
+            f"{int(r['枠'])}号艇 {r['選手名']}　"
+            f"AI {r['AI1着評価']}"
+        )
 
+    # 今までの3連単予想
     if len(df)>=3:
-        x,y,z=[int(df.iloc[i]["枠"]) for i in range(3)]
-        st.subheader("🎯 推奨3連単")
+        x,y,z=[
+            int(df.iloc[i]["枠"])
+            for i in range(3)
+        ]
+
+        st.subheader("🎯 従来型3連単")
+
         st.success(f"本線  {x}-{y}-{z}")
         st.info(f"押さえ  {x}-{z}-{y}")
         st.warning(f"穴  {y}-{x}-{z}")
 
+    # 120通りAI
+    if len(df)>=3:
+        tri=trifecta_ai(df)
+
+        st.subheader("🔥 120通り3連単AI")
+
+        st.caption(
+            "6艇の全120通りをAIスコアリングし、"
+            "上位から表示しています。"
+        )
+
+        top=tri.iloc[0]
+        second=tri.iloc[1]
+        third=tri.iloc[2]
+        hole=tri.iloc[-1]
+
+        a,b,c,d=st.columns(4)
+
+        with a:
+            st.metric(
+                "🥇 AI本線",
+                top["3連単"],
+                f"{top['AIスコア']}"
+            )
+
+        with b:
+            st.metric(
+                "🥈 AI対抗",
+                second["3連単"],
+                f"{second['AIスコア']}"
+            )
+
+        with c:
+            st.metric(
+                "🎯 AI押さえ",
+                third["3連単"],
+                f"{third['AIスコア']}"
+            )
+
+        with d:
+            st.metric(
+                "💥 AI穴",
+                hole["3連単"],
+                f"{hole['AIスコア']}"
+            )
+
+        st.subheader("📈 120通りAIランキング TOP10")
+
+        top10=tri.head(10).copy()
+        top10.insert(
+            0,
+            "順位",
+            range(1,len(top10)+1)
+        )
+
+        st.dataframe(
+            top10,
+            use_container_width=True,
+            hide_index=True
+        )
+
     st.subheader("🧠 AIの考え方")
-    st.write("今回のAIは、過去14日の実レース結果を使って全国勝率・モーター・ST・展示・コースの影響度を調整しています。")
-    st.write(f"過去検証の1着予測的中率：{ws['accuracy']}%")
-    st.caption("この学習は簡易的な統計モデルです。的中や利益を保証するものではありません。")
+
+    st.write(
+        "今回のAIは、過去14日の実レース結果を使って"
+        "全国勝率・モーター・ST・展示・コースの"
+        "影響度を調整しています。"
+    )
+
+    st.write(
+        f"過去検証の1着予測的中率：{ws['accuracy']}%"
+    )
+
+    st.write(
+        "さらに今回は6艇から作れる120通りの3連単を"
+        "すべてAI採点し、組み合わせごとの順位を出しています。"
+    )
+
+    st.caption(
+        "この学習は簡易的な統計モデルです。"
+        "的中や利益を保証するものではありません。"
+    )
+
 else:
-    st.info("開催日・競艇場・レースを選んで「AI予想を実行」を押してください。")
+    st.info(
+        "開催日・競艇場・レースを選んで"
+        "「AI予想を実行」を押してください。"
+               )

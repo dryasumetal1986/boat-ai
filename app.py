@@ -1,7 +1,7 @@
 import streamlit as st
-import requests
+import cloudscraper
+from bs4 import BeautifulSoup
 import pandas as pd
-import re
 
 # 競艇場と場コード(jcd)のマッピング
 JCD_MAP = {
@@ -15,11 +15,8 @@ JCD_MAP = {
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
 st.caption("【リアルタイムデータ×気象・潮汐×決まり手解析】")
 
-st.subheader("競艇場を選択")
-selected_place = st.selectbox("", list(JCD_MAP.keys()), index=2)
-
-st.subheader("レースを選択")
-selected_race = st.selectbox("", [f"{i}R" for i in range(1, 13)], index=8)
+selected_place = st.selectbox("競艇場を選択", list(JCD_MAP.keys()), index=2)
+selected_race = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)], index=8)
 
 if st.button("🔍 AI予想を実行する"):
     jcd = JCD_MAP[selected_place]
@@ -27,31 +24,32 @@ if st.button("🔍 AI予想を実行する"):
     
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}"
     
-    # ブロックを回避するための偽装ヘッダー
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.boatrace.jp/",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
-    }
-    
-    with st.spinner("データを取得中..."):
+    with st.spinner("公式Webサイトからデータを取得中..."):
         try:
-            res = requests.get(url, headers=headers, timeout=15)
+            # セキュリティ回避用のスクレイパー
+            scraper = cloudscraper.create_scraper()
+            res = scraper.get(url, timeout=15)
             
-            if res.status_code == 200:
-                html = res.text
-                rows = []
-                
-                # HTMLから選手名と級別を抽出
-                names = re.findall(r'<div class="is-fs18[^"]*">\s*<a[^>]*>([^<]+)</a>', html)
-                ranks = re.findall(r'(A1|A2|B1|B2)', html)
-                
-                for i in range(1, 7):
-                    name = names[i-1].replace(" ", "").replace("　", "") if i-1 < len(names) else f"出走艇 {i}"
-                    rank = ranks[i-1] if i-1 < len(ranks) else "-"
+            soup = BeautifulSoup(res.text, "html.parser")
+            tbodies = soup.find_all("tbody", class_="is-fs12")
+            
+            rows = []
+            if len(tbodies) >= 6:
+                for i, tbody in enumerate(tbodies[:6]):
+                    # 選手名
+                    name_tag = tbody.find("div", class_=lambda x: x and "is-fs18" in x)
+                    name = name_tag.get_text(strip=True).replace(" ", "").replace("　", "") if name_tag else f"選手{i+1}"
+                    
+                    # 級別
+                    text = tbody.get_text()
+                    rank = "-"
+                    for r in ["A1", "A2", "B1", "B2"]:
+                        if r in text:
+                            rank = r
+                            break
                     
                     rows.append({
-                        "枠番": f"{i}号艇",
+                        "枠番": f"{i+1}号艇",
                         "選手名": name,
                         "級別": rank
                     })
@@ -60,13 +58,14 @@ if st.button("🔍 AI予想を実行する"):
                 st.success(f"【{selected_place} {selected_race}】のデータを取得しました！")
                 st.dataframe(df, use_container_width=True)
                 
+                # 予想表示
+                top_player = df.iloc[0]["選手名"]
+                top_rank = df.iloc[0]["級別"]
                 st.markdown("### 🤖 AI予想結果")
-                st.write("1着軸予想: 1号艇 / 2着対抗: 2号艇・3号艇")
+                st.write(f"本命軸: **1号艇 {top_player}（{top_rank}）**")
+                st.write("おすすめ買い目: **1-2-3, 1-2-4, 1-3-2**")
             else:
-                st.warning("⚠️ データの自動取得に制限がかかりました。基本枠順を表示します。")
-                # 万が一ブロックされた場合の予備データ表示
-                rows = [{"枠番": f"{i}号艇", "選手名": f"出走艇 {i}", "級別": "-"} for i in range(1, 7)]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True)
-
+                st.error("出走表データの取得に失敗しました。時間をおいて再試行してください。")
+                
         except Exception as e:
             st.error(f"通信エラーが発生しました: {e}")

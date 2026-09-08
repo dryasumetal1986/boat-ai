@@ -7,32 +7,96 @@ import itertools
 import re
 
 # ページ設定
-st.set_page_config(page_title="やっちゃんの競艇AI予想ツール", page_icon="🚤", layout="centered")
+st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- スマホ表示最適化（見切れ防止） ---
+# --- 画像風カスタムCSSデザイン ---
 st.markdown("""
     <style>
-    h1 {
-        font-size: 1.6rem !important;
-        word-wrap: break-word !important;
-        overflow-wrap: break-word !important;
-        white-space: normal !important;
-        line-height: 1.4 !important;
+    /* 全体背景とフォント */
+    .stApp {
+        background-color: #F4F6F9;
     }
-    .stButton>button {
-        white-space: normal !important;
-        height: auto !important;
-        padding-top: 10px !important;
-        padding-bottom: 10px !important;
+    
+    /* ヘッダーカード */
+    .top-header {
+        background: linear-gradient(135deg, #D4AF37, #AA7C11);
+        color: #111;
+        font-weight: bold;
+        text-align: center;
+        padding: 10px;
+        border-radius: 8px 8px 0 0;
+        font-size: 1.1rem;
+    }
+    .top-bg {
+        background-color: #0F1E36;
+        padding: 12px;
+        border-radius: 0 0 8px 8px;
+        margin-bottom: 20px;
+    }
+    .featured-card {
+        background: white;
+        border-radius: 8px;
+        padding: 10px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+    }
+    .tag-blue {
+        background-color: #6C8EA4;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
+    
+    /* 会場グリッド風ボタン */
+    div.stButton > button {
+        width: 100%;
+        height: 68px !important;
+        background-color: #FFFFFF !important;
+        color: #333333 !important;
+        border: 1px solid #DCE1E7 !important;
+        border-radius: 6px !important;
+        font-weight: bold !important;
+        font-size: 0.9rem !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        transition: all 0.2s ease !important;
+        padding: 4px !important;
+    }
+    div.stButton > button:hover {
+        border-color: #0F1E36 !important;
+        color: #0F1E36 !important;
+        background-color: #F0F4F8 !important;
+    }
+    div.stButton > button:focus {
+        border-color: #D4AF37 !important;
+        box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.4) !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# タイトル表示
-st.title("🚤 やっちゃんの競艇AI予想ツール")
-st.caption("全国24会場特性・気象・満干潮位・展示・勝率統合解析")
+# 日付設定
+JST = timezone(timedelta(hours=+9), 'JST')
+now_jst = datetime.now(JST)
+today_str = now_jst.strftime("%Y%m%d")
+date_display = now_jst.strftime("%m月%d日")
 
-st.divider()
+# --- タイトル＆トップのカード表示（画像風デザイン） ---
+st.markdown(f'<div class="top-header">🚤 {date_display} のAIピックアップレース</div>', unsafe_allow_html=True)
+st.markdown("""
+<div class="top-bg">
+    <div style="display: flex; gap: 10px;">
+        <div class="featured-card" style="flex: 1;">
+            <span class="tag-blue">注目</span> <strong style="font-size:1.1rem; color:#111;">江戸川 7R</strong><br>
+            <span style="font-size:0.8rem; color:#666;">締切 13:56</span>
+        </div>
+        <div class="featured-card" style="flex: 1;">
+            <span class="tag-blue">注目</span> <strong style="font-size:1.1rem; color:#111;">蒲郡 12R</strong><br>
+            <span style="font-size:0.8rem; color:#666;">締切 20:38</span>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 VENUE_CODES = {
     "桐生": "01", "戸田": "02", "江戸川": "03", "平和島": "04", "多摩川": "05", "浜名湖": "06",
@@ -41,7 +105,6 @@ VENUE_CODES = {
     "下関": "19", "若松": "20", "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
-# 全国24会場の水面特性（水質属性含む）
 VENUE_CHARACTERISTICS = {
     "大村": {"water": "海水", "in_adj": 20, "makuri_adj": -5, "desc": "【海水/超イン最強】満潮時は1号艇独壇場。"},
     "徳山": {"water": "海水", "in_adj": 18, "makuri_adj": -4, "desc": "【海水/イン鉄板】満潮でイン信頼度さらに上昇。"},
@@ -69,11 +132,36 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
+# 選択状態の保持
+if "selected_venue" not in st.session_state:
+    st.session_state.selected_venue = "大村"
+
+st.subheader("🏁 開催場を選択")
+
+# --- 24会場を4列のパネル（グリッド）配置 ---
+venues = list(VENUE_CODES.keys())
+cols = st.columns(4)
+
+for idx, v_name in enumerate(venues):
+    col = cols[idx % 4]
+    # クリックしたら選択会場を切り替え
+    if col.button(v_name, key=f"btn_{v_name}"):
+        st.session_state.selected_venue = v_name
+
+# --- 選択後のレース・条件指定 ---
+st.divider()
+st.markdown(f"### 📍 選択中: **{st.session_state.selected_venue}**")
+
+col_r, col_m = st.columns(2)
+with col_r:
+    race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
+with col_m:
+    investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
+
 # --- 1. 出走表データ取得 ---
 def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    
     try:
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200: return None
@@ -108,29 +196,25 @@ def get_detailed_racers(jcd, rno, date_str):
                 "モーター2連率(%)": motor_2ren
             })
             if len(racers) == 6: break
-                
         return pd.DataFrame(racers) if len(racers) == 6 else None
     except Exception:
         return None
 
-# --- 2. 直前情報（気象・展示・潮位）取得 ---
+# --- 2. 直前情報 ---
 def get_before_info(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    
     info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
     try:
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200: return info
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 気象＆潮位情報
         weather_section = soup.find("div", class_="weather1")
         if weather_section:
             w_text = weather_section.get_text()
             m_speed = re.search(r"風速\s*(\d+)m", w_text)
-            if m_speed:
-                info["wind_speed"] = int(m_speed.group(1))
+            if m_speed: info["wind_speed"] = int(m_speed.group(1))
             
             if "追い風" in w_text: info["wind_dir"] = "追い風"
             elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
@@ -145,30 +229,26 @@ def get_before_info(jcd, rno, date_str):
             val = td.get_text(strip=True)
             if re.match(r"^\d\.\d{2}$", val):
                 tenji_list.append(float(val))
-        if len(tenji_list) == 6:
-            info["tenji"] = tenji_list
-            
+        if len(tenji_list) == 6: info["tenji"] = tenji_list
         return info
     except Exception:
         return info
 
-# --- 3. 満干潮・水質・会場特性・気象・展示統合AI計算エンジン ---
-def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
+# --- 3. AI分析ロジック ---
+def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
-    
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
     
-    # 潮位補正 (海水・汽水場のみ)
     tide_status = weather_info["tide"]
     tide_in_adj = 0
     tide_makuri_adj = 0
     
     if v_param["water"] in ["海水", "汽水"]:
         if "満潮" in tide_status:
-            tide_in_adj = +6  # 満潮は波が立ちイン有利・差し有利
+            tide_in_adj = +6
             tide_makuri_adj = -4
         elif "干潮" in tide_status:
-            tide_in_adj = -4  # 干潮は水面が平らになりダッシュまくり有利
+            tide_in_adj = -4
             tide_makuri_adj = +6
             
     course_base[1] += (v_param["in_adj"] + tide_in_adj)
@@ -177,7 +257,6 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
     course_base[4] += (v_param["makuri_adj"] + tide_makuri_adj) * 0.7
     
     rank_bonus = {"A1": 25, "A2": 15, "B1": 5, "B2": 0}
-    
     w_speed = weather_info["wind_speed"]
     w_dir = weather_info["wind_dir"]
     wind_course_adj = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
@@ -193,7 +272,6 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
             wind_course_adj[4] += (w_speed * 2.5)
 
     min_tenji = min(weather_info["tenji"])
-    
     scores = {}
     attack_power = {}
     
@@ -206,16 +284,12 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
         t_time = weather_info["tenji"][idx] if idx < len(weather_info["tenji"]) else 6.80
         
         tenji_score = max(0, (6.90 - t_time) * 30)
-        if t_time == min_tenji:
-            tenji_score += 10
+        if t_time == min_tenji: tenji_score += 10
 
         course_fitness = 0
-        if w == 1:
-            course_fitness = (nat_win * 3) + (loc_win * 2)
-        elif w in [2, 3]:
-            course_fitness = (nat_win * 3) + (motor * 0.2)
-        elif w in [4, 5, 6]:
-            course_fitness = (nat_win * 2.5) + tenji_score
+        if w == 1: course_fitness = (nat_win * 3) + (loc_win * 2)
+        elif w in [2, 3]: course_fitness = (nat_win * 3) + (motor * 0.2)
+        elif w in [4, 5, 6]: course_fitness = (nat_win * 2.5) + tenji_score
 
         total = (course_base.get(w, 5) + wind_course_adj.get(w, 0) + 
                  rank_bonus.get(rank, 0) + (nat_win * 3) + (loc_win * 2) + 
@@ -224,26 +298,18 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
         scores[w] = total
         attack_power[w] = (nat_win * 2) + tenji_score + ((v_param["makuri_adj"] + tide_makuri_adj) * 2)
         
-    boats = [1, 2, 3, 4, 5, 6]
-    combos = list(itertools.permutations(boats, 3))
-    
+    combos = list(itertools.permutations([1, 2, 3, 4, 5, 6], 3))
     combo_scores = []
-    
     center_attack = max(attack_power[3], attack_power[4])
     is_makuri_tenkai = (center_attack > attack_power[1] + 3) or (w_dir == "向かい風" and w_speed >= 4) or ("干潮" in tide_status and v_param["water"] in ["海水", "汽水"])
     
     for c in combos:
         eval_score = (scores[c[0]] * 1.6) + (scores[c[1]] * 1.0) + (scores[c[2]] * 0.6)
-        
         if is_makuri_tenkai:
-            if c[0] in [3, 4]:
-                eval_score *= 1.3
-            if c[1] in [2, 4, 5]:
-                eval_score *= 1.15
+            if c[0] in [3, 4]: eval_score *= 1.3
+            if c[1] in [2, 4, 5]: eval_score *= 1.15
         else:
-            if c[0] == 1 and c[1] in [2, 3]:
-                eval_score *= 1.25
-                
+            if c[0] == 1 and c[1] in [2, 3]: eval_score *= 1.25
         combo_scores.append((c, eval_score))
         
     combo_scores.sort(key=lambda x: x[1], reverse=True)
@@ -258,7 +324,6 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
         buy_str = f"{c[0]} - {c[1]} - {c[2]}"
         amount = int(investment * ratios[i] // 100 * 100)
         stars = "★★★★★" if i == 0 else ("★★★★☆" if i == 1 else "★★★☆☆")
-        
         bet_list.append({
             "区分": labels[i],
             "買い目（3連単）": buy_str,
@@ -267,60 +332,32 @@ def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
         })
         
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-        
     return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
 
-# --- 条件設定UI ---
-st.subheader("⚙️ レース条件設定")
-
-JST = timezone(timedelta(hours=+9), 'JST')
-now_jst = datetime.now(JST)
-today_str = now_jst.strftime("%Y%m%d")
-date_display = now_jst.strftime("%m/%d")
-
-st.info(f"📅 本日の日付: {date_display} (日本時間)")
-
-col1, col2 = st.columns(2)
-with col1:
-    venue = st.selectbox("開催会場", list(VENUE_CODES.keys()), index=9)
-with col2:
-    race_num = st.selectbox("レース", [f"{i}R" for i in range(1, 13)])
-
-investment = st.number_input("投資合計金額 (円)", min_value=1000, value=5000, step=1000)
-
-st.divider()
-
 # --- 予想実行 ---
-if st.button("🤖 24会場・満干潮位・気象・展示を統合してAI予想実行", type="primary", use_container_width=True):
+if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想する", type="primary", use_container_width=True):
+    venue = st.session_state.selected_venue
     jcd = VENUE_CODES[venue]
     rno = race_num.replace("R", "")
     
-    with st.spinner("出走表・水面特性・満干潮位・展示タイムをフル分析中..."):
+    with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
         df_racers = get_detailed_racers(jcd, rno, today_str)
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.warning(f"⚠️ {date_display} の {venue} {race_num} の解析に失敗しました。開催状況またはレース番号をご確認ください。")
+        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。")
     else:
-        st.success(f"【{venue} {race_num}】のデータ取得＆満干潮位フル統合AI分析が完了しました！")
+        df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
         
-        df_bets, tenkai_msg, v_desc = calculate_tide_integrated_predictions(df_racers, venue, weather_info, investment)
-        
-        w_speed = weather_info["wind_speed"]
-        w_dir = weather_info["wind_dir"]
-        tide_info = weather_info["tide"]
-        
-        st.info(f"🏟️ **会場解説**: {v_desc}\n\n🌀 **リアルタイム気象/潮位**: {w_dir} {w_speed}m / {tide_info}")
+        st.info(f"🏟️ **会場特性**: {v_desc}\n\n🌀 **コンディション**: {weather_info['wind_dir']} {weather_info['wind_speed']}m / {weather_info['tide']}")
         
         df_display = df_racers.copy()
         df_display["枠"] = df_display["枠"].apply(lambda x: f"{x}号艇")
         df_display["展示タイム"] = weather_info["tenji"]
         
-        st.subheader("📋 統合出走表 (全国/当地勝率・展示)")
+        st.subheader("📋 出走表・展示")
         st.dataframe(df_display, hide_index=True, use_container_width=True)
 
-        st.divider()
-
-        st.subheader("🎯 潮位＆水面特性考慮のAI推奨買い目")
-        st.caption(f"解析展開: **{tenkai_msg}**")
+        st.subheader("🎯 AI推奨買い目")
+        st.caption(f"展開予測: **{tenkai_msg}**")
         st.table(df_bets)

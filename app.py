@@ -9,25 +9,23 @@ import re
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想ツール", page_icon="🚤", layout="centered")
 
-# --- UIデザイン調整（スマホ最適化CSS） ---
+# --- スマホ表示最適化（見切れ防止） ---
 st.markdown("""
     <style>
+    /* タイトルの見切れを防ぎ、スマホで自然に改行されるように設定 */
     h1 {
         font-size: 1.6rem !important;
-        line-height: 1.3 !important;
-        padding-top: 0.2rem !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        white-space: normal !important;
+        line-height: 1.4 !important;
     }
-    h2, h3 {
-        font-size: 1.1rem !important;
-        margin-top: 0.8rem !important;
-        margin-bottom: 0.4rem !important;
-    }
-    .stDataFrame {
-        font-size: 0.85rem !important;
-    }
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
+    /* ボタン文字の見切れ防止 */
+    .stButton>button {
+        white-space: normal !important;
+        height: auto !important;
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -65,7 +63,6 @@ def get_detailed_racers(jcd, rno, date_str):
             text = tbody.get_text(separator=" ", strip=True)
             words = text.split()
             
-            # 級別を抽出
             rank = None
             for word in words:
                 if word in ["A1", "A2", "B1", "B2"]:
@@ -75,16 +72,13 @@ def get_detailed_racers(jcd, rno, date_str):
             if not rank:
                 continue
                 
-            # 選手名を取得
             name_el = tbody.find("div", class_="is-fs18")
             if not name_el:
                 name_el = tbody.find("span", class_="is-fs18")
             name = name_el.get_text(strip=True) if name_el else "不明"
             
-            # 勝率（全国勝率）とモーター2連率の数値を正規表現で取得
             floats = re.findall(r"\d+\.\d+", text)
             
-            # 標準的な出走表配置に基づくデフォルト＆取得値設定
             national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
             motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
             
@@ -105,7 +99,6 @@ def get_detailed_racers(jcd, rno, date_str):
 
 # --- AIスコア＆期待値計算エンジン ---
 def calculate_advanced_predictions(df, investment):
-    # コース補正（1号艇優位）
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     rank_bonus = {"A1": 25, "A2": 15, "B1": 5, "B2": 0}
     
@@ -116,7 +109,6 @@ def calculate_advanced_predictions(df, investment):
         win_rate = row["全国勝率"]
         motor = row["モーター2連率(%)"]
         
-        # 総合スコア算出 = コース補正 + 級別 + 全国勝率*5 + モーター*0.5
         total = course_base.get(w, 5) + rank_bonus.get(rank, 0) + (win_rate * 5) + (motor * 0.5)
         scores[w] = total
         
@@ -125,13 +117,11 @@ def calculate_advanced_predictions(df, investment):
     
     combo_scores = []
     for c in combos:
-        # 1着の評価重み付け
         eval_score = (scores[c[0]] * 1.6) + (scores[c[1]] * 1.0) + (scores[c[2]] * 0.6)
         combo_scores.append((c, eval_score))
         
     combo_scores.sort(key=lambda x: x[1], reverse=True)
     
-    # 期待値順の買い目抽出（本命2点・対抗1点・穴1点）
     top_combos = [combo_scores[0], combo_scores[1], combo_scores[2], combo_scores[6]]
     labels = ["本命 🔥", "本命 🔥", "対抗 ⚔️", "中穴 ⚡"]
     ratios = [0.4, 0.3, 0.2, 0.1]
@@ -141,8 +131,6 @@ def calculate_advanced_predictions(df, investment):
         c, score = top_combos[i]
         buy_str = f"{c[0]} - {c[1]} - {c[2]}"
         amount = int(investment * ratios[i] // 100 * 100)
-        
-        # 期待度星評価
         stars = "★★★★★" if i == 0 else ("★★★★☆" if i == 1 else "★★★☆☆")
         
         bet_list.append({

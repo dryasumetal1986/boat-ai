@@ -19,7 +19,6 @@ STADIUMS = {
     21: "芦屋", 22: "福岡", 23: "唐津", 24: "大村"
 }
 
-# 競艇場ごとの水面特徴データベース
 STADIUM_FEATURES = {
     "大村": {"in_rate": "極高", "water": "海水", "bonus_1": 15, "desc": "全国屈指のイン最強水面。1号艇の信頼度が非常に高い。"},
     "徳山": {"in_rate": "極高", "water": "海水", "bonus_1": 14, "desc": "イン強固。風の影響が少ない日は1号艇軸で安定。"},
@@ -31,7 +30,6 @@ STADIUM_FEATURES = {
     "平和島": {"in_rate": "低", "water": "海水", "bonus_1": -2, "desc": "イン弱め。風と波の影響を受けやすく長穴が出やすい。"},
 }
 
-# デフォルト（標準水面）
 DEFAULT_FEATURE = {"in_rate": "中", "water": "標準", "bonus_1": 5, "desc": "標準的な水面特性。"}
 
 TECHNIQUES = {
@@ -42,7 +40,7 @@ def num(x):
     try:
         return float(x)
     except:
-        return 0
+        return 0.0
 
 @st.cache_data(ttl=180)
 def get_data(d):
@@ -202,9 +200,8 @@ def technique_bonus(row):
     elif lane == 6 and technique == "まくり差し": bonus = 4
     return bonus
 
-# 気象（風向き・風速）および会場特性に応じたAIスコア補正
 def calculate_score(row, stadium_feat, weather_info):
-    s = 0
+    s = 0.0
     s += row["全国勝率"] * 10
     s += row["全国2連率"] * 0.25
     s += row["当地勝率"] * 5
@@ -221,20 +218,18 @@ def calculate_score(row, stadium_feat, weather_info):
     lane_bonus = {1: 20, 2: 8, 3: 6, 4: 7, 5: 2, 6: 0}
     s += lane_bonus.get(lane, 0)
 
-    # 会場固有の1号艇補正
     if lane == 1:
         s += stadium_feat.get("bonus_1", 0)
 
-    # 風・波の環境補正
     wind_speed = weather_info.get("wind_speed", 0)
     wind_dir = weather_info.get("wind_direction", "")
 
-    if wind_speed >= 5:  # 強風時
-        if lane in [2, 3, 4]: s += 5  # 波乱（まくり・差し）
+    if wind_speed >= 5:
+        if lane in [2, 3, 4]: s += 5
     if "追い風" in wind_dir and lane in [1, 2]:
-        s += 4  # 追い風はイン・差し有利
+        s += 4
     elif "向かい風" in wind_dir and lane in [3, 4, 5]:
-        s += 6  # 向かい風はダッシュまくり有利
+        s += 6
 
     course_rate = row["コース1着率"]
     if course_rate >= 50: s += 12
@@ -256,7 +251,7 @@ def calculate_score(row, stadium_feat, weather_info):
 
 # --- UI実装 ---
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
-st.write("【リアルタイム気象データ×会場水面特性×過去データAI解析】")
+st.write("【リアルタイム気象データ×会場水面特性×オッズ妙味解析】")
 
 st.subheader("📅 レースを選択")
 c1, c2, c3 = st.columns(3)
@@ -289,7 +284,7 @@ if st.button("🚀 AI予想を実行", type="primary"):
         st.error("出走表がありません")
         st.stop()
 
-    # 会場・気象データの抽出
+    # 会場・気象データ抽出
     stadium_feat = STADIUM_FEATURES.get(stadium_name, DEFAULT_FEATURE)
     preview_data = race.get("preview", {})
     weather_info = {
@@ -299,7 +294,7 @@ if st.button("🚀 AI予想を実行", type="primary"):
         "weather": preview_data.get("weather_name", "不明")
     }
 
-    # 気象・会場特徴パネル表示
+    # 気象情報表示
     st.info(f"🏟️ **{stadium_name} 特徴**: {stadium_feat['desc']} （イン強度: {stadium_feat['in_rate']} / 水質: {stadium_feat['water']}）")
     w_col1, w_col2, w_col3, w_col4 = st.columns(4)
     w_col1.metric("天候", weather_info["weather"])
@@ -314,8 +309,6 @@ if st.button("🚀 AI予想を実行", type="primary"):
     df = add_course_stats(df, course_stats)
     df = add_technique_stats(df, technique_stats)
     df["決まり手補正"] = df.apply(technique_bonus, axis=1)
-    
-    # 風速・会場特性を反映したAIスコア計算
     df["AIスコア"] = df.apply(lambda row: calculate_score(row, stadium_feat, weather_info), axis=1)
 
     maximum = df["AIスコア"].max()
@@ -329,23 +322,60 @@ if st.button("🚀 AI予想を実行", type="primary"):
     ]
     st.dataframe(df[columns], use_container_width=True, hide_index=True)
 
-    st.subheader("🏆 AI注目選手")
-    top = df.iloc[0]
-    st.success(f"本命: **{int(top['枠'])}号艇 {top['選手名']}** (コース1着率 {top['コース1着率']}% / 得意決まり手: {top['得意決まり手']} / AI評価: {top['AI1着評価']})")
+    # --- オッズデータ取得 & 妙味（期待値）解析 ---
+    odds_data = race.get("odds", {}).get("trifecta", {}) # 3連単オッズ
+    
+    predictions = []
+    # 各枠番の確率ウェイトを割り当て
+    score_map = {int(row["枠"]): row["AI1着評価"] for _, row in df.iterrows()}
+    total_score = sum(score_map.values()) if sum(score_map.values()) > 0 else 1
 
-    if len(df) >= 2:
-        second = df.iloc[1]
-        st.info(f"対抗: **{int(second['枠'])}号艇 {second['選手名']}** (得意決まり手: {second['得意決まり手']})")
-    if len(df) >= 3:
-        third = df.iloc[2]
-        st.info(f"穴目: **{int(third['枠'])}号艇 {third['選手名']}** (得意決まり手: {third['得意決まり手']})")
+    # 主要な組み合わせ（上位組み合わせ）の期待値判定
+    lanes = [1, 2, 3, 4, 5, 6]
+    for i in lanes:
+        for j in lanes:
+            for k in lanes:
+                if i != j and j != k and i != k:
+                    combo = f"{i}-{j}-{k}"
+                    # ざっくりとした理論勝率計算
+                    prob = (score_map[i] / total_score) * (score_map[j] / (total_score - score_map[i] + 0.1))
+                    
+                    # APIからオッズ取得
+                    odds_val = num(odds_data.get(f"{i}{j}{k}", 0))
+                    
+                    # 期待値 = 確率 × オッズ
+                    expected_value = round(prob * odds_val, 2)
+                    
+                    predictions.append({
+                        "組み合わせ": combo,
+                        "AI理論勝率": f"{round(prob * 100, 1)}%",
+                        "オッズ": f"{odds_val}倍" if odds_val > 0 else "未確定",
+                        "期待値スコア": expected_value if odds_val > 0 else prob * 10,
+                        "raw_odds": odds_val
+                    })
 
-    if len(df) >= 3:
-        a, b, c = int(df.iloc[0]["枠"]), int(df.iloc[1]["枠"]), int(df.iloc[2]["枠"])
-        st.subheader("🎯 推奨3連単")
-        st.write(f"本線: **{a}-{b}-{c}**")
-        st.write(f"押さえ: **{a}-{c}-{b}**")
-        st.write(f"穴目: **{b}-{a}-{c}**")
+    pred_df = pd.DataFrame(predictions)
+
+    st.subheader("🎯 AI推薦買い目（本命 vs オッズ妙味）")
+    col_honmei, col_myomi = st.columns(2)
+
+    with col_honmei:
+        st.write("### 🟢 本命狙い（勝率重視）")
+        top_prob = pred_df.sort_values("AI理論勝率", ascending=False).head(5)
+        for _, row in top_prob.iterrows():
+            st.success(f"**{row['組み合わせ']}** | 勝率: {row['AI理論勝率']} | オッズ: {row['オッズ']}")
+
+    with col_myomi:
+        st.write("### 🟡 妙味狙い（回収率・高期待値）")
+        if (pred_df["raw_odds"] > 0).any():
+            top_exp = pred_df.sort_values("期待値スコア", ascending=False).head(5)
+            for _, row in top_exp.iterrows():
+                st.warning(f"**{row['組み合わせ']}** | 期待値: {row['期待値スコア']} | オッズ: {row['オッズ']}")
+        else:
+            st.info("※現在オッズが未確定のため、展示スコアベースの穴目を表示中")
+            top_exp = pred_df.sort_values("期待値スコア", ascending=False).head(5)
+            for _, row in top_exp.iterrows():
+                st.write(f"・**{row['組み合わせ']}** (勝率高)")
 
     st.divider()
-    st.caption("AI評価は会場特性・展示気象データを含む独自計算による予想値です。")
+    st.caption("※期待値スコアは【AI推定確率 × リアルタイムオッズ】で算出した回収率の指標です。")

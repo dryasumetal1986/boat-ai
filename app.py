@@ -2,17 +2,34 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import date, timedelta
+from collections import defaultdict
 
+
+# =========================================================
+# 設定
+# =========================================================
 
 st.set_page_config(
-    page_title="やっちゃんの競艇AI予想 PRO",
+    page_title="やっちゃんの競艇AI予想 PRO++",
     page_icon="🚤",
     layout="wide"
 )
 
 
-API = "https://boatraceopenapi.github.io/api/v1"
+# =========================================================
+# API
+# =========================================================
+# 現在公開されている旧API群を利用。
+# 将来的には boatraceopenapi/api への移行を推奨。
 
+PROGRAM_API = "https://boatraceopenapi.github.io/programs/v3"
+RESULT_API = "https://boatraceopenapi.github.io/results/v3"
+PREVIEW_API = "https://boatraceopenapi.github.io/previews/v3"
+
+
+# =========================================================
+# 競艇場
+# =========================================================
 
 STADIUMS = {
     1: "桐生",
@@ -52,20 +69,51 @@ TECHNIQUES = {
 }
 
 
+# =========================================================
+# 基本関数
+# =========================================================
+
 def num(x):
+
     try:
         return float(x)
+
+    except:
+        return 0.0
+
+
+def safe_int(x):
+
+    try:
+        return int(x)
+
     except:
         return 0
 
 
+def get_url(base, d):
+
+    return (
+        base
+        + "/"
+        + d.strftime("%Y")
+        + "/"
+        + d.strftime("%Y%m%d")
+        + ".json"
+    )
+
+
+# =========================================================
+# API取得
+# =========================================================
+
 @st.cache_data(ttl=180)
-def get_data(d):
+def get_program_data(d):
 
-    ymd = d.strftime("%Y%m%d")
-    year = d.strftime("%Y")
-
-    url = API + "/" + year + "/" + ymd + ".json"
+    url = get_url(
+        PROGRAM_API,
+        d
+    )
 
     r = requests.get(
         url,
@@ -77,24 +125,86 @@ def get_data(d):
     return r.json()
 
 
-def get_race(data, stadium, race_no):
+@st.cache_data(ttl=180)
+def get_result_data(d):
 
-    stadiums = data.get(
-        "programs",
-        {}
-    ).get(
-        "stadiums",
-        {}
+    url = get_url(
+        RESULT_API,
+        d
     )
 
-    s = stadiums.get(
-        str(stadium)
+    r = requests.get(
+        url,
+        timeout=20
     )
 
-    if not s:
+    r.raise_for_status()
+
+    return r.json()
+
+
+@st.cache_data(ttl=180)
+def get_preview_data(d):
+
+    url = get_url(
+        PREVIEW_API,
+        d
+    )
+
+    r = requests.get(
+        url,
+        timeout=20
+    )
+
+    r.raise_for_status()
+
+    return r.json()
+
+
+# =========================================================
+# JSONから会場取得
+# =========================================================
+
+def get_stadiums(data):
+
+    return (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+    )
+
+
+def get_result_stadiums(data):
+
+    return (
+        data
+        .get("results", {})
+        .get("stadiums", {})
+    )
+
+
+# =========================================================
+# レース取得
+# =========================================================
+
+def get_race(
+    data,
+    stadium_no,
+    race_no
+):
+
+    stadiums = get_stadiums(
+        data
+    )
+
+    stadium = stadiums.get(
+        str(stadium_no)
+    )
+
+    if not stadium:
         return None
 
-    races = s.get(
+    races = stadium.get(
         "races",
         {}
     )
@@ -104,126 +214,296 @@ def get_race(data, stadium, race_no):
     )
 
 
-def get_course_stats(target_date):
+def get_result_race(
+    data,
+    stadium_no,
+    race_no
+):
 
-    stats = {}
+    stadiums = get_result_stadiums(
+        data
+    )
 
-    for day in range(1, 15):
+    stadium = stadiums.get(
+        str(stadium_no)
+    )
 
-        d = target_date - timedelta(days=day)
+    if not stadium:
+        return None
 
-        if d < date(2026, 1, 1):
-            continue
+    races = stadium.get(
+        "races",
+        {}
+    )
 
-        try:
-            data = get_data(d)
-        except:
-            continue
+    return races.get(
+        str(race_no)
+    )
 
-        stadiums = data.get(
-            "programs",
-            {}
-        ).get(
-            "stadiums",
+
+# =========================================================
+# 再帰的に天候データを探す
+# =========================================================
+
+def recursive_find(
+    obj,
+    keys
+):
+
+    if isinstance(obj, dict):
+
+        for key in keys:
+
+            if key in obj:
+                return obj[key]
+
+        for value in obj.values():
+
+            found = recursive_find(
+                value,
+                keys
+            )
+
+            if found is not None:
+                return found
+
+    elif isinstance(obj, list):
+
+        for value in obj:
+
+            found = recursive_find(
+                value,
+                keys
+            )
+
+            if found is not None:
+                return found
+
+    return None
+
+
+def extract_weather(race):
+
+    if not race:
+        return {
+            "天候": "",
+            "風速": 0,
+            "風向": "",
+            "波高": 0
+        }
+
+    weather = recursive_find(
+        race,
+        [
+            "weather",
+            "before_weather"
+        ]
+    )
+
+    wind = recursive_find(
+        race,
+        [
+            "wind",
+            "before_wind",
+            "wind_speed"
+        ]
+    )
+
+    wind_direction = recursive_find(
+        race,
+        [
+            "windDirect",
+            "before_windDirect",
+            "wind_direction"
+        ]
+    )
+
+    wave = recursive_find(
+        race,
+        [
+            "wave",
+            "before_wave",
+            "wave_height"
+        ]
+    )
+
+    return {
+
+        "天候": (
+            str(weather)
+            if weather is not None
+            else ""
+        ),
+
+        "風速": num(wind),
+
+        "風向": (
+            str(wind_direction)
+            if wind_direction is not None
+            else ""
+        ),
+
+        "波高": num(wave)
+    }
+
+
+# =========================================================
+# 出走表
+# =========================================================
+
+def make_table(race):
+
+    racers = race.get(
+        "racers",
+        {}
+    )
+
+    preview = (
+        race
+        .get("preview", {})
+        .get("racers", {})
+    )
+
+    rows = []
+
+    for lane in range(1, 7):
+
+        r = racers.get(
+            str(lane),
             {}
         )
 
-        for stadium in stadiums.values():
+        p = preview.get(
+            str(lane),
+            {}
+        )
 
-            races = stadium.get(
-                "races",
-                {}
-            )
-
-            for race in races.values():
-
-                result = race.get(
-                    "result",
-                    {}
-                )
-
-                result_racers = result.get(
-                    "racers",
-                    {}
-                )
-
-                if not result_racers:
-                    continue
-
-                for racer in result_racers.values():
-
-                    player_number = str(
-                        racer.get(
-                            "number",
-                            ""
-                        )
-                    )
-
-                    course = racer.get(
-                        "course_number"
-                    )
-
-                    place = racer.get(
-                        "place_number"
-                    )
-
-                    if not player_number:
-                        continue
-
-                    try:
-                        course = int(course)
-                    except:
-                        continue
-
-                    if course < 1 or course > 6:
-                        continue
-
-                    key = (
-                        player_number,
-                        course
-                    )
-
-                    if key not in stats:
-                        stats[key] = {
-                            "出走": 0,
-                            "1着": 0
-                        }
-
-                    stats[key]["出走"] += 1
-
-                    try:
-                        place = int(place)
-                    except:
-                        place = 0
-
-                    if place == 1:
-                        stats[key]["1着"] += 1
-
-    return stats
-
-
-def get_technique_stats(target_date):
-
-    stats = {}
-
-    for day in range(1, 15):
-
-        d = target_date - timedelta(days=day)
-
-        if d < date(2026, 1, 1):
+        if not r:
             continue
 
+        rows.append({
+
+            "枠": lane,
+
+            "選手名": r.get(
+                "name",
+                "不明"
+            ),
+
+            "選手番号": str(
+                r.get(
+                    "number",
+                    ""
+                )
+            ),
+
+            "級別": r.get(
+                "rank_number",
+                ""
+            ),
+
+            "全国勝率": num(
+                r.get(
+                    "national_win_rate"
+                )
+            ),
+
+            "全国2連率": num(
+                r.get(
+                    "national_top_2_percent"
+                )
+            ),
+
+            "当地勝率": num(
+                r.get(
+                    "local_win_rate"
+                )
+            ),
+
+            "モーター2連率": num(
+                r.get(
+                    "motor_top_2_percent"
+                )
+            ),
+
+            "平均ST": num(
+                r.get(
+                    "average_start_timing"
+                )
+            ),
+
+            "展示タイム": num(
+                p.get(
+                    "exhibition_time"
+                )
+            )
+        })
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+# =========================================================
+# 過去日
+# =========================================================
+
+def past_dates(
+    target_date,
+    days
+):
+
+    result = []
+
+    for i in range(
+        1,
+        days + 1
+    ):
+
+        d = target_date - timedelta(
+            days=i
+        )
+
+        if d < date(2026, 1, 1):
+            break
+
+        result.append(d)
+
+    return result
+
+
+# =========================================================
+# 選手×コース
+# =========================================================
+
+@st.cache_data(ttl=900)
+def build_player_course_stats(
+    target_date,
+    days=90
+):
+
+    stats = defaultdict(
+        lambda: {
+            "出走": 0,
+            "1着": 0,
+            "2着": 0,
+            "3着": 0
+        }
+    )
+
+    for d in past_dates(
+        target_date,
+        days
+    ):
+
         try:
-            data = get_data(d)
+            data = get_result_data(d)
+
         except:
             continue
 
-        stadiums = data.get(
-            "programs",
-            {}
-        ).get(
-            "stadiums",
-            {}
+        stadiums = get_result_stadiums(
+            data
         )
 
         for stadium in stadiums.values():
@@ -245,147 +525,425 @@ def get_technique_stats(target_date):
                     {}
                 )
 
-                if not racers:
-                    continue
-
                 for racer in racers.values():
 
-                    player_number = str(
+                    player = str(
                         racer.get(
                             "number",
                             ""
                         )
                     )
 
-                    technique = racer.get(
-                        "technique_number"
+                    course = safe_int(
+                        racer.get(
+                            "course_number"
+                        )
                     )
 
-                    if not player_number:
-                        continue
+                    place = safe_int(
+                        racer.get(
+                            "place_number"
+                        )
+                    )
 
-                    try:
-                        technique = int(technique)
-                    except:
-                        continue
-
-                    if technique < 1 or technique > 6:
+                    if (
+                        not player
+                        or course < 1
+                        or course > 6
+                    ):
                         continue
 
                     key = (
-                        player_number,
-                        technique
+                        player,
+                        course
                     )
 
-                    if key not in stats:
-                        stats[key] = 0
+                    stats[key][
+                        "出走"
+                    ] += 1
 
-                    stats[key] += 1
+                    if place == 1:
+                        stats[key]["1着"] += 1
 
-    return stats
+                    elif place == 2:
+                        stats[key]["2着"] += 1
+
+                    elif place == 3:
+                        stats[key]["3着"] += 1
+
+    return dict(stats)
 
 
-def make_table(race):
+# =========================================================
+# 会場×コース
+# =========================================================
 
-    racers = race.get(
-        "racers",
-        {}
+@st.cache_data(ttl=900)
+def build_stadium_course_stats(
+    target_date,
+    stadium_no,
+    days=90
+):
+
+    stats = defaultdict(
+        lambda: {
+            "出走": 0,
+            "1着": 0,
+            "2着": 0,
+            "3着": 0
+        }
     )
 
-    preview = race.get(
-        "preview",
-        {}
-    ).get(
-        "racers",
-        {}
-    )
+    for d in past_dates(
+        target_date,
+        days
+    ):
 
-    rows = []
+        try:
+            data = get_result_data(d)
 
-    for lane in range(1, 7):
-
-        r = racers.get(
-            str(lane),
-            {}
-        )
-
-        p = preview.get(
-            str(lane),
-            {}
-        )
-
-        if not r:
+        except:
             continue
 
-        rows.append({
-            "枠": lane,
-            "選手名": r.get(
-                "name",
-                "不明"
-            ),
-            "選手番号": str(
-                r.get(
-                    "number",
-                    ""
-                )
-            ),
-            "級別": r.get(
-                "rank_number",
-                ""
-            ),
-            "全国勝率": num(
-                r.get(
-                    "national_win_rate"
-                )
-            ),
-            "全国2連率": num(
-                r.get(
-                    "national_top_2_percent"
-                )
-            ),
-            "当地勝率": num(
-                r.get(
-                    "local_win_rate"
-                )
-            ),
-            "モーター2連率": num(
-                r.get(
-                    "motor_top_2_percent"
-                )
-            ),
-            "平均ST": num(
-                r.get(
-                    "average_start_timing"
-                )
-            ),
-            "展示タイム": num(
-                p.get(
-                    "exhibition_time"
-                )
+        stadiums = get_result_stadiums(
+            data
+        )
+
+        stadium = stadiums.get(
+            str(stadium_no)
+        )
+
+        if not stadium:
+            continue
+
+        races = stadium.get(
+            "races",
+            {}
+        )
+
+        for race in races.values():
+
+            result = race.get(
+                "result",
+                {}
             )
-        })
 
-    return pd.DataFrame(rows)
+            racers = result.get(
+                "racers",
+                {}
+            )
+
+            for racer in racers.values():
+
+                course = safe_int(
+                    racer.get(
+                        "course_number"
+                    )
+                )
+
+                place = safe_int(
+                    racer.get(
+                        "place_number"
+                    )
+                )
+
+                if course < 1 or course > 6:
+                    continue
+
+                stats[course][
+                    "出走"
+                ] += 1
+
+                if place == 1:
+                    stats[course]["1着"] += 1
+
+                elif place == 2:
+                    stats[course]["2着"] += 1
+
+                elif place == 3:
+                    stats[course]["3着"] += 1
+
+    return dict(stats)
 
 
-def add_course_stats(df, stats):
+# =========================================================
+# 会場×決まり手
+# =========================================================
 
-    rates = []
-    starts = []
+@st.cache_data(ttl=900)
+def build_stadium_technique_stats(
+    target_date,
+    stadium_no,
+    days=90
+):
+
+    stats = defaultdict(int)
+
+    for d in past_dates(
+        target_date,
+        days
+    ):
+
+        try:
+            data = get_result_data(d)
+
+        except:
+            continue
+
+        stadiums = get_result_stadiums(
+            data
+        )
+
+        stadium = stadiums.get(
+            str(stadium_no)
+        )
+
+        if not stadium:
+            continue
+
+        races = stadium.get(
+            "races",
+            {}
+        )
+
+        for race in races.values():
+
+            result = race.get(
+                "result",
+                {}
+            )
+
+            racers = result.get(
+                "racers",
+                {}
+            )
+
+            for racer in racers.values():
+
+                technique = safe_int(
+                    racer.get(
+                        "technique_number"
+                    )
+                )
+
+                if technique in TECHNIQUES:
+
+                    stats[
+                        TECHNIQUES[
+                            technique
+                        ]
+                    ] += 1
+
+    return dict(stats)
+
+
+# =========================================================
+# 決まり手×選手
+# =========================================================
+
+@st.cache_data(ttl=900)
+def build_player_technique_stats(
+    target_date,
+    days=90
+):
+
+    stats = defaultdict(int)
+
+    for d in past_dates(
+        target_date,
+        days
+    ):
+
+        try:
+            data = get_result_data(d)
+
+        except:
+            continue
+
+        stadiums = get_result_stadiums(
+            data
+        )
+
+        for stadium in stadiums.values():
+
+            for race in stadium.get(
+                "races",
+                {}
+            ).values():
+
+                racers = (
+                    race
+                    .get("result", {})
+                    .get("racers", {})
+                )
+
+                for racer in racers.values():
+
+                    player = str(
+                        racer.get(
+                            "number",
+                            ""
+                        )
+                    )
+
+                    technique = safe_int(
+                        racer.get(
+                            "technique_number"
+                        )
+                    )
+
+                    if (
+                        player
+                        and technique in TECHNIQUES
+                    ):
+
+                        stats[
+                            (
+                                player,
+                                technique
+                            )
+                        ] += 1
+
+    return dict(stats)
+
+
+# =========================================================
+# 天候×コース
+# =========================================================
+
+@st.cache_data(ttl=900)
+def build_weather_course_stats(
+    target_date,
+    stadium_no,
+    days=90
+):
+
+    stats = defaultdict(
+        lambda: {
+            "出走": 0,
+            "1着": 0
+        }
+    )
+
+    for d in past_dates(
+        target_date,
+        days
+    ):
+
+        try:
+            data = get_result_data(d)
+
+        except:
+            continue
+
+        stadiums = get_result_stadiums(
+            data
+        )
+
+        stadium = stadiums.get(
+            str(stadium_no)
+        )
+
+        if not stadium:
+            continue
+
+        for race in stadium.get(
+            "races",
+            {}
+        ).values():
+
+            weather = extract_weather(
+                race
+            )
+
+            wind = weather[
+                "風速"
+            ]
+
+            wave = weather[
+                "波高"
+            ]
+
+            # 風・波の条件をグループ化
+            if wind >= 5:
+                condition = "強風"
+
+            elif wind >= 3:
+                condition = "中風"
+
+            elif wind > 0:
+                condition = "弱風"
+
+            else:
+                condition = "無風"
+
+            if wave >= 5:
+                condition += "_高波"
+
+            elif wave >= 3:
+                condition += "_中波"
+
+            else:
+                condition += "_低波"
+
+            racers = (
+                race
+                .get("result", {})
+                .get("racers", {})
+            )
+
+            for racer in racers.values():
+
+                course = safe_int(
+                    racer.get(
+                        "course_number"
+                    )
+                )
+
+                place = safe_int(
+                    racer.get(
+                        "place_number"
+                    )
+                )
+
+                if course < 1 or course > 6:
+                    continue
+
+                key = (
+                    condition,
+                    course
+                )
+
+                stats[key][
+                    "出走"
+                ] += 1
+
+                if place == 1:
+                    stats[key][
+                        "1着"
+                    ] += 1
+
+    return dict(stats)
+
+
+# =========================================================
+# 統計追加
+# =========================================================
+
+def add_player_course(
+    df,
+    stats
+):
+
+    win_rates = []
+    second_rates = []
+    counts = []
 
     for _, row in df.iterrows():
 
-        player = str(
-            row["選手番号"]
-        )
-
-        course = int(
-            row["枠"]
-        )
-
         key = (
-            player,
-            course
+            str(row["選手番号"]),
+            int(row["枠"])
         )
 
         item = stats.get(
@@ -393,46 +951,157 @@ def add_course_stats(df, stats):
             {}
         )
 
-        start_count = item.get(
+        n = item.get(
             "出走",
             0
         )
 
-        win_count = item.get(
+        win = item.get(
             "1着",
             0
         )
 
-        if start_count > 0:
+        second = item.get(
+            "2着",
+            0
+        )
 
-            rate = (
-                win_count
-                / start_count
-                * 100
+        win_rate = (
+            win / n * 100
+            if n
+            else 0
+        )
+
+        second_rate = (
+            (win + second)
+            / n
+            * 100
+            if n
+            else 0
+        )
+
+        win_rates.append(
+            round(
+                win_rate,
+                1
             )
-
-        else:
-
-            rate = 0
-
-        rates.append(
-            round(rate, 1)
         )
 
-        starts.append(
-            start_count
+        second_rates.append(
+            round(
+                second_rate,
+                1
+            )
         )
 
-    df["コース1着率"] = rates
-    df["コース出走数"] = starts
+        counts.append(
+            n
+        )
+
+    df[
+        "選手コース1着率"
+    ] = win_rates
+
+    df[
+        "選手コース2連率"
+    ] = second_rates
+
+    df[
+        "選手コース出走数"
+    ] = counts
 
     return df
 
 
-def add_technique_stats(df, stats):
+def add_stadium_course(
+    df,
+    stats
+):
 
-    technique_names = []
-    technique_counts = []
+    win_rates = []
+    second_rates = []
+    counts = []
+
+    for _, row in df.iterrows():
+
+        item = stats.get(
+            int(row["枠"]),
+            {}
+        )
+
+        n = item.get(
+            "出走",
+            0
+        )
+
+        win = item.get(
+            "1着",
+            0
+        )
+
+        second = item.get(
+            "2着",
+            0
+        )
+
+        win_rate = (
+            win / n * 100
+            if n
+            else 0
+        )
+
+        second_rate = (
+            (win + second)
+            / n
+            * 100
+            if n
+            else 0
+        )
+
+        win_rates.append(
+            round(
+                win_rate,
+                1
+            )
+        )
+
+        second_rates.append(
+            round(
+                second_rate,
+                1
+            )
+        )
+
+        counts.append(
+            n
+        )
+
+    df[
+        "会場コース1着率"
+    ] = win_rates
+
+    df[
+        "会場コース2連率"
+    ] = second_rates
+
+    df[
+        "会場コース出走数"
+    ] = counts
+
+    return df
+
+
+# =========================================================
+# 得意決まり手
+# =========================================================
+
+def add_technique(
+    df,
+    stats
+):
+
+    names = []
+    counts = []
 
     for _, row in df.iterrows():
 
@@ -445,13 +1114,11 @@ def add_technique_stats(df, stats):
 
         for number, name in TECHNIQUES.items():
 
-            key = (
-                player,
-                number
-            )
-
             count = stats.get(
-                key,
+                (
+                    player,
+                    number
+                ),
                 0
             )
 
@@ -460,524 +1127,25 @@ def add_technique_stats(df, stats):
                 best_count = count
                 best_name = name
 
-        technique_names.append(
+        names.append(
             best_name
         )
 
-        technique_counts.append(
+        counts.append(
             best_count
         )
 
-    df["得意決まり手"] = technique_names
-    df["決まり手回数"] = technique_counts
+    df[
+        "得意決まり手"
+    ] = names
+
+    df[
+        "決まり手回数"
+    ] = counts
 
     return df
 
 
-def technique_bonus(row):
-
-    lane = int(
-        row["枠"]
-    )
-
-    technique = row[
-        "得意決まり手"
-    ]
-
-    bonus = 0
-
-    if lane == 1 and technique == "逃げ":
-        bonus = 8
-
-    elif lane == 2 and technique == "差し":
-        bonus = 8
-
-    elif lane == 3 and technique == "まくり":
-        bonus = 7
-
-    elif lane == 3 and technique == "まくり差し":
-        bonus = 7
-
-    elif lane == 4 and technique == "まくり":
-        bonus = 7
-
-    elif lane == 4 and technique == "まくり差し":
-        bonus = 7
-
-    elif lane == 5 and technique == "まくり差し":
-        bonus = 5
-
-    elif lane == 6 and technique == "まくり差し":
-        bonus = 4
-
-    return bonus
-
-
-def calculate_score(row):
-
-    s = 0
-
-    s += row["全国勝率"] * 10
-
-    s += row["全国2連率"] * 0.25
-
-    s += row["当地勝率"] * 5
-
-    s += row["モーター2連率"] * 0.12
-
-    st_time = row["平均ST"]
-
-    if st_time > 0:
-
-        if st_time <= 0.12:
-            s += 12
-
-        elif st_time <= 0.15:
-            s += 8
-
-        elif st_time <= 0.18:
-            s += 4
-
-        elif st_time >= 0.22:
-            s -= 4
-
-    lane = int(
-        row["枠"]
-    )
-
-    lane_bonus = {
-        1: 20,
-        2: 8,
-        3: 6,
-        4: 7,
-        5: 2,
-        6: 0
-    }
-
-    s += lane_bonus.get(
-        lane,
-        0
-    )
-
-    course_rate = row[
-        "コース1着率"
-    ]
-
-    if course_rate >= 50:
-        s += 12
-
-    elif course_rate >= 40:
-        s += 9
-
-    elif course_rate >= 30:
-        s += 6
-
-    elif course_rate >= 20:
-        s += 3
-
-    elif course_rate > 0:
-        s += 1
-
-    s += technique_bonus(row)
-
-    exhibition = row[
-        "展示タイム"
-    ]
-
-    if exhibition > 0:
-
-        if exhibition <= 6.70:
-            s += 6
-
-        elif exhibition <= 6.75:
-            s += 4
-
-        elif exhibition <= 6.80:
-            s += 2
-
-        elif exhibition >= 6.90:
-            s -= 2
-
-    return s
-
-
-st.title(
-    "🚤 やっちゃんの競艇AI予想 PRO"
-)
-
-
-st.write(
-    "全国24場対応の競艇予想支援アプリ"
-)
-
-
-st.warning(
-    "非公式APIを利用しています。"
-    "最新情報は必ず公式BOATRACEで確認してください。"
-)
-
-
-st.subheader(
-    "📅 レースを選択"
-)
-
-
-c1, c2, c3 = st.columns(3)
-
-
-with c1:
-
-    target_date = st.date_input(
-        "開催日",
-        value=date.today(),
-        min_value=date(2026, 1, 1)
-    )
-
-
-with c2:
-
-    stadium_name = st.selectbox(
-        "競艇場",
-        list(STADIUMS.values())
-    )
-
-
-with c3:
-
-    race_no = st.selectbox(
-        "レース",
-        list(range(1, 13)),
-        format_func=lambda x:
-        str(x) + "R"
-    )
-
-
-stadium_no = 1
-
-
-for n, name in STADIUMS.items():
-
-    if name == stadium_name:
-        stadium_no = n
-        break
-
-
-if st.button(
-    "🚀 AI予想を実行",
-    type="primary"
-):
-
-    try:
-
-        with st.spinner(
-            "🚤 レースデータ取得中..."
-        ):
-
-            data = get_data(
-                target_date
-            )
-
-    except Exception as e:
-
-        st.error(
-            "データ取得に失敗しました"
-        )
-
-        st.code(
-            str(e)
-        )
-
-        st.stop()
-
-
-    race = get_race(
-        data,
-        stadium_no,
-        race_no
-    )
-
-
-    if race is None:
-
-        st.error(
-            "このレースのデータがありません"
-        )
-
-        st.stop()
-
-
-    df = make_table(
-        race
-    )
-
-
-    if df.empty:
-
-        st.error(
-            "出走表がありません"
-        )
-
-        st.stop()
-
-
-    with st.spinner(
-        "📊 過去14日分を分析中..."
-    ):
-
-        course_stats = get_course_stats(
-            target_date
-        )
-
-        technique_stats = get_technique_stats(
-            target_date
-        )
-
-
-    df = add_course_stats(
-        df,
-        course_stats
-    )
-
-
-    df = add_technique_stats(
-        df,
-        technique_stats
-    )
-
-
-    df["決まり手補正"] = df.apply(
-        technique_bonus,
-        axis=1
-    )
-
-
-    df["AIスコア"] = df.apply(
-        calculate_score,
-        axis=1
-    )
-
-
-    maximum = df[
-        "AIスコア"
-    ].max()
-
-
-    if maximum > 0:
-
-        df["AI1着評価"] = (
-            df["AIスコア"]
-            / maximum
-            * 100
-        ).round(1)
-
-    else:
-
-        df["AI1着評価"] = 0
-
-
-    df = df.sort_values(
-        "AI1着評価",
-        ascending=False
-    )
-
-
-    df = df.reset_index(
-        drop=True
-    )
-
-
-    st.subheader(
-        stadium_name
-        + " "
-        + str(race_no)
-        + "R"
-    )
-
-
-    st.subheader(
-        "📋 AI評価"
-    )
-
-
-    columns = [
-        "枠",
-        "選手名",
-        "級別",
-        "全国勝率",
-        "当地勝率",
-        "モーター2連率",
-        "平均ST",
-        "展示タイム",
-        "コース1着率",
-        "コース出走数",
-        "得意決まり手",
-        "決まり手回数",
-        "決まり手補正",
-        "AI1着評価"
-    ]
-
-
-    st.dataframe(
-        df[columns],
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-    st.subheader(
-        "🏆 AI注目選手"
-    )
-
-
-    top = df.iloc[0]
-
-
-    st.success(
-        "本命 "
-        + str(int(top["枠"]))
-        + "号艇 "
-        + str(top["選手名"])
-        + "　コース1着率 "
-        + str(top["コース1着率"])
-        + "%"
-        + "　得意決まり手 "
-        + str(top["得意決まり手"])
-        + "　AI評価 "
-        + str(top["AI1着評価"])
-    )
-
-
-    if len(df) >= 2:
-
-        second = df.iloc[1]
-
-        st.info(
-            "対抗 "
-            + str(int(second["枠"]))
-            + "号艇 "
-            + str(second["選手名"])
-            + "　得意決まり手 "
-            + str(second["得意決まり手"])
-        )
-
-
-    if len(df) >= 3:
-
-        third = df.iloc[2]
-
-        st.info(
-            "穴 "
-            + str(int(third["枠"]))
-            + "号艇 "
-            + str(third["選手名"])
-            + "　得意決まり手 "
-            + str(third["得意決まり手"])
-        )
-
-
-    if len(df) >= 3:
-
-        a = int(
-            df.iloc[0]["枠"]
-        )
-
-        b = int(
-            df.iloc[1]["枠"]
-        )
-
-        c = int(
-            df.iloc[2]["枠"]
-        )
-
-
-        st.subheader(
-            "🎯 推奨3連単"
-        )
-
-
-        st.write(
-            "本線 "
-            + str(a)
-            + "-"
-            + str(b)
-            + "-"
-            + str(c)
-        )
-
-
-        st.write(
-            "押さえ "
-            + str(a)
-            + "-"
-            + str(c)
-            + "-"
-            + str(b)
-        )
-
-
-        st.write(
-            "穴 "
-            + str(b)
-            + "-"
-            + str(a)
-            + "-"
-            + str(c)
-        )
-
-
-    st.subheader(
-        "🧠 AI分析項目"
-    )
-
-
-    st.write(
-        "・全国勝率"
-    )
-
-    st.write(
-        "・全国2連率"
-    )
-
-    st.write(
-        "・当地勝率"
-    )
-
-    st.write(
-        "・モーター2連率"
-    )
-
-    st.write(
-        "・平均ST"
-    )
-
-    st.write(
-        "・展示タイム"
-    )
-
-    st.write(
-        "・選手別コース1着率"
-    )
-
-    st.write(
-        "・選手別決まり手傾向"
-    )
-
-    st.write(
-        "・過去14日間のデータ"
-    )
-
-
-    st.divider()
-
-
-    st.caption(
-        "AI評価は独自計算による予想値です。"
-        "的中や利益を保証するものではありません。"
-    )
-
-
-else:
-
-    st.info(
-        "競艇場とレースを選んでください"
-)
+# =========================================================
+# 天候補正
+# =======================================

@@ -5,7 +5,6 @@ import numpy as np
 from datetime import datetime, timedelta
 from itertools import permutations
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, log_loss
 
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想 PRO",
@@ -15,759 +14,752 @@ st.set_page_config(
 
 API = "https://boatraceopenapi.github.io/api/v1"
 
-# 競艇場
 STADIUMS = {
-    "01": "桐生",
-    "02": "戸田",
-    "03": "江戸川",
-    "04": "平和島",
-    "05": "多摩川",
-    "06": "浜名湖",
-    "07": "蒲郡",
-    "08": "常滑",
-    "09": "津",
-    "10": "三国",
-    "11": "びわこ",
-    "12": "住之江",
-    "13": "尼崎",
-    "14": "鳴門",
-    "15": "丸亀",
-    "16": "児島",
-    "17": "宮島",
-    "18": "徳山",
-    "19": "下関",
-    "20": "若松",
-    "21": "芦屋",
-    "22": "福岡",
-    "23": "唐津",
-    "24": "大村"
+    "01":"桐生","02":"戸田","03":"江戸川","04":"平和島",
+    "05":"多摩川","06":"浜名湖","07":"蒲郡","08":"常滑",
+    "09":"津","10":"三国","11":"びわこ","12":"住之江",
+    "13":"尼崎","14":"鳴門","15":"丸亀","16":"児島",
+    "17":"宮島","18":"徳山","19":"下関","20":"若松",
+    "21":"芦屋","22":"福岡","23":"唐津","24":"大村"
 }
 
-NAME_TO_NO = {v: k for k, v in STADIUMS.items()}
+NAME_TO_NO = {v:k for k,v in STADIUMS.items()}
+
 
 # =========================
-# API
+# API取得
 # =========================
 
 @st.cache_data(ttl=300)
-def get_day(date):
-    url = f"{API}/{date:%Y/%Y%m%d}.json"
+def get_day(day):
+    url = f"{API}/{day:%Y/%Y%m%d}.json"
     try:
         r = requests.get(url, timeout=20)
         if r.status_code != 200:
             return None
         return r.json()
-    except Exception:
+    except:
         return None
 
 
-def get_stadiums(day):
-    if not day:
-        return {}
+# =========================
+# 開催会場
+# =========================
 
-    try:
-        stadiums = day["programs"]["stadiums"]
-    except Exception:
-        return {}
-
+def get_holding(day):
     result = {}
+    stadiums = day.get("programs", {}).get("stadiums", {})
 
-    for no, data in stadiums.items():
-        if not data:
-            continue
+    for no, stadium in stadiums.items():
+        races = stadium.get("races", {})
+        nums = []
 
-        races = data.get("races", {})
-        if not races:
-            continue
-
-        valid_races = []
-
-        for race_no, race in races.items():
+        for race_no in races:
             try:
-                racers = race.get("racers", {})
-                if len(racers) >= 6:
-                    valid_races.append(int(race_no))
-            except Exception:
+                nums.append(int(race_no))
+            except:
                 pass
 
-        if valid_races:
-            result[str(no).zfill(2)] = sorted(valid_races)
+        if nums:
+            result[str(no).zfill(2)] = sorted(nums)
 
     return result
 
 
 # =========================
-# 現在レースのデータ
+# レース取得
+# =========================
+
+def get_race(day, stadium_no, race_no):
+    stadiums = day.get("programs", {}).get("stadiums", {})
+
+    stadium = None
+
+    for k, v in stadiums.items():
+        if str(k).zfill(2) == str(stadium_no).zfill(2):
+            stadium = v
+            break
+
+    if stadium is None:
+        return None
+
+    races = stadium.get("races", {})
+
+    for k, v in races.items():
+        try:
+            if int(k) == int(race_no):
+                return v
+        except:
+            pass
+
+    return None
+
+
+# =========================
+# 6艇データ作成
 # =========================
 
 def make_race_df(day, stadium_no, race_no):
-    try:
-        race = (
-            day["programs"]
-            ["stadiums"][str(stadium_no)]
-            ["races"][str(race_no)]
-        )
-    except Exception:
+    race = get_race(day, stadium_no, race_no)
+
+    if not race:
         return None
 
     racers = race.get("racers", {})
-    preview = race.get("preview", {})
-    preview_racers = preview.get("racers", {})
+    preview = race.get("preview", {}).get("racers", {})
 
     rows = []
 
-    for boat_no in range(1, 7):
-        r = racers.get(str(boat_no), {})
-        p = preview_racers.get(str(boat_no), {})
-
-        if not r:
+    for k, r in sorted(
+        racers.items(),
+        key=lambda x: int(x[0])
+    ):
+        try:
+            boat = int(k)
+        except:
             continue
 
+        p = preview.get(str(k), preview.get(boat, {}))
+
         rows.append({
-            "枠": boat_no,
-            "選手名": r.get("name", ""),
-            "全国勝率": float(r.get("national_win_rate", 0) or 0),
-            "全国2連率": float(r.get("national_top_2_percent", 0) or 0),
-            "当地勝率": float(r.get("local_win_rate", 0) or 0),
-            "当地2連率": float(r.get("local_top_2_percent", 0) or 0),
-            "モーター2連率": float(r.get("motor_top_2_percent", 0) or 0),
-            "ボート2連率": float(r.get("boat_top_2_percent", 0) or 0),
-            "平均ST": float(r.get("average_start_timing", 0) or 0),
-            "展示": float(p.get("exhibition_time", 0) or 0),
-            "コース": int(p.get("course_number", boat_no) or boat_no),
+            "stadium": int(stadium_no),
+            "boat": boat,
+            "name": r.get("name", ""),
+            "national_win": r.get("national_win_rate", 0),
+            "national_top2": r.get("national_top_2_percent", 0),
+            "national_top3": r.get("national_top_3_percent", 0),
+            "local_win": r.get("local_win_rate", 0),
+            "local_top2": r.get("local_top_2_percent", 0),
+            "local_top3": r.get("local_top_3_percent", 0),
+            "motor_top2": r.get("motor_top_2_percent", 0),
+            "motor_top3": r.get("motor_top_3_percent", 0),
+            "boat_top2": r.get("boat_top_2_percent", 0),
+            "boat_top3": r.get("boat_top_3_percent", 0),
+            "avg_st": r.get("average_start_timing", 0),
+            "course": p.get("course_number", boat),
+            "st": p.get("start_timing", 0),
+            "exhibition": p.get("exhibition_time", 0)
         })
 
-    if len(rows) != 6:
+    if len(rows) < 6:
         return None
 
-    df = pd.DataFrame(rows)
-
-    df["ST順位"] = df["平均ST"].rank(method="min")
-    df["展示順位"] = df["展示"].replace(0, np.nan).rank(method="min")
-
-    for c in [
-        "全国勝率",
-        "全国2連率",
-        "当地勝率",
-        "モーター2連率",
-        "ST順位",
-        "展示順位"
-    ]:
-        df[c] = df[c].fillna(df[c].median())
-
-    return df
+    return pd.DataFrame(rows[:6])
 
 
 # =========================
-# 学習用
+# 過去データ
 # =========================
 
 @st.cache_data(ttl=3600)
-def history(days=14):
-
-    all_rows = []
-
-    today = datetime.now().date()
+def make_history(end_day, days=14):
+    rows = []
 
     for i in range(days):
-        d = today - timedelta(days=i + 1)
-        day = get_day(d)
+        d = end_day - timedelta(days=i)
+        data = get_day(d)
 
-        if not day:
+        if not data:
             continue
 
-        try:
-            stadiums = day["programs"]["stadiums"]
-        except Exception:
-            continue
+        stadiums = data.get(
+            "programs", {}
+        ).get("stadiums", {})
 
-        for stadium_no, stadium_data in stadiums.items():
-
-            if not stadium_data:
-                continue
-
-            races = stadium_data.get("races", {})
+        for stadium_no, stadium in stadiums.items():
+            races = stadium.get("races", {})
 
             for race_no, race in races.items():
+                racers = race.get("racers", {})
+                result = race.get("result", {})
+                result_racers = result.get("racers", {})
+                preview = race.get("preview", {}).get("racers", {})
 
-                try:
-                    racers = race.get("racers", {})
-                    result = race.get("result", {})
-                    result_racers = result.get("racers", {})
-
-                    if len(racers) != 6:
-                        continue
-
-                    if len(result_racers) != 6:
-                        continue
-
-                    preview = race.get("preview", {})
-                    preview_racers = preview.get("racers", {})
-
-                    places = []
-
-                    for boat_no in range(1, 7):
-
-                        r = racers.get(str(boat_no), {})
-                        p = preview_racers.get(str(boat_no), {})
-                        rr = result_racers.get(str(boat_no), {})
-
-                        place = rr.get("place_number")
-
-                        if place is None:
-                            continue
-
-                        try:
-                            place = int(place)
-                        except Exception:
-                            continue
-
-                        places.append(place)
-
-                        all_rows.append({
-                            "枠": boat_no,
-                            "選手名": r.get("name", ""),
-                            "全国勝率": float(r.get("national_win_rate", 0) or 0),
-                            "全国2連率": float(r.get("national_top_2_percent", 0) or 0),
-                            "当地勝率": float(r.get("local_win_rate", 0) or 0),
-                            "当地2連率": float(r.get("local_top_2_percent", 0) or 0),
-                            "モーター2連率": float(r.get("motor_top_2_percent", 0) or 0),
-                            "ボート2連率": float(r.get("boat_top_2_percent", 0) or 0),
-                            "平均ST": float(r.get("average_start_timing", 0) or 0),
-                            "展示": float(p.get("exhibition_time", 0) or 0),
-                            "着順": place,
-                            "会場": int(stadium_no),
-                            "日付": d,
-                            "1着": 1 if place == 1 else 0,
-                            "2着": 1 if place == 2 else 0,
-                            "3着": 1 if place == 3 else 0,
-                        })
-
-                    if sorted(places) != [1, 2, 3, 4, 5, 6]:
-                        # 不完全な結果を除外
-                        continue
-
-                except Exception:
+                if not racers:
                     continue
 
-    if not all_rows:
-        return pd.DataFrame()
+                for k, r in racers.items():
+                    try:
+                        boat = int(k)
+                    except:
+                        continue
 
-    return pd.DataFrame(all_rows)
+                    rr = result_racers.get(
+                        str(k),
+                        result_racers.get(boat, {})
+                    )
+
+                    try:
+                        place = int(
+                            rr.get("place_number", 99)
+                        )
+                    except:
+                        place = 99
+
+                    p = preview.get(
+                        str(k),
+                        preview.get(boat, {})
+                    )
+
+                    rows.append({
+                        "date": d,
+                        "stadium": int(stadium_no),
+                        "race": int(race_no),
+                        "boat": boat,
+                        "national_win": r.get(
+                            "national_win_rate", 0
+                        ),
+                        "national_top2": r.get(
+                            "national_top_2_percent", 0
+                        ),
+                        "national_top3": r.get(
+                            "national_top_3_percent", 0
+                        ),
+                        "local_win": r.get(
+                            "local_win_rate", 0
+                        ),
+                        "local_top2": r.get(
+                            "local_top_2_percent", 0
+                        ),
+                        "local_top3": r.get(
+                            "local_top_3_percent", 0
+                        ),
+                        "motor_top2": r.get(
+                            "motor_top_2_percent", 0
+                        ),
+                        "motor_top3": r.get(
+                            "motor_top_3_percent", 0
+                        ),
+                        "boat_top2": r.get(
+                            "boat_top_2_percent", 0
+                        ),
+                        "boat_top3": r.get(
+                            "boat_top_3_percent", 0
+                        ),
+                        "avg_st": r.get(
+                            "average_start_timing", 0
+                        ),
+                        "course": p.get(
+                            "course_number", boat
+                        ),
+                        "st": p.get(
+                            "start_timing", 0
+                        ),
+                        "exhibition": p.get(
+                            "exhibition_time", 0
+                        ),
+                        "place": place
+                    })
+
+    return pd.DataFrame(rows)
 
 
 # =========================
-# 特徴量
+# AI特徴量
 # =========================
 
-BASE = [
-    "枠",
-    "全国勝率",
-    "全国2連率",
-    "当地勝率",
-    "当地2連率",
-    "モーター2連率",
-    "ボート2連率",
-    "平均ST",
-    "展示",
-    "ST順位",
-    "展示順位",
-    "全国勝率差",
-    "全国2連率差",
-    "当地勝率差",
-    "モーター2連率差",
-    "ST差",
-    "展示差",
-    "会場",
-    "コース力",
-    "選手コース力"
+FEATURES = [
+    "stadium",
+    "boat",
+    "course",
+    "national_win",
+    "national_top2",
+    "national_top3",
+    "local_win",
+    "local_top2",
+    "local_top3",
+    "motor_top2",
+    "motor_top3",
+    "boat_top2",
+    "boat_top3",
+    "avg_st",
+    "st",
+    "exhibition"
 ]
 
 
-def make_features(df, full_df=None):
+def make_x(df):
+    x = df[FEATURES].copy()
 
-    x = df.copy()
+    x = x.replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
 
-    x["ST順位"] = x["平均ST"].rank(method="min")
-    x["展示順位"] = x["展示"].replace(0, np.nan).rank(method="min")
-
-    x["全国勝率差"] = x["全国勝率"] - x["全国勝率"].mean()
-    x["全国2連率差"] = x["全国2連率"] - x["全国2連率"].mean()
-    x["当地勝率差"] = x["当地勝率"] - x["当地勝率"].mean()
-    x["モーター2連率差"] = x["モーター2連率"] - x["モーター2連率"].mean()
-
-    x["ST差"] = x["平均ST"] - x["平均ST"].mean()
-    x["展示差"] = x["展示"] - x["展示"].replace(0, np.nan).mean()
-
-    # 枠そのもののコース力
-    course_rate = {
-        1: 0.58,
-        2: 0.16,
-        3: 0.12,
-        4: 0.08,
-        5: 0.04,
-        6: 0.02
-    }
-
-    x["コース力"] = x["枠"].map(course_rate).fillna(0)
-
-    # 過去データから会場×枠の強さ
-    x["選手コース力"] = 0.0
-
-    if full_df is not None and len(full_df) > 0:
-
-        tmp = full_df.copy()
-
-        # 会場×枠
-        venue_course = (
-            tmp.groupby(["会場", "枠"])["1着"]
-            .mean()
-            .to_dict()
-        )
-
-        for idx in x.index:
-            key = (
-                int(x.loc[idx, "会場"]),
-                int(x.loc[idx, "枠"])
-            )
-            x.loc[idx, "コース力"] = venue_course.get(
-                key,
-                course_rate.get(int(x.loc[idx, "枠"]), 0)
-            )
-
-        # 選手×枠
-        player_course = (
-            tmp.groupby(["選手名", "枠"])["1着"]
-            .mean()
-            .to_dict()
-        )
-
-        for idx in x.index:
-            key = (
-                x.loc[idx, "選手名"],
-                int(x.loc[idx, "枠"])
-            )
-            x.loc[idx, "選手コース力"] = player_course.get(key, 0.0)
-
-    return x[BASE].fillna(0)
+    return x.fillna(0)
 
 
 # =========================
 # AI学習
 # =========================
 
-def train_ai(df):
+def train_ai(history):
+    if history.empty:
+        return None
 
-    x = make_features(df, df)
+    history = history[
+        history["place"].between(1, 6)
+    ].copy()
 
-    m1 = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=12,
-        min_samples_leaf=3,
-        random_state=42,
-        n_jobs=-1
-    )
+    models = {}
 
-    m2 = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=12,
-        min_samples_leaf=3,
-        random_state=43,
-        n_jobs=-1
-    )
+    for target in [1, 2, 3]:
+        y = (
+            history["place"] == target
+        ).astype(int)
 
-    m3 = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=12,
-        min_samples_leaf=3,
-        random_state=44,
-        n_jobs=-1
-    )
+        model = RandomForestClassifier(
+            n_estimators=250,
+            max_depth=10,
+            min_samples_leaf=3,
+            random_state=42,
+            n_jobs=-1,
+            class_weight="balanced"
+        )
 
-    m1.fit(x, df["1着"])
-    m2.fit(x, df["2着"])
-    m3.fit(x, df["3着"])
+        model.fit(make_x(history), y)
+        models[target] = model
 
-    return m1, m2, m3
+    return models
 
 
 # =========================
-# 検証
+# 未知データ検証
 # =========================
 
-def validate(df):
+def validate(history):
+    if history.empty:
+        return None
 
-    dates = sorted(df["日付"].unique())
+    dates = sorted(history["date"].unique())
 
     if len(dates) < 5:
         return None
 
     test_dates = dates[-3:]
 
-    train_df = df[~df["日付"].isin(test_dates)].copy()
-    test_df = df[df["日付"].isin(test_dates)].copy()
+    train = history[
+        ~history["date"].isin(test_dates)
+    ]
 
-    if len(train_df) == 0 or len(test_df) == 0:
+    test = history[
+        history["date"].isin(test_dates)
+    ]
+
+    models = train_ai(train)
+
+    if models is None:
         return None
 
-    x_train = make_features(train_df, train_df)
-    x_test = make_features(test_df, train_df)
+    x = make_x(test)
 
-    model = RandomForestClassifier(
-        n_estimators=80,
-        max_depth=12,
-        min_samples_leaf=3,
-        random_state=99,
-        n_jobs=-1
+    p = models[1].predict_proba(x)[:, 1]
+
+    temp = test.copy()
+    temp["prob"] = p
+
+    top = (
+        temp
+        .sort_values(
+            ["date","stadium","race","prob"],
+            ascending=[True,True,True,False]
+        )
+        .groupby(
+            ["date","stadium","race"]
+        )
+        .first()
+        .reset_index()
     )
 
-    model.fit(x_train, train_df["1着"])
+    accuracy = (
+        top["place"] == 1
+    ).mean()
 
-    pred = model.predict(x_test)
-    proba = model.predict_proba(x_test)[:, 1]
+    eps = 1e-7
 
-    acc = accuracy_score(test_df["1着"], pred)
+    y = (
+        test["place"] == 1
+    ).astype(int)
 
-    try:
-        ll = log_loss(test_df["1着"], proba)
-    except Exception:
-        ll = 0
+    logloss = -np.mean(
+        y * np.log(p + eps)
+        + (1-y) * np.log(1-p + eps)
+    )
 
-    return acc, ll, len(test_dates)
+    return accuracy, logloss, len(test_dates)
+
+
+# =========================
+# レース予想
+# =========================
+
+def predict_race(df, models):
+    x = make_x(df)
+
+    result = df.copy()
+
+    result["p1"] = models[1].predict_proba(x)[:, 1]
+    result["p2"] = models[2].predict_proba(x)[:, 1]
+    result["p3"] = models[3].predict_proba(x)[:, 1]
+
+    result["score"] = (
+        result["p1"] * 0.5
+        + result["p2"] * 0.3
+        + result["p3"] * 0.2
+    )
+
+    ranking = (
+        result
+        .sort_values(
+            "score",
+            ascending=False
+        )
+        .reset_index(drop=True)
+    )
+
+    combos = []
+
+    for a, b, c in permutations(
+        ranking["boat"].tolist(),
+        3
+    ):
+        ra = result[
+            result.boat == a
+        ].iloc[0]
+
+        rb = result[
+            result.boat == b
+        ].iloc[0]
+
+        rc = result[
+            result.boat == c
+        ].iloc[0]
+
+        score = (
+            ra["p1"]
+            * rb["p2"]
+            * rc["p3"]
+        )
+
+        combos.append(
+            (f"{a}-{b}-{c}", score)
+        )
+
+    combos.sort(
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    return ranking, combos
 
 
 # =========================
 # 画面
 # =========================
 
-st.title("🚤 やっちゃんの競艇AI予想 PRO")
+st.title(
+    "🚤 やっちゃんの競艇AI予想 PRO"
+)
 
-# セッション
-if "models" not in st.session_state:
-    st.session_state.models = None
+st.caption(
+    "24場対応・当日全レース対応・強化AI"
+)
 
-if "learned_df" not in st.session_state:
-    st.session_state.learned_df = None
 
-if "selected_day" not in st.session_state:
-    st.session_state.selected_day = None
-
-# -------------------------
+# =========================
 # 日付
-# -------------------------
-
-st.sidebar.header("🏟️ レース選択")
+# =========================
 
 selected_date = st.sidebar.date_input(
     "📅 日付",
     datetime.now().date()
 )
 
-# -------------------------
-# その日の開催場を取得
-# -------------------------
-
 day = get_day(selected_date)
 
-holding = get_stadiums(day)
-
-if not holding:
-    st.error("⚠️ この日の開催データを取得できませんでした。")
+if not day:
+    st.error(
+        "⚠️ この日のデータを取得できませんでした"
+    )
     st.stop()
 
-stadium_names = [
-    f"{STADIUMS[no]}（{len(races)}R開催）"
-    for no, races in holding.items()
-]
 
-selected_stadium_label = st.sidebar.selectbox(
-    "🏟️ 競艇場",
-    stadium_names
+# =========================
+# 開催会場
+# =========================
+
+holding = get_holding(day)
+
+if not holding:
+    st.warning(
+        "⚠️ この日の開催会場が見つかりません"
+    )
+    st.stop()
+
+st.sidebar.markdown(
+    f"### 📡 {len(holding)}会場開催"
 )
 
-selected_stadium_name = selected_stadium_label.split("（")[0]
-selected_stadium_no = NAME_TO_NO[selected_stadium_name]
+stadium_options = list(holding.keys())
 
-# -------------------------
-# その会場の開催レースだけ表示
-# -------------------------
+stadium_no = st.sidebar.selectbox(
+    "🏟️ 競艇場",
+    stadium_options,
+    format_func=lambda x:
+        f"{STADIUMS.get(x,x)}（{len(holding[x])}R）"
+)
 
-available_races = holding[selected_stadium_no]
 
-selected_race = st.sidebar.selectbox(
+# =========================
+# レース
+# =========================
+
+race_no = st.sidebar.selectbox(
     "🏁 レース",
-    available_races,
-    format_func=lambda x: f"{x}R"
+    holding[stadium_no],
+    format_func=lambda x:
+        f"{x}R"
+)
+
+stadium_name = STADIUMS.get(
+    stadium_no,
+    stadium_no
 )
 
 st.sidebar.success(
-    f"選択中：{selected_stadium_name} {selected_race}R"
+    f"選択中：{stadium_name} {race_no}R"
 )
 
-st.sidebar.caption(
-    f"📡 当日開催：{len(holding)}会場"
+
+# =========================
+# レースデータ
+# =========================
+
+race_df = make_race_df(
+    day,
+    stadium_no,
+    race_no
 )
 
-# -------------------------
-# 学習
-# -------------------------
+if race_df is None:
+    st.error(
+        "⚠️ このレースの6艇データを取得できませんでした"
+    )
+    st.stop()
 
-st.subheader("🧠 AI学習")
 
-if st.button(
-    "🧠 AIを学習・実戦検証する",
+st.subheader(
+    f"🏁 {stadium_name} {race_no}R"
+)
+
+display_df = race_df[
+    [
+        "boat",
+        "name",
+        "course",
+        "st",
+        "exhibition",
+        "national_win",
+        "national_top2",
+        "local_win",
+        "motor_top2"
+    ]
+].copy()
+
+display_df.columns = [
+    "艇",
+    "選手",
+    "コース",
+    "ST",
+    "展示",
+    "全国勝率",
+    "全国2連率",
+    "当地勝率",
+    "モーター2連率"
+]
+
+st.dataframe(
+    display_df,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =========================
+# セッション
+# =========================
+
+if "models" not in st.session_state:
+    st.session_state.models = None
+
+if "history" not in st.session_state:
+    st.session_state.history = None
+
+
+# =========================
+# AI学習
+# =========================
+
+if st.sidebar.button(
+    "🧠 AIを学習する",
     use_container_width=True
 ):
 
-    with st.spinner("📡 過去データを取得・AIを学習中です…"):
+    with st.spinner(
+        "過去14日分を学習中..."
+    ):
+        history = make_history(
+            selected_date,
+            14
+        )
 
-        df = history(14)
+        models = train_ai(history)
 
-        if df.empty:
-            st.error("学習データを取得できませんでした。")
-            st.stop()
+        st.session_state.history = history
+        st.session_state.models = models
 
-        st.session_state.learned_df = df
+    if models is not None:
 
-        result = validate(df)
+        races = history[
+            ["date","stadium","race"]
+        ].drop_duplicates()
 
-        m1, m2, m3 = train_ai(df)
+        st.success(
+            f"🎉 AI学習完了！ "
+            f"{history['date'].nunique()}日・"
+            f"{len(races)}R・"
+            f"{len(history)}行"
+        )
 
-        st.session_state.models = (m1, m2, m3)
+    else:
+        st.error("AI学習に失敗しました")
 
-    st.success(
-        f"🎉 強化AI学習完了！ "
-        f"{df['日付'].nunique()}日・"
-        f"{len(df)//6}R・"
-        f"{len(df)}行"
+
+# =========================
+# 検証
+# =========================
+
+if st.session_state.history is not None:
+
+    val = validate(
+        st.session_state.history
     )
 
-    if result:
-        acc, ll, days = result
+    if val:
 
-        st.subheader("🧪 未知データでの実戦検証")
+        accuracy, logloss, days = val
+
+        st.subheader(
+            "🧪 未知データでの実戦検証"
+        )
 
         c1, c2, c3 = st.columns(3)
 
-        c1.metric("検証期間", f"{days}日")
-        c2.metric("1着判定精度", f"{acc*100:.1f}%")
-        c3.metric("LogLoss", f"{ll:.3f}")
-
-        st.caption(
-            "直近3日を学習から完全に除外して検証しています。"
+        c1.metric(
+            "検証期間",
+            f"{days}日"
         )
 
-# -------------------------
-# 学習状況
-# -------------------------
+        c2.metric(
+            "1着判定精度",
+            f"{accuracy*100:.1f}%"
+        )
 
-if st.session_state.learned_df is not None:
+        c3.metric(
+            "LogLoss",
+            f"{logloss:.3f}"
+        )
 
-    df = st.session_state.learned_df
 
-    st.subheader("📊 AI学習状況")
+# =========================
+# AI予想
+# =========================
 
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "学習日数",
-        f"{df['日付'].nunique()}日"
-    )
-
-    c2.metric(
-        "学習レース",
-        f"{len(df)//6}R"
-    )
-
-    c3.metric(
-        "学習データ",
-        f"{len(df):,}行"
-    )
-
-# -------------------------
-# レース予想
-# -------------------------
-
-st.divider()
-
-st.header(
-    f"🏁 {selected_stadium_name} {selected_race}R"
-)
-
-if st.button(
-    "🚀 結果検索・AI予想",
+if st.sidebar.button(
+    "🚤 このレースをAI予想",
     use_container_width=True
 ):
 
     if st.session_state.models is None:
+
         st.warning(
-            "⚠️ 先に「🧠 AIを学習・実戦検証する」を押してください。"
-        )
-        st.stop()
-
-    race_df = make_race_df(
-        day,
-        selected_stadium_no,
-        selected_race
-    )
-
-    if race_df is None:
-        st.error(
-            "⚠️ このレースの6艇データを取得できませんでした。"
-        )
-        st.stop()
-
-    models = st.session_state.models
-
-    # 会場番号
-    race_df["会場"] = int(selected_stadium_no)
-
-    x = make_features(
-        race_df,
-        st.session_state.learned_df
-    )
-
-    p1 = models[0].predict_proba(x)[:, 1]
-    p2 = models[1].predict_proba(x)[:, 1]
-    p3 = models[2].predict_proba(x)[:, 1]
-
-    # 各順位内で正規化
-    p1 = p1 / p1.sum()
-    p2 = p2 / p2.sum()
-    p3 = p3 / p3.sum()
-
-    race_df["1着確率"] = p1
-    race_df["2着確率"] = p2
-    race_df["3着確率"] = p3
-
-    st.subheader("🥇🥈🥉 AI順位予想")
-
-    display_df = race_df[
-        [
-            "枠",
-            "選手名",
-            "全国勝率",
-            "当地勝率",
-            "モーター2連率",
-            "展示",
-            "1着確率",
-            "2着確率",
-            "3着確率"
-        ]
-    ].copy()
-
-    display_df = display_df.sort_values(
-        "1着確率",
-        ascending=False
-    )
-
-    for c in ["1着確率", "2着確率", "3着確率"]:
-        display_df[c] = (
-            display_df[c] * 100
-        ).round(1).astype(str) + "%"
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # -------------------------
-    # 3連単120通り
-    # -------------------------
-
-    boats = list(range(1, 7))
-
-    rankings = []
-
-    for a, b, c in permutations(boats, 3):
-
-        pa = race_df.loc[
-            race_df["枠"] == a,
-            "1着確率"
-        ].iloc[0]
-
-        pb = race_df.loc[
-            race_df["枠"] == b,
-            "2着確率"
-        ].iloc[0]
-
-        pc = race_df.loc[
-            race_df["枠"] == c,
-            "3着確率"
-        ].iloc[0]
-
-        score = (
-            pa ** 1.15
-            * pb ** 1.00
-            * pc ** 0.90
+            "先に「🧠 AIを学習する」を押してください"
         )
 
-        rankings.append({
-            "3連単": f"{a}-{b}-{c}",
-            "AIスコア": score,
-            "1着確率": pa,
-            "2着確率": pb,
-            "3着確率": pc
-        })
+    else:
 
-    ranking_df = pd.DataFrame(rankings)
-
-    ranking_df = ranking_df.sort_values(
-        "AIスコア",
-        ascending=False
-    ).reset_index(drop=True)
-
-    st.subheader("🎯 AI 3連単ランキング")
-
-    top10 = ranking_df.head(10).copy()
-
-    top10["AIスコア"] = (
-        top10["AIスコア"] * 10000
-    ).round(2)
-
-    top10["確率目安"] = (
-        top10["AIスコア"] /
-        top10["AIスコア"].sum() * 100
-    ).round(1).astype(str) + "%"
-
-    st.dataframe(
-        top10[
-            ["3連単", "AIスコア", "確率目安"]
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # 本命
-    best = ranking_df.iloc[0]["3連単"]
-
-    st.success(
-        f"🔥 AI本命：{best}"
-    )
-
-    # 上位3点
-    st.write("### ⭐ AI上位3点")
-
-    for i, row in ranking_df.head(3).iterrows():
-
-        medal = ["🥇", "🥈", "🥉"][i]
-
-        st.write(
-            f"{medal} **{row['3連単']}**"
+        ranking, combos = predict_race(
+            race_df,
+            st.session_state.models
         )
 
-# -------------------------
-# 注意
-# -------------------------
+        st.subheader(
+            "🥇🥈🥉 AI順位予想"
+        )
 
-st.divider()
+        for i, row in ranking.iterrows():
 
-st.caption(
-    "※AI予想は過去データから算出した参考値です。"
-    "的中・回収を保証するものではありません。"
-)
+            st.write(
+                f"**{i+1}位："
+                f"{int(row['boat'])}号艇 "
+                f"{row['name']}**"
+            )
 
-st.caption(
-    "※開催会場・レースは選択した日付のAPIデータから自動取得しています。"
-)
+        st.subheader(
+            "🎯 AI 3連単ランキング"
+        )
+
+        for i, (combo, score) in enumerate(
+            combos[:10],
+            1
+        ):
+            st.write(
+                f"**{i}位　{combo}** "
+                f"　AIスコア {score:.5f}"
+            )
+
+        st.success(
+            f"🔥 AI本命：{combos[0][0]}"
+        )
+
+
+# =========================
+# AI学習状況
+# =========================
+
+if st.session_state.history is not None:
+
+    h = st.session_state.history
+
+    st.subheader(
+        "📊 AI学習状況"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    races = h[
+        ["date","stadium","race"]
+    ].drop_duplicates()
+
+    c1.metric(
+        "学習日数",
+        f"{h['date'].nunique()}日"
+    )
+
+    c2.metric(
+        "レース数",
+        f"{len(races)}R"
+    )
+
+    c3.metric(
+        "艇データ",
+        f"{len(h)}行"
+    )
+
+    val = validate(h)
+
+    if val:
+        c4.metric(
+            "未知データ精度",
+            f"{val[0]*100:.1f}%"
+    )

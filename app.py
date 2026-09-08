@@ -11,8 +11,8 @@ JCD_MAP = {
     "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
-# 送っていただいた最新のGASデプロイURL
-GAS_URL = "https://script.google.com/macros/s/AKfycbzDJeQlua2NUjgZJNTA-2PE48VZIuF9uaNttD9wXLpFZUDH__3va9JwwGDA7KVFeHFT/exec"
+# 発行された最新のGASデプロイURL
+GAS_URL = "https://script.google.com/macros/s/AKfycbwX9MLSLRsuVlw5EHlG1mP2mLmYegLnJ4kdNpJShcmUbYiv42lbUQ0wRcC8fx55-wAP/exec"
 
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
 st.caption("【リアルタイムデータ×気象・潮汐×決まり手解析】")
@@ -34,7 +34,7 @@ if st.button("🔍 AI予想を実行する"):
             try:
                 data = res.json()
             except Exception:
-                st.error("⚠️ GASからの応答解析に失敗しました。GASのアクセス権限（『全員』になっているか）をご確認ください。")
+                st.error("⚠️ GASからの応答解析に失敗しました。")
                 st.stop()
             
             if data.get("status") == "success":

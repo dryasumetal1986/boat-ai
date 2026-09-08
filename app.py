@@ -9,15 +9,12 @@ import re
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- スマホ・PC両対応のカスタムCSSデザイン ---
+# --- カスタムCSS（画像風のカードデザイン・段差ズレ防止） ---
 st.markdown("""
     <style>
-    /* 全体背景 */
     .stApp {
         background-color: #F4F6F9;
     }
-    
-    /* 見出しテキストの色固定 */
     h1, h2, h3, .stSubheader {
         color: #111111 !important;
     }
@@ -62,38 +59,49 @@ st.markdown("""
         font-size: 0.75rem;
     }
     
-    /* 会場ボタングリッド（4列固定） */
-    .venue-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        margin-bottom: 15px;
+    /* 会場ボタン・カードグリッド共通設定 */
+    [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        width: 23.5% !important;
+        min-width: 0 !important;
+        flex: none !important;
     }
     
-    /* 会場ボタンのデザイン */
+    /* 会場選択ボタン（画像のタイル風デザイン） */
     div.stButton > button {
         width: 100% !important;
-        height: 48px !important;
+        min-height: 82px !important;
         background-color: #FFFFFF !important;
-        color: #222222 !important;
-        border: 1px solid #C0C8D0 !important;
-        border-radius: 6px !important;
+        color: #111111 !important;
+        border: 1px solid #D1D5DB !important;
+        border-radius: 8px !important;
         font-weight: bold !important;
         font-size: 0.85rem !important;
-        padding: 2px !important;
+        padding: 6px 2px !important;
         margin: 0 !important;
+        white-space: pre-wrap !important;
+        line-height: 1.3 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
     }
     div.stButton > button:hover {
         border-color: #0F1E36 !important;
-        background-color: #E2E8F0 !important;
+        background-color: #E5E7EB !important;
     }
     
-    /* 入力エリアの段差・高さを綺麗に整える設定 */
+    /* 入力フォームの縦位置を揃える */
     [data-testid="column"] {
         align-self: flex-start !important;
     }
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        height: 45px !important;
+        height: 42px !important;
         border-radius: 6px !important;
     }
     </style>
@@ -181,6 +189,18 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
+# --- 本日の開催場一覧を取得 ---
+@st.cache_data(ttl=3600)
+def check_active_venues(date_str):
+    active_dict = {}
+    for name, code in VENUE_CODES.items():
+        df = get_detailed_racers(code, "1", date_str)
+        if df is not None and not df.empty:
+            active_dict[name] = True
+        else:
+            active_dict[name] = False
+    return active_dict
+
 # --- 最もイン逃げ率が高い会場・レースの自動判定 ---
 @st.cache_data(ttl=3600)
 def find_best_in_race(date_str):
@@ -207,6 +227,8 @@ def find_best_in_race(date_str):
 
     return best_venue, best_rno, best_racer, highest_score
 
+# 開催情報の取得
+active_venues = check_active_venues(today_str)
 best_v, best_r, best_name, best_score = find_best_in_race(today_str)
 
 # --- タイトル＆トップのAIピックアップ表示 ---
@@ -232,22 +254,29 @@ st.markdown(f"""
 if "selected_venue" not in st.session_state:
     st.session_state.selected_venue = best_v
 
-st.subheader("🏁 開催場を選択")
+st.subheader("🏁 本日の開催場を選択")
 
-# --- 24会場ボタン（崩れにくいHTMLグリッドで配置） ---
+# --- 画像風の4列カード表示 ---
 venues = list(VENUE_CODES.keys())
-
 cols = st.columns(4)
+
 for idx, v_name in enumerate(venues):
+    is_active = active_venues.get(v_name, False)
+    
+    # 開催状態に応じたボタン表記（一般タグ・1R表示）
+    if is_active:
+        label = f"一般  {v_name}\n1R 開催中"
+    else:
+        label = f"\n{v_name}\n非開催"
+        
     with cols[idx % 4]:
-        if st.button(v_name, key=f"btn_{v_name}"):
+        if st.button(label, key=f"btn_{v_name}"):
             st.session_state.selected_venue = v_name
 
 # --- 選択後の詳細指定 ---
 st.divider()
 st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
 
-# 綺麗に揃えるため、ラベル（見出し）を上部につけて横並び配置
 col_r, col_m = st.columns(2)
 with col_r:
     race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
@@ -399,7 +428,7 @@ if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想す�
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。")
+        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、終了している可能性があります。")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
         

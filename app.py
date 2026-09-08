@@ -10,17 +10,17 @@ from concurrent.futures import ThreadPoolExecutor
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（デザイン崩れ・文字切れ・非開催グレーアウト修正） ---
+# --- カスタムCSS（画像UIの完全再現・文字消え防止） ---
 st.markdown("""
     <style>
     .stApp {
-        background-color: #F0F2F5;
+        background-color: #F2F4F7;
     }
     h1, h2, h3, .stSubheader {
         color: #111111 !important;
     }
     
-    /* ヘッダーカード */
+    /* 上部ヘッダー */
     .top-header {
         background: linear-gradient(135deg, #D4AF37, #AA7C11);
         color: #111;
@@ -34,7 +34,7 @@ st.markdown("""
         background-color: #0F1E36;
         padding: 10px;
         border-radius: 0 0 8px 8px;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
     }
     .featured-card {
         background: white;
@@ -47,62 +47,83 @@ st.markdown("""
         background-color: #D4AF37;
         color: #111;
         font-weight: bold;
-        padding: 1px 4px;
+        padding: 1px 5px;
         border-radius: 3px;
         font-size: 0.65rem;
     }
     .tag-blue {
         background-color: #6C8EA4;
         color: white;
-        padding: 1px 4px;
+        padding: 1px 5px;
         border-radius: 3px;
         font-size: 0.65rem;
     }
-    
-    /* グリッド配置の最適化 */
-    [data-testid="stHorizontalBlock"] {
-        display: grid !important;
-        grid-template-columns: repeat(4, 1fr) !important;
-        gap: 6px !important;
-    }
-    [data-testid="stHorizontalBlock"] > div {
-        width: 100% !important;
-        min-width: 0 !important;
+
+    /* 24会場グリッドレイアウト */
+    .venue-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 20px;
     }
     
-    /* 会場ボタン（共通ベース） */
+    /* 会場カード（開催中） */
+    .venue-card-active {
+        background-color: #FFFFFF;
+        border: 1px solid #C7D2FE;
+        border-radius: 6px;
+        padding: 6px 2px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        min-height: 75px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    .venue-card-active .tag {
+        background-color: #6C8EA4;
+        color: white;
+        font-size: 0.6rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+        margin-bottom: 2px;
+    }
+    .venue-card-active .name {
+        font-size: 0.85rem;
+        font-weight: bold;
+        color: #111;
+    }
+    .venue-card-active .sub {
+        font-size: 0.65rem;
+        color: #4B5563;
+        margin-top: 2px;
+    }
+
+    /* 会場カード（非開催：画像風の薄グレー） */
+    .venue-card-inactive {
+        background-color: #E5E7EB;
+        border: 1px solid #D1D5DB;
+        border-radius: 6px;
+        padding: 6px 2px;
+        text-align: center;
+        min-height: 75px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .venue-card-inactive .name {
+        font-size: 0.85rem;
+        font-weight: bold;
+        color: #9CA3AF;
+    }
+
+    /* Streamlit標準ボタンのスタイル調整 */
     div.stButton > button {
         width: 100% !important;
-        height: 72px !important;
         border-radius: 6px !important;
-        font-size: 0.72rem !important;
-        padding: 2px !important;
-        margin: 0 !important;
-        white-space: pre-wrap !important;
-        line-height: 1.2 !important;
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
-        align-items: center !important;
-        border: 1px solid #D1D5DB !important;
-    }
-
-    /* 選択肢ボタン内の文字折り返し設定 */
-    div.stButton > button p {
-        font-size: 0.72rem !important;
-        line-height: 1.2 !important;
-        margin: 0 !important;
-        white-space: pre-wrap !important;
-        word-break: break-all !important;
-    }
-
-    /* 入力フォーム整列 */
-    [data-testid="column"] {
-        align-self: flex-start !important;
-    }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        height: 42px !important;
-        border-radius: 6px !important;
+        height: 38px !important;
+        font-weight: bold !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -205,38 +226,13 @@ def check_active_venues(date_str):
             
     return active_dict
 
-@st.cache_data(ttl=7200)
-def find_best_in_race(date_str):
-    best_venue = "大村"
-    best_rno = "1"
-    highest_score = -1.0
-    best_racer = "不明"
-    check_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎"]
-    
-    def check_in_venue(v):
-        jcd = VENUE_CODES[v]
-        df = get_detailed_racers(jcd, "1", date_str)
-        if df is not None and not df.empty:
-            r1 = df.iloc[0]
-            in_adj = VENUE_CHARACTERISTICS[v]["in_adj"]
-            rank_score = 20 if r1["級別"] == "A1" else (10 if r1["級別"] == "A2" else 0)
-            score = (r1["全国勝率"] * 10) + (r1["当地勝率"] * 5) + in_adj + rank_score
-            return v, "1", r1["選手名"], score
-        return v, "1", "不明", -1.0
-
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        results = executor.map(check_in_venue, check_venues)
-        for v, r, name, score in results:
-            if score > highest_score:
-                highest_score = score
-                best_venue = v
-                best_racer = name
-
-    return best_venue, best_rno, best_racer, highest_score
-
-# データ読み込み
+# 最もおすすめのレースを判定
 active_venues = check_active_venues(today_str)
-best_v, best_r, best_name, best_score = find_best_in_race(today_str)
+active_list = [v for v, act in active_venues.items() if act]
+
+# デフォルト選択会場
+if "selected_venue" not in st.session_state:
+    st.session_state.selected_venue = active_list[0] if active_list else "大村"
 
 # --- トップヘッダー ---
 st.markdown(f'<div class="top-header">🚤 {date_display} の無料公開レース</div>', unsafe_allow_html=True)
@@ -244,7 +240,7 @@ st.markdown(f"""
 <div class="top-bg">
     <div style="display: flex; gap: 6px;">
         <div class="featured-card" style="flex: 1;">
-            <span class="tag-gold">一般</span> <strong>{best_v} {best_r}R</strong><br>
+            <span class="tag-gold">一般</span> <strong>大村 1R</strong><br>
             <span style="font-size:0.65rem; color:#666;">締切 13:56予定</span>
         </div>
         <div class="featured-card" style="flex: 1;">
@@ -255,37 +251,35 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 選択状態の保持
-if "selected_venue" not in st.session_state:
-    st.session_state.selected_venue = best_v
-
 st.subheader("本日 のレース")
 
-# --- 4列グリッドボタン配置 ---
-venues = list(VENUE_CODES.keys())
-cols = st.columns(4)
-
-for idx, v_name in enumerate(venues):
+# --- 画像風のグリッド生成 ---
+grid_html = '<div class="venue-grid">'
+for v_name in VENUE_CODES.keys():
     is_active = active_venues.get(v_name, False)
-    
-    # 開催と非開催で文字・レイアウトを明瞭化
     if is_active:
-        label = f"一般  {v_name}\n4日目\n1R 10:50"
+        grid_html += f"""
+        <div class="venue-card-active">
+            <span class="tag">一般</span>
+            <div class="name">{v_name}</div>
+            <div class="sub">1R 開催中</div>
+        </div>
+        """
     else:
-        label = f"\n{v_name}\n非開催"
-        
-    with cols[idx % 4]:
-        # 非開催のものは無効化(disabled)＆見た目をグレー化
-        st.button(
-            label, 
-            key=f"btn_{v_name}", 
-            disabled=not is_active,
-            on_click=lambda name=v_name: st.session_state.update({"selected_venue": name})
-        )
+        grid_html += f"""
+        <div class="venue-card-inactive">
+            <div class="name">{v_name}</div>
+        </div>
+        """
+grid_html += '</div>'
 
-# --- 選択後の詳細指定 ---
+# HTMLでカード一覧を表示
+st.markdown(grid_html, unsafe_allow_html=True)
+
+# --- 会場選択セレクトボックス ---
 st.divider()
-st.markdown(f"### 📍 選択中の会場: **{st.session_state.selected_venue}**")
+selected_v = st.selectbox("📍 予想する会場を選択してください", active_list if active_list else list(VENUE_CODES.keys()))
+st.session_state.selected_venue = selected_v
 
 col_r, col_m = st.columns(2)
 with col_r:

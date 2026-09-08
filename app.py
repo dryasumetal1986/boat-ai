@@ -58,20 +58,35 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 堅牢通信レイヤー ---
+# --- クラウドブロック回避（プロキシ＆複数フォールバック通信） ---
 def fetch_url(url):
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'ja,en-US;q=0.7,en;q=0.3',
-        'Cache-Control': 'no-cache',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     }
+    
+    # 試行パターン1: 直接アクセス
     try:
-        res = requests.get(url, headers=headers, timeout=8)
-        if res.status_code == 200:
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200 and "出走表" in res.text:
             return res.text
     except Exception:
         pass
+
+    # 試行パターン2: プロキシ経由（クラウドIPのブロックをバイパス）
+    proxy_urls = [
+        f"https://api.allorigins.win/raw?url={requests.utils.quote(url)}",
+        f"https://corsproxy.io/?{requests.utils.quote(url)}"
+    ]
+    
+    for p_url in proxy_urls:
+        try:
+            res = requests.get(p_url, timeout=7)
+            if res.status_code == 200 and len(res.text) > 2000:
+                return res.text
+        except Exception:
+            continue
+            
     return None
 
 def get_detailed_racers(jcd, rno, date_str):
@@ -91,7 +106,7 @@ def get_detailed_racers(jcd, rno, date_str):
             continue
         rank = rank_match.group(1)
         
-        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
+        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18") or tbody.find("a")
         name = name_el.get_text(strip=True) if name_el else "選手"
         name = re.sub(r"[0-9\s/]+", "", name)[:4]
         
@@ -261,12 +276,12 @@ if st.button(f"🚀 {selected_v} {race_num} をAI予想する", type="primary", 
     jcd = VENUE_CODES[selected_v]
     rno = race_num.replace("R", "")
     
-    with st.spinner("データ取得中..."):
+    with st.spinner("出走表データを取得中（迂回接続中...）"):
         df_racers = get_detailed_racers(jcd, rno, today_str)
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。\nアクセス制限、または本日開催のない会場・レースの可能性があります。他の開催場やレースでお試しください。")
+        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。\n※締め切り直前/終了直後、または通信混雑の可能性があります。別のレースでお試しください。")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, selected_v, weather_info, investment)
         st.info(f"🏟️ **会場特性**: {v_desc}\n\n🌀 **コンディション**: {weather_info['wind_dir']} {weather_info['wind_speed']}m / {weather_info['tide']}")

@@ -62,17 +62,12 @@ st.markdown("""
         font-size: 0.75rem;
     }
     
-    /* 会場ボタンをスマホでも横並び（4列）にする設定 */
-    [data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: wrap !important;
-        gap: 4px !important;
-    }
-    [data-testid="stHorizontalBlock"] > div {
-        width: 23% !important;
-        min-width: 0 !important;
-        flex: none !important;
+    /* 会場ボタングリッド（4列固定） */
+    .venue-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 15px;
     }
     
     /* 会場ボタンのデザイン */
@@ -91,6 +86,15 @@ st.markdown("""
     div.stButton > button:hover {
         border-color: #0F1E36 !important;
         background-color: #E2E8F0 !important;
+    }
+    
+    /* 入力エリアの段差・高さを綺麗に整える設定 */
+    [data-testid="column"] {
+        align-self: flex-start !important;
+    }
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        height: 45px !important;
+        border-radius: 6px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -177,15 +181,14 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
-# --- 最もイン逃げ率（1号艇期待度）が高い会場・レースの自動判定機能 ---
-@st.cache_data(ttl=3600)  # 1時間キャッシュで高速化
+# --- 最もイン逃げ率が高い会場・レースの自動判定 ---
+@st.cache_data(ttl=3600)
 def find_best_in_race(date_str):
     best_venue = "大村"
     best_rno = "1"
     highest_score = -1.0
     best_racer = "不明"
 
-    # 主要なイン強力会場を中心に各場の1Rを検索
     check_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎"]
     
     for v in check_venues:
@@ -193,7 +196,6 @@ def find_best_in_race(date_str):
         df = get_detailed_racers(jcd, "1", date_str)
         if df is not None and not df.empty:
             r1 = df.iloc[0]
-            # 会場イン補正 + 1号艇の勝率・級別スコア
             in_adj = VENUE_CHARACTERISTICS[v]["in_adj"]
             rank_score = 20 if r1["級別"] == "A1" else (10 if r1["級別"] == "A2" else 0)
             score = (r1["全国勝率"] * 10) + (r1["当地勝率"] * 5) + in_adj + rank_score
@@ -205,7 +207,6 @@ def find_best_in_race(date_str):
 
     return best_venue, best_rno, best_racer, highest_score
 
-# ピックアップの動的取得
 best_v, best_r, best_name, best_score = find_best_in_race(today_str)
 
 # --- タイトル＆トップのAIピックアップ表示 ---
@@ -233,19 +234,20 @@ if "selected_venue" not in st.session_state:
 
 st.subheader("🏁 開催場を選択")
 
-# --- 24会場を4列に敷き詰め（横並び固定） ---
+# --- 24会場ボタン（崩れにくいHTMLグリッドで配置） ---
 venues = list(VENUE_CODES.keys())
-cols = st.columns(4)
 
+cols = st.columns(4)
 for idx, v_name in enumerate(venues):
-    col = cols[idx % 4]
-    if col.button(v_name, key=f"btn_{v_name}"):
-        st.session_state.selected_venue = v_name
+    with cols[idx % 4]:
+        if st.button(v_name, key=f"btn_{v_name}"):
+            st.session_state.selected_venue = v_name
 
 # --- 選択後の詳細指定 ---
 st.divider()
 st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
 
+# 綺麗に揃えるため、ラベル（見出し）を上部につけて横並び配置
 col_r, col_m = st.columns(2)
 with col_r:
     race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])

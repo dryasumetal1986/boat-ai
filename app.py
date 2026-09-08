@@ -10,11 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（画像風のカードデザイン・段差ズレ防止） ---
+# --- カスタムCSS（デザイン崩れ・文字切れ・非開催グレーアウト修正） ---
 st.markdown("""
     <style>
     .stApp {
-        background-color: #F4F6F9;
+        background-color: #F0F2F5;
     }
     h1, h2, h3, .stSubheader {
         color: #111111 !important;
@@ -26,78 +26,77 @@ st.markdown("""
         color: #111;
         font-weight: bold;
         text-align: center;
-        padding: 10px;
+        padding: 8px;
         border-radius: 8px 8px 0 0;
-        font-size: 1.1rem;
+        font-size: 1.0rem;
     }
     .top-bg {
         background-color: #0F1E36;
-        padding: 12px;
+        padding: 10px;
         border-radius: 0 0 8px 8px;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
     }
     .featured-card {
         background: white;
-        border-radius: 8px;
-        padding: 10px;
+        border-radius: 6px;
+        padding: 8px 4px;
         text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border: 1px solid #e0e0e0;
     }
     .tag-gold {
         background-color: #D4AF37;
         color: #111;
         font-weight: bold;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.75rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 0.65rem;
     }
     .tag-blue {
         background-color: #6C8EA4;
         color: white;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.75rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 0.65rem;
     }
     
-    /* 会場ボタン・カードグリッド共通設定 */
+    /* グリッド配置の最適化 */
     [data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: wrap !important;
+        display: grid !important;
+        grid-template-columns: repeat(4, 1fr) !important;
         gap: 6px !important;
     }
     [data-testid="stHorizontalBlock"] > div {
-        width: 23.5% !important;
+        width: 100% !important;
         min-width: 0 !important;
-        flex: none !important;
     }
     
-    /* 会場選択ボタン（画像のタイル風デザイン） */
+    /* 会場ボタン（共通ベース） */
     div.stButton > button {
         width: 100% !important;
-        min-height: 82px !important;
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-        border: 1px solid #D1D5DB !important;
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        font-size: 0.85rem !important;
-        padding: 6px 2px !important;
+        height: 72px !important;
+        border-radius: 6px !important;
+        font-size: 0.72rem !important;
+        padding: 2px !important;
         margin: 0 !important;
         white-space: pre-wrap !important;
-        line-height: 1.3 !important;
+        line-height: 1.2 !important;
         display: flex !important;
         flex-direction: column !important;
         justify-content: center !important;
         align-items: center !important;
+        border: 1px solid #D1D5DB !important;
     }
-    div.stButton > button:hover {
-        border-color: #0F1E36 !important;
-        background-color: #E5E7EB !important;
+
+    /* 選択肢ボタン内の文字折り返し設定 */
+    div.stButton > button p {
+        font-size: 0.72rem !important;
+        line-height: 1.2 !important;
+        margin: 0 !important;
+        white-space: pre-wrap !important;
+        word-break: break-all !important;
     }
-    
-    /* 入力フォームの縦位置を揃える */
+
+    /* 入力フォーム整列 */
     [data-testid="column"] {
         align-self: flex-start !important;
     }
@@ -153,7 +152,7 @@ def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=4)
         if res.status_code != 200: return None
         soup = BeautifulSoup(res.text, "html.parser")
         tbodies = soup.find_all("tbody")
@@ -190,17 +189,15 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
-# --- 本日の開催場一覧を【高速並列アクセス】で取得 ---
-@st.cache_data(ttl=7200)  # キャッシュ保持時間を2時間に延長
+# --- 本日の開催場一覧を取得 ---
+@st.cache_data(ttl=7200)
 def check_active_venues(date_str):
     active_dict = {}
-    
     def check_single(v_tuple):
         name, code = v_tuple
         df = get_detailed_racers(code, "1", date_str)
         return name, (df is not None and not df.empty)
 
-    # 12スレッドで24場へ同時並列アクセス
     with ThreadPoolExecutor(max_workers=12) as executor:
         results = executor.map(check_single, VENUE_CODES.items())
         for name, is_active in results:
@@ -208,14 +205,12 @@ def check_active_venues(date_str):
             
     return active_dict
 
-# --- 最もイン逃げ率が高い会場・レースの自動判定 ---
 @st.cache_data(ttl=7200)
 def find_best_in_race(date_str):
     best_venue = "大村"
     best_rno = "1"
     highest_score = -1.0
     best_racer = "不明"
-
     check_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎"]
     
     def check_in_venue(v):
@@ -239,24 +234,22 @@ def find_best_in_race(date_str):
 
     return best_venue, best_rno, best_racer, highest_score
 
-# 開催情報の取得
+# データ読み込み
 active_venues = check_active_venues(today_str)
 best_v, best_r, best_name, best_score = find_best_in_race(today_str)
 
-# --- タイトル＆トップのAIピックアップ表示 ---
-st.markdown(f'<div class="top-header">🚤 {date_display} のAIピックアップレース</div>', unsafe_allow_html=True)
+# --- トップヘッダー ---
+st.markdown(f'<div class="top-header">🚤 {date_display} の無料公開レース</div>', unsafe_allow_html=True)
 st.markdown(f"""
 <div class="top-bg">
-    <div style="display: flex; gap: 8px;">
+    <div style="display: flex; gap: 6px;">
         <div class="featured-card" style="flex: 1;">
-            <span class="tag-gold">イン逃げ本命⚡</span><br>
-            <strong style="font-size:1.0rem; color:#111;">{best_v} {best_r}R</strong><br>
-            <span style="font-size:0.75rem; color:#333;">1号艇: {best_name}</span>
+            <span class="tag-gold">一般</span> <strong>{best_v} {best_r}R</strong><br>
+            <span style="font-size:0.65rem; color:#666;">締切 13:56予定</span>
         </div>
         <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">高補正水面🌊</span><br>
-            <strong style="font-size:1.0rem; color:#111;">徳山 1R</strong><br>
-            <span style="font-size:0.75rem; color:#666;">イン期待度高</span>
+            <span class="tag-blue">一般</span> <strong>蒲郡 12R</strong><br>
+            <span style="font-size:0.65rem; color:#666;">締切 20:38予定</span>
         </div>
     </div>
 </div>
@@ -266,28 +259,33 @@ st.markdown(f"""
 if "selected_venue" not in st.session_state:
     st.session_state.selected_venue = best_v
 
-st.subheader("🏁 本日の開催場を選択")
+st.subheader("本日 のレース")
 
-# --- 画像風の4列カード表示 ---
+# --- 4列グリッドボタン配置 ---
 venues = list(VENUE_CODES.keys())
 cols = st.columns(4)
 
 for idx, v_name in enumerate(venues):
     is_active = active_venues.get(v_name, False)
     
-    # 開催状態に応じたボタン表記（一般タグ・1R表示）
+    # 開催と非開催で文字・レイアウトを明瞭化
     if is_active:
-        label = f"一般  {v_name}\n1R 開催中"
+        label = f"一般  {v_name}\n4日目\n1R 10:50"
     else:
         label = f"\n{v_name}\n非開催"
         
     with cols[idx % 4]:
-        if st.button(label, key=f"btn_{v_name}"):
-            st.session_state.selected_venue = v_name
+        # 非開催のものは無効化(disabled)＆見た目をグレー化
+        st.button(
+            label, 
+            key=f"btn_{v_name}", 
+            disabled=not is_active,
+            on_click=lambda name=v_name: st.session_state.update({"selected_venue": name})
+        )
 
 # --- 選択後の詳細指定 ---
 st.divider()
-st.markdown(f"<h3 style='color:#111;'>📍 選択中の会場: <span style='color:#0F1E36;'>{st.session_state.selected_venue}</span></h3>", unsafe_allow_html=True)
+st.markdown(f"### 📍 選択中の会場: **{st.session_state.selected_venue}**")
 
 col_r, col_m = st.columns(2)
 with col_r:
@@ -301,7 +299,7 @@ def get_before_info(jcd, rno, date_str):
     headers = {"User-Agent": "Mozilla/5.0"}
     info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=4)
         if res.status_code != 200: return info
         soup = BeautifulSoup(res.text, "html.parser")
         
@@ -329,7 +327,7 @@ def get_before_info(jcd, rno, date_str):
     except Exception:
         return info
 
-# --- AI分析ロジック ---
+# --- AI分析 ---
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})

@@ -30,7 +30,7 @@ st.markdown("""
 
 # タイトル表示
 st.title("🚤 やっちゃんの競艇AI予想ツール")
-st.caption("会場補正・風向風速・展示タイム・勝率を統合解析")
+st.caption("全国24会場特性・気象・満干潮位・展示・勝率統合解析")
 
 st.divider()
 
@@ -41,12 +41,32 @@ VENUE_CODES = {
     "下関": "19", "若松": "20", "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
-# 会場別イン強さ補正 (1号艇の加算/減算ポイント)
-VENUE_IN_CORRECTION = {
-    "大村": 15, "徳山": 15, "芦屋": 12, "下関": 10, "住之江": 8, "尼崎": 8,
-    "津": 5, "丸亀": 5, "若松": 5, "唐津": 5, "蒲郡": 0, "常滑": 0,
-    "宮島": 0, "児島": 0, "三国": -3, "びわこ": -5, "鳴門": -5,
-    "多摩川": -5, "浜名湖": -5, "桐生": -5, "江戸川": -10, "平和島": -10, "戸田": -12
+# 全国24会場の水面特性（水質属性含む）
+VENUE_CHARACTERISTICS = {
+    "大村": {"water": "海水", "in_adj": 20, "makuri_adj": -5, "desc": "【海水/超イン最強】満潮時は1号艇独壇場。"},
+    "徳山": {"water": "海水", "in_adj": 18, "makuri_adj": -4, "desc": "【海水/イン鉄板】満潮でイン信頼度さらに上昇。"},
+    "芦屋": {"in_adj": 15, "water": "淡水", "makuri_adj": -3, "desc": "【淡水/イン圧倒】静水面でイン安定。"},
+    "下関": {"water": "海水", "in_adj": 12, "makuri_adj": -2, "desc": "【海水/イン優位】ナイター・海水で安定感抜群。"},
+    "住之江": {"water": "淡水", "in_adj": 10, "makuri_adj": -2, "desc": "【淡水/イン強力】硬い水面、イン逃げ主力。"},
+    "尼崎": {"water": "淡水", "in_adj": 8, "makuri_adj": 0, "desc": "【淡水/静水面】フラットで実力通りの展開。"},
+    "蒲郡": {"water": "淡水", "in_adj": 5, "makuri_adj": 0, "desc": "【淡水/ナイター】夜間の気温・気圧変化注意。"},
+    "唐津": {"water": "淡水", "in_adj": 5, "makuri_adj": 0, "desc": "【淡水/広大水面】ピット離れ重要。"},
+    "津": {"water": "淡水", "in_adj": 3, "makuri_adj": 2, "desc": "【淡水/風注意】強風時の波乱注意。"},
+    "丸亀": {"water": "海水", "in_adj": 3, "makuri_adj": 1, "desc": "【海水/潮影響】満潮でイン有利、干潮でまくり。"},
+    "若松": {"water": "海水", "in_adj": 3, "makuri_adj": 1, "desc": "【海水/洞海湾】風と潮の組み合わせ重要。"},
+    "常滑": {"water": "海水", "in_adj": 0, "makuri_adj": 2, "desc": "【海水/風影響】風向きでカド一撃。"},
+    "宮島": {"water": "海水", "in_adj": 0, "makuri_adj": 3, "desc": "【海水/潮汐激甚】干満差大きく満潮イン・干潮まくり顕著。"},
+    "児島": {"water": "海水", "in_adj": 0, "makuri_adj": 2, "desc": "【海水/潮干満】干潮時のダッシュまくり警戒。"},
+    "三国": {"water": "淡水", "in_adj": -3, "makuri_adj": 3, "desc": "【淡水/強風注意】風向きでイン流されやすい。"},
+    "浜名湖": {"water": "汽水", "in_adj": -5, "makuri_adj": 4, "desc": "【汽水/広大】潮と風でセンターまくり差し決定。"},
+    "多摩川": {"water": "淡水", "in_adj": -5, "makuri_adj": 4, "desc": "【淡水/日本一静水面】全速ターン決定、差し有効。"},
+    "桐生": {"water": "淡水", "in_adj": -5, "makuri_adj": 5, "desc": "【淡水/高標高】出足鈍りダッシュ旋回頻出。"},
+    "びわこ": {"water": "淡水", "in_adj": -8, "makuri_adj": 6, "desc": "【淡水/ウネリ難所】1M狭くイン流されやすい。"},
+    "鳴門": {"water": "海水", "in_adj": -8, "makuri_adj": 6, "desc": "【海水/激流】潮と狭い1Mで波乱多発。"},
+    "福岡": {"water": "汽水", "in_adj": -10, "makuri_adj": 7, "desc": "【汽水/博多うねり】1M難所、2差し・3まくり差し。"},
+    "江戸川": {"water": "海水", "in_adj": -12, "makuri_adj": 8, "desc": "【海水/超難水面】潮流と風のダブルパンチ。"},
+    "平和島": {"water": "海水", "in_adj": -12, "makuri_adj": 8, "desc": "【海水/イン難】バック伸び勝負、差し有利。"},
+    "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
 # --- 1. 出走表データ取得 ---
@@ -76,6 +96,7 @@ def get_detailed_racers(jcd, rno, date_str):
             
             floats = re.findall(r"\d+\.\d+", text)
             national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
+            local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
             motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
             
             racers.append({
@@ -83,6 +104,7 @@ def get_detailed_racers(jcd, rno, date_str):
                 "選手名": name,
                 "級別": rank,
                 "全国勝率": national_win_rate,
+                "当地勝率": local_win_rate,
                 "モーター2連率(%)": motor_2ren
             })
             if len(racers) == 6: break
@@ -91,18 +113,18 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
-# --- 2. 直前情報（風速・風向・展示タイム）取得 ---
+# --- 2. 直前情報（気象・展示・潮位）取得 ---
 def get_before_info(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6}
+    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
     try:
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200: return info
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 風速・風向
+        # 気象＆潮位情報
         weather_section = soup.find("div", class_="weather1")
         if weather_section:
             w_text = weather_section.get_text()
@@ -114,7 +136,9 @@ def get_before_info(jcd, rno, date_str):
             elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
             elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
             
-        # 展示タイム
+            if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
+            elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
+            
         tenji_list = []
         td_tenji = soup.find_all("td", class_="is-fs14")
         for td in td_tenji:
@@ -128,66 +152,104 @@ def get_before_info(jcd, rno, date_str):
     except Exception:
         return info
 
-# --- 3. 風・展示データを取り入れた高度AI分析スコア計算 ---
-def calculate_wind_and_tenji_predictions(df, venue, weather_info, investment):
-    # 基本コーススコア
+# --- 3. 満干潮・水質・会場特性・気象・展示統合AI計算エンジン ---
+def calculate_tide_integrated_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     
-    # 1号艇に会場ごとの強さ補正を追加
-    venue_adj = VENUE_IN_CORRECTION.get(venue, 0)
-    course_base[1] += venue_adj
+    v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
+    
+    # 潮位補正 (海水・汽水場のみ)
+    tide_status = weather_info["tide"]
+    tide_in_adj = 0
+    tide_makuri_adj = 0
+    
+    if v_param["water"] in ["海水", "汽水"]:
+        if "満潮" in tide_status:
+            tide_in_adj = +6  # 満潮は波が立ちイン有利・差し有利
+            tide_makuri_adj = -4
+        elif "干潮" in tide_status:
+            tide_in_adj = -4  # 干潮は水面が平らになりダッシュまくり有利
+            tide_makuri_adj = +6
+            
+    course_base[1] += (v_param["in_adj"] + tide_in_adj)
+    course_base[2] += (tide_in_adj * 0.5)
+    course_base[3] += (v_param["makuri_adj"] + tide_makuri_adj) * 0.5
+    course_base[4] += (v_param["makuri_adj"] + tide_makuri_adj) * 0.7
     
     rank_bonus = {"A1": 25, "A2": 15, "B1": 5, "B2": 0}
     
-    # 風によるコース影響の補正値
     w_speed = weather_info["wind_speed"]
     w_dir = weather_info["wind_dir"]
     wind_course_adj = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
     
     if w_speed >= 3:
         if w_dir == "追い風":
-            # 追い風：1号艇が流れやすく、2・3号艇の差し/まくり差しが効く
             wind_course_adj[1] -= (w_speed * 1.5)
             wind_course_adj[2] += (w_speed * 2.0)
             wind_course_adj[3] += (w_speed * 1.5)
         elif w_dir == "向かい風":
-            # 向かい風：インがへこみやすく、3・4号艇のダッシュまくりが効く
             wind_course_adj[1] -= (w_speed * 2.0)
             wind_course_adj[3] += (w_speed * 1.5)
             wind_course_adj[4] += (w_speed * 2.5)
 
-    # 展示タイムの最速（一番時計）判定
     min_tenji = min(weather_info["tenji"])
     
     scores = {}
+    attack_power = {}
+    
     for idx, row in df.iterrows():
         w = int(row["枠"])
         rank = row["級別"]
-        win_rate = row["全国勝率"]
+        nat_win = row["全国勝率"]
+        loc_win = row["当地勝率"]
         motor = row["モーター2連率(%)"]
         t_time = weather_info["tenji"][idx] if idx < len(weather_info["tenji"]) else 6.80
         
-        # 展示タイム補正 (一番時計なら +10点、トップと差がないほど加点)
         tenji_score = max(0, (6.90 - t_time) * 30)
         if t_time == min_tenji:
             tenji_score += 10
 
+        course_fitness = 0
+        if w == 1:
+            course_fitness = (nat_win * 3) + (loc_win * 2)
+        elif w in [2, 3]:
+            course_fitness = (nat_win * 3) + (motor * 0.2)
+        elif w in [4, 5, 6]:
+            course_fitness = (nat_win * 2.5) + tenji_score
+
         total = (course_base.get(w, 5) + wind_course_adj.get(w, 0) + 
-                 rank_bonus.get(rank, 0) + (win_rate * 5) + (motor * 0.4) + tenji_score)
+                 rank_bonus.get(rank, 0) + (nat_win * 3) + (loc_win * 2) + 
+                 (motor * 0.3) + tenji_score + course_fitness)
+        
         scores[w] = total
+        attack_power[w] = (nat_win * 2) + tenji_score + ((v_param["makuri_adj"] + tide_makuri_adj) * 2)
         
     boats = [1, 2, 3, 4, 5, 6]
     combos = list(itertools.permutations(boats, 3))
     
     combo_scores = []
+    
+    center_attack = max(attack_power[3], attack_power[4])
+    is_makuri_tenkai = (center_attack > attack_power[1] + 3) or (w_dir == "向かい風" and w_speed >= 4) or ("干潮" in tide_status and v_param["water"] in ["海水", "汽水"])
+    
     for c in combos:
         eval_score = (scores[c[0]] * 1.6) + (scores[c[1]] * 1.0) + (scores[c[2]] * 0.6)
+        
+        if is_makuri_tenkai:
+            if c[0] in [3, 4]:
+                eval_score *= 1.3
+            if c[1] in [2, 4, 5]:
+                eval_score *= 1.15
+        else:
+            if c[0] == 1 and c[1] in [2, 3]:
+                eval_score *= 1.25
+                
         combo_scores.append((c, eval_score))
         
     combo_scores.sort(key=lambda x: x[1], reverse=True)
     
-    top_combos = [combo_scores[0], combo_scores[1], combo_scores[2], combo_scores[6]]
-    labels = ["本命 🔥", "本命 🔥", "対抗 ⚔️", "中穴 ⚡"]
+    top_combos = [combo_scores[0], combo_scores[1], combo_scores[2], combo_scores[5]]
+    labels = ["本命 🔥", "本命 🔥", "対抗 ⚔️", "潮位穴 ⚡"]
     ratios = [0.4, 0.3, 0.2, 0.1]
     
     bet_list = []
@@ -204,7 +266,9 @@ def calculate_wind_and_tenji_predictions(df, venue, weather_info, investment):
             "推奨金額": f"{amount:,} 円"
         })
         
-    return pd.DataFrame(bet_list)
+    tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
+        
+    return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
 
 # --- 条件設定UI ---
 st.subheader("⚙️ レース条件設定")
@@ -227,34 +291,36 @@ investment = st.number_input("投資合計金額 (円)", min_value=1000, value=5
 st.divider()
 
 # --- 予想実行 ---
-if st.button("🤖 風速・水面・気象を考慮してAI予想実行", type="primary", use_container_width=True):
+if st.button("🤖 24会場・満干潮位・気象・展示を統合してAI予想実行", type="primary", use_container_width=True):
     jcd = VENUE_CODES[venue]
     rno = race_num.replace("R", "")
     
-    with st.spinner("出走表・水面気象・展示タイムを分析中..."):
+    with st.spinner("出走表・水面特性・満干潮位・展示タイムをフル分析中..."):
         df_racers = get_detailed_racers(jcd, rno, today_str)
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
         st.warning(f"⚠️ {date_display} の {venue} {race_num} の解析に失敗しました。開催状況またはレース番号をご確認ください。")
     else:
-        st.success(f"【{venue} {race_num}】のデータ取得＆直前風速AI分析が完了しました！")
+        st.success(f"【{venue} {race_num}】のデータ取得＆満干潮位フル統合AI分析が完了しました！")
         
-        # 気象・展示データの表示パネル
+        df_bets, tenkai_msg, v_desc = calculate_tide_integrated_predictions(df_racers, venue, weather_info, investment)
+        
         w_speed = weather_info["wind_speed"]
         w_dir = weather_info["wind_dir"]
-        st.info(f"🌀 **現地気象**: {w_dir} {w_speed}m / **会場特性**: {venue} (1枠補正: {VENUE_IN_CORRECTION.get(venue, 0):+}pt)")
+        tide_info = weather_info["tide"]
+        
+        st.info(f"🏟️ **会場解説**: {v_desc}\n\n🌀 **リアルタイム気象/潮位**: {w_dir} {w_speed}m / {tide_info}")
         
         df_display = df_racers.copy()
         df_display["枠"] = df_display["枠"].apply(lambda x: f"{x}号艇")
         df_display["展示タイム"] = weather_info["tenji"]
         
-        st.subheader("📋 出走表 & 展示タイムデータ")
+        st.subheader("📋 統合出走表 (全国/当地勝率・展示)")
         st.dataframe(df_display, hide_index=True, use_container_width=True)
 
         st.divider()
 
-        df_bets = calculate_wind_and_tenji_predictions(df_racers, venue, weather_info, investment)
-
-        st.subheader("🎯 直前風向・気象考慮のAI推奨買い目")
+        st.subheader("🎯 潮位＆水面特性考慮のAI推奨買い目")
+        st.caption(f"解析展開: **{tenkai_msg}**")
         st.table(df_bets)

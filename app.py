@@ -11,7 +11,7 @@ import time
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（UI再現・文字色補正） ---
+# --- カスタムCSS（デザイン補正） ---
 st.markdown("""
     <style>
     /* 全体背景 */
@@ -20,120 +20,18 @@ st.markdown("""
     }
     
     /* 文字色の設定 */
-    h1, h2, h3, .stSubheader, p {
+    h1, h2, h3, .stSubheader, p, span {
         color: #111111 !important;
     }
-    
-    /* 上部ヘッダーカード */
-    .top-header {
-        background: linear-gradient(135deg, #D4AF37, #AA7C11);
-        color: #111;
-        font-weight: bold;
-        text-align: center;
-        padding: 10px;
-        border-radius: 8px 8px 0 0;
-        font-size: 1.1rem;
-    }
-    .top-bg {
-        background-color: #0F1E36;
-        padding: 12px;
-        border-radius: 0 0 8px 8px;
-        margin-bottom: 20px;
-    }
-    .featured-card {
-        background: white;
-        border-radius: 6px;
-        padding: 10px 6px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .tag-gold {
-        background-color: #D4AF37;
-        color: #111;
-        font-weight: bold;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 0.7rem;
-        margin-right: 2px;
-    }
-    .tag-blue {
-        background-color: #6C8EA4;
-        color: white;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 0.7rem;
-        margin-right: 2px;
-    }
 
-    /* 24会場グリッド配置 */
-    .venue-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        margin-bottom: 25px;
-    }
-    
-    /* 会場カード（開催中・白地） */
-    .venue-card-active {
+    /* 24会場の表示スタイル */
+    div[data-testid="column"] > div {
         background-color: #FFFFFF;
-        border: 1px solid #C7D2FE;
-        border-radius: 6px;
-        padding: 6px 2px;
-        text-align: center;
-        min-height: 78px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    .venue-card-active .tag {
-        background-color: #6C8EA4;
-        color: white;
-        font-size: 0.65rem;
-        padding: 1px 4px;
-        border-radius: 3px;
-        margin-bottom: 3px;
-    }
-    .venue-card-active .name {
-        font-size: 0.85rem;
-        font-weight: bold;
-        color: #111;
-    }
-    .venue-card-active .sub {
-        font-size: 0.68rem;
-        color: #4B5563;
-        margin-top: 3px;
-    }
-
-    /* 会場カード（非開催・薄グレー） */
-    .venue-card-inactive {
-        background-color: #E5E7EB;
         border: 1px solid #D1D5DB;
-        border-radius: 6px;
-        padding: 6px 2px;
+        border-radius: 8px;
+        padding: 8px 4px;
         text-align: center;
-        min-height: 78px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
-    .venue-card-inactive .name {
-        font-size: 0.85rem;
-        font-weight: bold;
-        color: #9CA3AF;
-    }
-
-    /* セレクトボックスのラベル非表示と幅調整 */
-    [data-testid="stSelectbox"] label, [data-testid="stNumberInput"] label {
-        display: none !important;
-    }
-    [data-testid="column"] {
-        align-self: flex-start !important;
-    }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        height: 42px !important;
-        border-radius: 6px !important;
+        margin-bottom: 6px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -178,7 +76,7 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 出走表データ取得（高速化・リトライ機能） ---
+# --- 出走表データ取得 ---
 def get_detailed_racers(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {
@@ -252,55 +150,34 @@ active_list = [v for v, act in active_venues.items() if act]
 if "selected_venue" not in st.session_state:
     st.session_state.selected_venue = active_list[0] if active_list else "大村"
 
-# --- トップヘッダー（HTML出力） ---
-top_html = f"""
-<div class="top-header">🚤 {date_display} の無料公開レース</div>
-<div class="top-bg">
-    <div style="display: flex; gap: 6px;">
-        <div class="featured-card" style="flex: 1;">
-            <span class="tag-gold">一般</span> <strong>大村 1R</strong><br>
-            <span style="font-size:0.65rem; color:#666;">締切 13:56予定</span>
-        </div>
-        <div class="featured-card" style="flex: 1;">
-            <span class="tag-blue">一般</span> <strong>蒲郡 12R</strong><br>
-            <span style="font-size:0.65rem; color:#666;">締切 20:38予定</span>
-        </div>
-    </div>
-</div>
-"""
-st.markdown(top_html, unsafe_allow_html=True)
+# --- トップ案内 ---
+st.title("🚤 やっちゃんの競艇AI予想")
+st.caption(f"日付: {date_display}")
 
-st.subheader("本日 のレース")
+# --- 24会場グリッド表示（Streamlitの標準レイアウト使用で崩れ防止） ---
+st.subheader("本日の開催一覧")
 
-# --- 画像風の24会場グリッド（HTML出力） ---
-grid_html = '<div class="venue-grid">'
-for v_name in VENUE_CODES.keys():
-    is_active = active_venues.get(v_name, False)
-    if is_active:
-        grid_html += f"""
-        <div class="venue-card-active">
-            <span class="tag">一般</span>
-            <div class="name">{v_name}</div>
-            <div class="sub">1R 開催中</div>
-        </div>
-        """
-    else:
-        grid_html += f"""
-        <div class="venue-card-inactive">
-            <div class="name">{v_name}</div>
-        </div>
-        """
-grid_html += '</div>'
+venues = list(VENUE_CODES.keys())
+cols_per_row = 4
 
-# HTMLでカード一覧を表示（★unsafe_allow_html=Trueで正しくレンダリング）
-st.markdown(grid_html, unsafe_allow_html=True)
+for i in range(0, len(venues), cols_per_row):
+    cols = st.columns(cols_per_row)
+    for j in range(cols_per_row):
+        if i + j < len(venues):
+            v_name = venues[i + j]
+            is_active = active_venues.get(v_name, False)
+            with cols[j]:
+                if is_active:
+                    st.markdown(f"**🔵 {v_name}**\n\n<span style='font-size:0.75rem; color:#2563EB;'>開催中</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<span style='color:#9CA3AF;'>{v_name}</span>", unsafe_allow_html=True)
 
 # --- 会場選択エリア ---
 st.divider()
-st.markdown("##### 📍 予想する会場を選択してください")
+st.subheader("📍 予想する会場を選択してください")
 
 selected_v = st.selectbox(
-    "会場選択",
+    "会場を選択",
     active_list if active_list else list(VENUE_CODES.keys()),
     index=active_list.index(st.session_state.selected_venue) if st.session_state.selected_venue in active_list else 0
 )
@@ -308,11 +185,11 @@ st.session_state.selected_venue = selected_v
 
 col_r, col_m = st.columns(2)
 with col_r:
-    race_num = st.selectbox("レース選択", [f"{i}R" for i in range(1, 13)])
+    race_num = st.selectbox("レースを選択", [f"{i}R" for i in range(1, 13)])
 with col_m:
     investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
 
-# --- 直前情報取得（展示タイム混雑対策強化） ---
+# --- 直前情報取得 ---
 def get_before_info(jcd, rno, date_str, retries=2):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {

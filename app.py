@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import itertools
 import re
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
@@ -177,55 +178,70 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 出走表データ取得 ---
-def get_detailed_racers(jcd, rno, date_str):
+# --- 出走表データ取得（リトライ機能追加） ---
+def get_detailed_racers(jcd, rno, date_str, retries=1):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        res = requests.get(url, headers=headers, timeout=4)
-        if res.status_code != 200: return None
-        soup = BeautifulSoup(res.text, "html.parser")
-        tbodies = soup.find_all("tbody")
-        
-        racers = []
-        for tbody in tbodies:
-            text = tbody.get_text(separator=" ", strip=True)
-            words = text.split()
-            rank = None
-            for word in words:
-                if word in ["A1", "A2", "B1", "B2"]:
-                    rank = word
-                    break
-            if not rank: continue
+    
+    for i in range(retries + 1):
+        try:
+            res = requests.get(url, headers=headers, timeout=5) # タイムアウトを少し伸ばす
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                tbodies = soup.find_all("tbody")
                 
-            name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
-            name = name_el.get_text(strip=True) if name_el else "不明"
-            
-            floats = re.findall(r"\d+\.\d+", text)
-            national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
-            local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
-            motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
-            
-            racers.append({
-                "枠": len(racers) + 1,
-                "選手名": name,
-                "級別": rank,
-                "全国勝率": national_win_rate,
-                "当地勝率": local_win_rate,
-                "モーター2連率(%)": motor_2ren
-            })
-            if len(racers) == 6: break
-        return pd.DataFrame(racers) if len(racers) == 6 else None
-    except Exception:
-        return None
+                racers = []
+                for tbody in tbodies:
+                    text = tbody.get_text(separator=" ", strip=True)
+                    words = text.split()
+                    rank = None
+                    for word in words:
+                        if word in ["A1", "A2", "B1", "B2"]:
+                            rank = word
+                            break
+                    if not rank: continue
+                        
+                    name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
+                    name = name_el.get_text(strip=True) if name_el else "不明"
+                    
+                    floats = re.findall(r"\d+\.\d+", text)
+                    national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
+                    local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
+                    motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
+                    
+                    racers.append({
+                        "枠": len(racers) + 1,
+                        "選手名": name,
+                        "級別": rank,
+                        "全国勝率": national_win_rate,
+                        "当地勝率": local_win_rate,
+                        "モーター2連率(%)": motor_2ren
+                    })
+                    if len(racers) == 6: break
+                return pd.DataFrame(racers) if len(racers) == 6 else None
+            else:
+                # ステータスコードが200以外の場合はリトライ
+                if i < retries:
+                    time.sleep(0.5) # 少し待ってからリトライ
+                    continue
+                else:
+                    return None
+        except requests.exceptions.RequestException:
+            # 通信エラーの場合はリトライ
+            if i < retries:
+                time.sleep(0.5)
+                continue
+            else:
+                return None
 
 # --- 本日の開催場一覧を取得 ---
-@st.cache_data(ttl=7200)
+@st.cache_data(ttl=10800) # 3時間に延長
 def check_active_venues(date_str):
     active_dict = {}
     def check_single(v_tuple):
         name, code = v_tuple
-        df = get_detailed_racers(code, "1", date_str)
+        # ここではリトライしない（速度優先）
+        df = get_detailed_racers(code, "1", date_str, retries=0)
         return name, (df is not None and not df.empty)
 
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -235,7 +251,7 @@ def check_active_venues(date_str):
             
     return active_dict
 
-# データ取得
+# 最もおすすめのレースを判定
 active_venues = check_active_venues(today_str)
 active_list = [v for v, act in active_venues.items() if act]
 
@@ -263,22 +279,33 @@ st.markdown(top_html, unsafe_allow_html=True)
 
 st.subheader("本日 のレース")
 
-# --- 画像風の24会場グリッド（HTML出力・修正版） ---
+# --- 画像風の24会場グリッド（HTML出力） ---
 grid_html = '<div class="venue-grid">'
 for v_name in VENUE_CODES.keys():
     is_active = active_venues.get(v_name, False)
     if is_active:
-        grid_html += f'''<div class="venue-card-active"><span class="tag">一般</span><div class="name">{v_name}</div><div class="sub">1R 開催中</div></div>'''
+        grid_html += f"""
+        <div class="venue-card-active">
+            <span class="tag">一般</span>
+            <div class="name">{v_name}</div>
+            <div class="sub">1R 開催中</div>
+        </div>
+        """
     else:
-        grid_html += f'''<div class="venue-card-inactive"><div class="name">{v_name}</div></div>'''
+        grid_html += f"""
+        <div class="venue-card-inactive">
+            <div class="name">{v_name}</div>
+        </div>
+        """
 grid_html += '</div>'
 
-# ★ここに unsafe_allow_html=True を追加して修正
+# HTMLでカード一覧を表示
 st.markdown(grid_html, unsafe_allow_html=True)
 
 # --- 会場選択エリア ---
 st.divider()
 st.markdown("##### 📍 予想する会場を選択してください")
+# セレクトボックスで会場を選択
 selected_v = st.selectbox(
     "会場選択",
     active_list if active_list else list(VENUE_CODES.keys()),
@@ -293,45 +320,70 @@ with col_r:
 with col_m:
     investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
 
-# --- 直前情報 ---
-def get_before_info(jcd, rno, date_str):
+# --- 直前情報取得（リトライ機能付き） ---
+def get_before_info(jcd, rno, date_str, retries=1):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
-    try:
-        res = requests.get(url, headers=headers, timeout=4)
-        if res.status_code != 200: return info
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        weather_section = soup.find("div", class_="weather1")
-        if weather_section:
-            w_text = weather_section.get_text()
-            m_speed = re.search(r"風速\s*(\d+)m", w_text)
-            if m_speed: info["wind_speed"] = int(m_speed.group(1))
-            
-            if "追い風" in w_text: info["wind_dir"] = "追い風"
-            elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
-            elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
-            
-            if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
-            elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
-            
-        tenji_list = []
-        td_tenji = soup.find_all("td", class_="is-fs14")
-        for td in td_tenji:
-            val = td.get_text(strip=True)
-            if re.match(r"^\d\.\d{2}$", val):
-                tenji_list.append(float(val))
-        if len(tenji_list) == 6: info["tenji"] = tenji_list
-        return info
-    except Exception:
-        return info
+    info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常", "status": "Error"}
+    
+    for i in range(retries + 1):
+        try:
+            res = requests.get(url, headers=headers, timeout=5) # タイムアウトを少し伸ばす
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                
+                weather_section = soup.find("div", class_="weather1")
+                if weather_section:
+                    w_text = weather_section.get_text()
+                    m_speed = re.search(r"風速\s*(\d+)m", w_text)
+                    if m_speed: info["wind_speed"] = int(m_speed.group(1))
+                    
+                    if "追い風" in w_text: info["wind_dir"] = "追い風"
+                    elif "向かい風" in w_text: info["wind_dir"] = "向かい風"
+                    elif "左横風" in w_text or "右横風" in w_text: info["wind_dir"] = "横風"
+                    
+                    if "満潮" in w_text or "上げ潮" in w_text: info["tide"] = "満潮/上げ潮 🌊"
+                    elif "干潮" in w_text or "下げ潮" in w_text: info["tide"] = "干潮/下げ潮 ☀️"
+                    
+                tenji_list = []
+                td_tenji = soup.find_all("td", class_="is-fs14")
+                for td in td_tenji:
+                    val = td.get_text(strip=True)
+                    if re.match(r"^\d\.\d{2}$", val):
+                        tenji_list.append(float(val))
+                if len(tenji_list) == 6: 
+                    info["tenji"] = tenji_list
+                    info["status"] = "OK"
+                
+                if info["status"] == "OK":
+                    return info
+                else:
+                    # ステータスがOKでない（展示タイムが取れていない）場合はリトライ
+                    if i < retries:
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        return info
+            else:
+                # ステータスコードが200以外の場合はリトライ
+                if i < retries:
+                    time.sleep(0.5)
+                    continue
+                else:
+                    return info
+        except requests.exceptions.RequestException:
+            # 通信エラーの場合はリトライ
+            if i < retries:
+                time.sleep(0.5)
+                continue
+            else:
+                return info
+    return info
 
-# --- AI分析ロジック ---
+# --- AI分析 ---
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
-    v_desc = v_param["desc"]
     
     tide_status = weather_info["tide"]
     tide_in_adj = 0
@@ -426,7 +478,7 @@ def calculate_predictions(df, venue, weather_info, investment):
         })
         
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-    return pd.DataFrame(bet_list), tenkai_msg, v_desc
+    return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
 
 # --- 予想実行 ---
 if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想する", type="primary", use_container_width=True):
@@ -435,11 +487,12 @@ if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想す�
     rno = race_num.replace("R", "")
     
     with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
-        df_racers = get_detailed_racers(jcd, rno, today_str)
-        weather_info = get_before_info(jcd, rno, today_str)
+        # 安定取得のためリトライ1回追加
+        df_racers = get_detailed_racers(jcd, rno, today_str, retries=1)
+        weather_info = get_before_info(jcd, rno, today_str, retries=1)
     
-    if df_racers is None or df_racers.empty:
-        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、終了している可能性があります。")
+    if df_racers is None or df_racers.empty or weather_info["status"] != "OK":
+        st.warning(f"⚠️ {venue} {race_num} のデータが取得できませんでした。本日の開催がないか、展示タイムがまだ発表されていない可能性があります。投票締切直前はアクセス集中により失敗しやすいため、再度お試しください。")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, venue, weather_info, investment)
         

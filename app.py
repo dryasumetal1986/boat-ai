@@ -11,8 +11,8 @@ JCD_MAP = {
     "芦屋": "21", "福岡": "22", "唐津": "23", "大村": "24"
 }
 
-# あなたの最新GASデプロイURL
-GAS_URL = "https://script.google.com/macros/s/AKfycbzcDjEeOka2MJJgZJNTA-2PE4DVZIuPXskND9wI1pFZUDH_3va5JewDDA7KvKVFshFT/exec"
+# 送っていただいた最新のGASデプロイURL
+GAS_URL = "https://script.google.com/macros/s/AKfycbzDJeQlua2NUjgZJNTA-2PE48VZIuF9uaNttD9wXLpFZUDH__3va9JwwGDA7KVFeHFT/exec"
 
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
 st.caption("【リアルタイムデータ×気象・潮汐×決まり手解析】")
@@ -31,11 +31,10 @@ if st.button("🔍 AI予想を実行する"):
         try:
             res = requests.get(GAS_URL, params={"jcd": jcd, "rno": rno}, timeout=15)
             
-            # レスポンスがJSONかどうか判定
             try:
                 data = res.json()
             except Exception:
-                st.error("⚠️ GASからの応答が正しいJSONデータではありません。GASのデプロイ設定（アクセス権限が『全員』になっているか）を確認してください。")
+                st.error("⚠️ GASからの応答解析に失敗しました。GASのアクセス権限（『全員』になっているか）をご確認ください。")
                 st.stop()
             
             if data.get("status") == "success":
@@ -46,7 +45,7 @@ if st.button("🔍 AI予想を実行する"):
                 st.markdown("### 🤖 AI予想結果")
                 st.write("1着軸予想: 1号艇 / 2着対抗: 2号艇・3号艇")
             else:
-                st.error(f"⚠️ 【{selected_place} {selected_race}】のデータを読み込めませんでした。（理由: {data.get('message')}）")
+                st.error(f"⚠️ 【{selected_place} {selected_race}】のデータを読み込めませんでした。（詳細: {data.get('message')}）")
                 
         except Exception as e:
             st.error(f"通信エラーが発生しました: {e}")

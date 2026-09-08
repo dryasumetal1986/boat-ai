@@ -89,14 +89,14 @@ def get_html_with_retry(url):
         "Referer": "https://www.boatrace.jp/"
     }
     try:
-        res = session.get(url, headers=headers, timeout=5)
+        res = session.get(url, headers=headers, timeout=6)
         if res.status_code == 200:
             return res.text
     except Exception:
         pass
     return None
 
-# --- 出走表データ取得 ---
+# --- 出走表データ取得（強力パース版） ---
 def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     html = get_html_with_retry(url)
@@ -109,28 +109,30 @@ def get_detailed_racers(jcd, rno, date_str):
     racers = []
     for tbody in tbodies:
         text = tbody.get_text(separator=" ", strip=True)
-        words = text.split()
-        rank = None
-        for word in words:
-            if word in ["A1", "A2", "B1", "B2"]:
-                rank = word
-                break
-        if not rank: continue
-            
-        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
-        name = name_el.get_text(strip=True) if name_el else "選手名"
         
+        # 級別の検索
+        rank_match = re.search(r"\b(A1|A2|B1|B2)\b", text)
+        if not rank_match:
+            continue
+        rank = rank_match.group(1)
+            
+        # 選手名の抽出
+        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18") or tbody.find("a")
+        name = name_el.get_text(strip=True) if name_el else "選手"
+        name = re.sub(r"[0-9\s/]+", "", name)[:4]  # 登録番号などを除外
+        
+        # 数値（勝率等）の抽出
         floats = re.findall(r"\d+\.\d+", text)
-        national_win_rate = float(floats[0]) if len(floats) >= 1 else 5.00
-        local_win_rate = float(floats[1]) if len(floats) >= 2 else national_win_rate
+        national_win = float(floats[0]) if len(floats) >= 1 else 5.00
+        local_win = float(floats[1]) if len(floats) >= 2 else national_win
         motor_2ren = float(floats[2]) if len(floats) >= 3 else 30.00
         
         racers.append({
             "枠": len(racers) + 1,
-            "選手名": name,
+            "選手名": name if name else f"{len(racers)+1}号艇",
             "級別": rank,
-            "全国勝率": national_win_rate,
-            "当地勝率": local_win_rate,
+            "全国勝率": national_win,
+            "当地勝率": local_win,
             "モーター2連率(%)": motor_2ren
         })
         if len(racers) == 6: break
@@ -269,37 +271,11 @@ def calculate_predictions(df, venue, weather_info, investment):
         })
         
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-    return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
+    return pd.DataFrame(bet_list), tenkai_msg, v_desc if 'v_desc' in locals() else v_param["desc"]
 
 # --- ヘッダー ---
 st.markdown('<p class="main-title">🚤 やっちゃんの競艇AI予想</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="sub-date">日付: {date_display}</p>', unsafe_allow_html=True)
-
-# --- ピックアップ検索（ワンクリック軽量版） ---
-with st.expander("🔥 本日のイン逃げ濃厚候補チェック（高速版）", expanded=False):
-    st.caption("ボタンを押すと主要イン有利会場（大村・徳山・芦屋・下関）の直近レースをサクッと確認します。")
-    if st.button("🔍 鉄板レースを即時検索"):
-        found = False
-        target_venues = ["大村", "徳山", "芦屋", "下関", "住之江"]
-        for v in target_venues:
-            jcd = VENUE_CODES[v]
-            for r in range(1, 13):
-                df_chk = get_detailed_racers(jcd, str(r), today_str)
-                if df_chk is not None and not df_chk.empty:
-                    r1 = df_chk.iloc[0]
-                    if r1["級別"] == "A1" and r1["全国勝率"] >= 6.50:
-                        st.markdown(f"""
-                        <div class="pickup-card">
-                            <b>🎯 {v} {r}R</b> | 1号艇: <b>{r1['選手名']}</b> ({r1['級別']}) 勝率:<b>{r1['全国勝率']}</b><br>
-                            <span style="color:#2563EB; font-weight:bold;">🔥 イン逃げ信頼度 ★★★★★</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        found = True
-                        break
-        if not found:
-            st.info("現在すぐ買える鉄板レースは見つかりませんでした。下の選択欄から個別に予想してください。")
-
-st.divider()
 
 # --- レース選択フォーム ---
 st.write("📍 **予想するレースを選択**")
@@ -322,7 +298,7 @@ if st.button(f"🚀 {selected_v} {race_num} をAI予想する", type="primary", 
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。まだ開催前か、締め切り後の可能性があります。")
+        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。\n※締め切り直前〜レース中、または本日開催のない会場・レースの可能性があります。次のレースでお試しください！")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, selected_v, weather_info, investment)
         

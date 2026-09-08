@@ -10,46 +10,20 @@ st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="�
 # --- カスタムCSS（BoatAI風デザイン） ---
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #f8fafc;
-        color: #1e293b;
-    }
+    .stApp { background-color: #f8fafc; color: #1e293b; }
     .hero-container {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 14px;
-        margin-bottom: 20px;
+        color: white; padding: 20px; border-radius: 14px; margin-bottom: 20px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    .hero-title {
-        font-size: 22px;
-        font-weight: 800;
-        margin-bottom: 6px;
-    }
-    .hero-sub {
-        font-size: 13px;
-        opacity: 0.9;
-        line-height: 1.4;
-        margin-bottom: 12px;
-    }
-    .stat-box {
-        background: rgba(255, 255, 255, 0.18);
-        border-radius: 8px;
-        padding: 8px;
-        text-align: center;
-    }
+    .hero-title { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+    .hero-sub { font-size: 13px; opacity: 0.9; line-height: 1.4; margin-bottom: 12px; }
+    .stat-box { background: rgba(255, 255, 255, 0.18); border-radius: 8px; padding: 8px; text-align: center; }
     .stat-label { font-size: 10px; opacity: 0.8; }
     .stat-val { font-size: 18px; font-weight: bold; }
     .venue-card {
-        background: white;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 8px;
-        border: 1px solid #e2e8f0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        background: white; border-radius: 10px; padding: 12px; margin-bottom: 8px;
+        border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;
     }
     .venue-name { font-size: 16px; font-weight: bold; color: #0f172a; }
     .venue-badge { font-size: 11px; color: #0284c7; background: #e0f2fe; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
@@ -67,37 +41,56 @@ VENUES_MAP = {
 
 GAS_URL = 'https://script.google.com/macros/s/AKfycbwZjBzSIO8_Rx8r1NdSvjgaRGV-8lOeN2aT4tMSkFDfeVXqCQvWeO1051KByM0KtlIn/exec'
 
-# --- 1. 本日のリアルタイム開催場を取得 ---
+# --- 堅牢なHTML取得関数（リトライ機能付き） ---
+def fetch_html_safe(target_url):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    # 1. 直接取得を試行
+    try:
+        res = requests.get(target_url, headers=headers, timeout=5)
+        if res.status_code == 200 and 'is-boat' in res.text:
+            return res.text
+    except Exception:
+        pass
+
+    # 2. 失敗した場合はGASプロキシ経由で再試行
+    try:
+        res = requests.get(GAS_URL, params={'url': target_url}, timeout=10)
+        if res.status_code == 200 and 'is-boat' in res.text:
+            return res.text
+    except Exception:
+        pass
+        
+    return None
+
+# --- 本日のリアルタイム開催場を取得 ---
 @st.cache_data(ttl=600)
 def fetch_active_venues():
-    try:
-        url = "https://www.boatrace.jp/owpc/pc/race/index"
-        res = requests.get(GAS_URL, params={'url': url}, timeout=15)
-        active = []
-        if res.status_code == 200:
-            for name in VENUES_MAP.keys():
-                if name in res.text:
-                    active.append(name)
-        return active if active else list(VENUES_MAP.keys())
-    except Exception:
-        return list(VENUES_MAP.keys())
+    html = fetch_html_safe("https://www.boatrace.jp/owpc/pc/race/index")
+    active = []
+    if html:
+        for name in VENUES_MAP.keys():
+            if name in html:
+                active.append(name)
+    return active if active else list(VENUES_MAP.keys())
 
-# --- 2. 本物の出走表データを取得・AI解析 ---
+# --- 本物の出走表データを取得・AI解析 ---
 def get_real_racelist(venue_name, race_num):
-    jcd = VENUES_MAP.get(venue_name, '02')
+    jcd = VENUES_MAP.get(venue_name, '01')
     rno = race_num.replace('R', '')
     target_url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}"
     
+    html = fetch_html_safe(target_url)
+    if not html:
+        return None, f"【{venue_name} {race_num}】の出走データ取得に一時的に失敗しました。もう一度選択し直してください。"
+        
     try:
-        res = requests.get(GAS_URL, params={'url': target_url}, timeout=15)
-        if res.status_code != 200 or 'is-boat' not in res.text:
-            return None, "公式サイトからのデータ取得に失敗しました。時間をおいて再試行してください。"
-            
-        soup = BeautifulSoup(res.text, 'html.parser')
+        soup = BeautifulSoup(html, 'html.parser')
         tbodies = soup.find_all('tbody', class_=lambda x: x and 'is-fs' in x)
         
         if len(tbodies) < 6:
-            return None, f"【{venue_name} {race_num}】の出走表データが見つかりません（中止または未確定の可能性があります）。"
+            return None, f"【{venue_name} {race_num}】の出走表が見つかりません（本日未開催・終了・中止の可能性があります）。"
             
         data = []
         for i, tbody in enumerate(tbodies[:6]):
@@ -105,7 +98,11 @@ def get_real_racelist(venue_name, race_num):
             
             # 選手名
             name_div = tbody.find('div', class_='is-name')
-            name = name_div.find('a').text.strip().replace(' ', '').replace('\u3000', '') if name_div and name_div.find('a') else "不明"
+            name = "不明"
+            if name_div:
+                a_tag = name_div.find('a')
+                if a_tag:
+                    name = a_tag.text.strip().replace(' ', '').replace('\u3000', '')
             
             # 級別
             class_span = tbody.find('span', class_='is-class')
@@ -116,21 +113,19 @@ def get_real_racelist(venue_name, race_num):
             win_rate = "0.00"
             motor_2ren = "0.00%"
             
-            if len(tds) >= 7:
-                # 勝率
+            if len(tds) >= 5:
                 rate_text = tds[4].text.strip()
                 match = re.search(r'\d+\.\d+', rate_text)
                 if match:
                     win_rate = match.group()
             
-            if len(tds) >= 8:
-                # モーター2連率
+            if len(tds) >= 7:
                 motor_text = tds[6].text.strip()
                 match_m = re.search(r'\d+\.\d+', motor_text)
                 if match_m:
                     motor_2ren = f"{match_m.group()}%"
 
-            # AIスコア計算（実データに基づくロジック）
+            # AIスコア計算
             w_rate_num = float(win_rate) if win_rate != "0.00" else 4.5
             base_score = (w_rate_num * 8) + (15 if boat_num == 1 else 0)
             if rank == 'A1': base_score += 10
@@ -152,11 +147,10 @@ def get_real_racelist(venue_name, race_num):
         return df, None
 
     except Exception as e:
-        return None, f"エラーが発生しました: {str(e)}"
+        return None, f"データ解析エラー: {str(e)}"
 
 # --- UI描画 ---
 
-# ヘッダー
 st.markdown("""
 <div class="hero-container">
     <div style="font-size:11px; opacity:0.8; margin-bottom:2px;">リアルタイム公式連動モデル</div>
@@ -170,7 +164,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 開催場一覧（カード型）
 st.markdown("### 📅 本日のリアルタイム開催場")
 active_venues = fetch_active_venues()
 
@@ -186,7 +179,6 @@ for i, v_name in enumerate(active_venues):
 
 st.markdown("---")
 
-# 予想検索セクション
 st.markdown("### 🔮 レース選択・AI予想")
 
 col1, col2 = st.columns(2)
@@ -196,22 +188,20 @@ with col2:
     selected_race = st.selectbox("② レースを選択", [f"{i}R" for i in range(1, 13)], key="r_select")
 
 if selected_venue and selected_race:
-    with st.spinner(f"🌐 【{selected_venue} {selected_race}】の公式本物出走データを解析中..."):
+    with st.spinner(f"🌐 【{selected_venue} {selected_race}】のデータを読み込み中..."):
         df_result, err = get_real_racelist(selected_venue, selected_race)
         
         if err:
             st.warning(err)
         else:
-            st.success(f"✅ 【{selected_venue} {selected_race}】の本物データ取得成功！")
+            st.success(f"✅ 【{selected_venue} {selected_race}】の出走表取得成功！")
             
-            # データ表示
             st.dataframe(
                 df_result[['印', '艇番', '選手名', '級別', '全国勝率', 'モーター2連率', 'AI予測スコア']], 
                 use_container_width=True,
                 hide_index=True
             )
             
-            # 買い目提案
             t1 = df_result.iloc[0]
             t2 = df_result.iloc[1]
             t3 = df_result.iloc[2]

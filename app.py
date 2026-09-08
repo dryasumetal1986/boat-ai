@@ -3,13 +3,16 @@ import requests
 import pandas as pd
 from datetime import date
 
+
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想 PRO",
     page_icon="🚤",
     layout="wide",
 )
 
+
 API_BASE = "https://boatraceopenapi.github.io/api/v1"
+
 
 STADIUMS = {
     1: "桐生",
@@ -53,7 +56,7 @@ def get_data(target_date):
     ymd = target_date.strftime("%Y%m%d")
     year = target_date.strftime("%Y")
 
-    url = f"{API_BASE}/{year}/{ymd}.json"
+    url = API_BASE + "/" + year + "/" + ymd + ".json"
 
     response = requests.get(
         url,
@@ -95,7 +98,9 @@ def get_course_bonus(course):
 
 def make_table(race):
     racers = race.get("racers", {})
-    preview = race.get("preview", {}).get("racers", {})
+
+    preview_data = race.get("preview", {})
+    preview = preview_data.get("racers", {})
 
     rows = []
 
@@ -107,52 +112,32 @@ def make_table(race):
         if not racer:
             continue
 
-        rows.append(
-            {
-                "枠": lane,
-                "選手名": racer.get(
-                    "name",
-                    "不明",
-                ),
-                "級別": racer.get(
-                    "rank_number",
-                    "",
-                ),
-                "全国勝率": get_number(
-                    racer.get(
-                        "national_win_rate"
-                    )
-                ),
-                "全国2連率": get_number(
-                    racer.get(
-                        "national_top_2_percent"
-                    )
-                ),
-                "当地勝率": get_number(
-                    racer.get(
-                        "local_win_rate"
-                    )
-                ),
-                "モーター2連率": get_number(
-                    racer.get(
-                        "motor_top_2_percent"
-                    )
-                ),
-                "平均ST": get_number(
-                    racer.get(
-                        "average_start_timing"
-                    )
-                ),
-                "展示タイム": get_number(
-                    info.get(
-                        "exhibition_time"
-                    )
-                ),
-                "コース適性": get_course_bonus(
-                    lane
-                ),
-            }
-        )
+        row = {
+            "枠": lane,
+            "選手名": racer.get("name", "不明"),
+            "級別": racer.get("rank_number", ""),
+            "全国勝率": get_number(
+                racer.get("national_win_rate")
+            ),
+            "全国2連率": get_number(
+                racer.get("national_top_2_percent")
+            ),
+            "当地勝率": get_number(
+                racer.get("local_win_rate")
+            ),
+            "モーター2連率": get_number(
+                racer.get("motor_top_2_percent")
+            ),
+            "平均ST": get_number(
+                racer.get("average_start_timing")
+            ),
+            "展示タイム": get_number(
+                info.get("exhibition_time")
+            ),
+            "コース適性": get_course_bonus(lane),
+        }
+
+        rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -163,17 +148,11 @@ def calculate_score(row):
 
     score += row["全国勝率"] * 10
 
-    score += (
-        row["全国2連率"] * 0.25
-    )
+    score += row["全国2連率"] * 0.25
 
-    score += (
-        row["当地勝率"] * 5
-    )
+    score += row["当地勝率"] * 5
 
-    score += (
-        row["モーター2連率"] * 0.12
-    )
+    score += row["モーター2連率"] * 0.12
 
     st_time = row["平均ST"]
 
@@ -212,42 +191,14 @@ def calculate_score(row):
     return score
 
 
-st.title(
-    "🚤 やっちゃんの競艇AI予想 PRO"
-)
+st.title("🚤 やっちゃんの競艇AI予想 PRO")
+
 
 st.write(
     "全国24場対応の競艇予想支援アプリです。"
 )
 
+
 st.warning(
     "⚠️ 非公式APIを利用しています。"
-    "最新情報は必ず公式BOATRACEで確認してください。"
-)
-
-st.subheader("📅 レースを選択")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-
-    target_date = st.date_input(
-        "開催日",
-        value=date.today(),
-        min_value=date(2026, 1, 1),
-    )
-
-with col2:
-
-    stadium_name = st.selectbox(
-        "競艇場",
-        list(STADIUMS.values()),
-    )
-
-with col3:
-
-    race_number = st.selectbox(
-        "レース",
-        list(range(1, 13)),
-        format_func=lambda x:
-        f"{
+    "最新情報は必ず

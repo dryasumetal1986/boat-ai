@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import re
+import json
 
 # --- ページ基本設定 ---
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
@@ -44,85 +45,80 @@ VENUES_MAP = {
     '芦屋': '21', '福岡': '22', '唐津': '23', '大村': '24'
 }
 
-def fetch_real_boatrace_data(venue_name, race_num):
-    """公式サイトから実データを完全直接取得する関数"""
+def fetch_real_boatrace_data_via_proxy(venue_name, race_num):
+    """プロキシAPI経由で公式出走表をIPブロック回避して取得する"""
     jcd = VENUES_MAP.get(venue_name, '01')
     rno = race_num.replace('R', '')
-    url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}"
+    target_url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-        'Referer': 'https://www.boatrace.jp/owpc/pc/race/raceindex',
-    }
+    # クラウドサーバーからのIPブロックを回避するプロキシURL
+    proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(target_url)}"
 
     try:
-        session = requests.Session()
-        res = session.get(url, headers=headers, timeout=6)
-        
-        if res.status_code == 200 and ('is-fs' in res.text or 'is-pck12' in res.text):
-            soup = BeautifulSoup(res.text, 'html.parser')
-            tbodies = soup.find_all('tbody', class_=lambda x: x and ('is-fs' in x or 'is-pck12' in x))
+        res = requests.get(proxy_url, timeout=10)
+        if res.status_code == 200:
+            json_data = res.json()
+            html_content = json_data.get('contents', '')
             
-            # 番組表から6艇分抽出
-            data = []
-            for i in range(min(6, len(tbodies))):
-                tbody = tbodies[i]
-                b_num = i + 1
+            if html_content and ('is-fs' in html_content or 'is-pck12' in html_content):
+                soup = BeautifulSoup(html_content, 'html.parser')
+                tbodies = soup.find_all('tbody', class_=lambda x: x and ('is-fs' in x or 'is-pck12' in x))
                 
-                # 1. 選手名取得
-                name_div = tbody.find('div', class_='is-name')
-                if name_div and name_div.find('a'):
-                    raw_name = name_div.find('a').text
-                    name = re.sub(r'[\s\u3000]+', '', raw_name)
-                else:
-                    name = f"（取得失敗）"
-                
-                # 2. 級別取得
-                class_span = tbody.find('span', class_='is-class')
-                rank = class_span.text.strip() if class_span else "B1"
-                
-                # 3. 勝率・モーター2連率の抽出
-                tds = tbody.find_all('td')
-                win_rate = "0.00"
-                motor_2ren = "0.0%"
-                
-                all_text = " ".join([td.text.strip() for td in tds])
-                
-                # 勝率パターン抽出
-                rates = re.findall(r'\d\.\d{2}', all_text)
-                if len(rates) >= 1:
-                    win_rate = rates[0]  # 全国勝率
-                
-                # モーター2連率抽出
-                motor_match = re.findall(r'\d+\.\d{2}%|\d+\.\d+%', all_text)
-                if len(motor_match) >= 3:
-                    motor_2ren = motor_match[2]  # 3番目が通常モーター2連率
-                elif len(motor_match) >= 1:
-                    motor_2ren = motor_match[0]
+                data = []
+                for i in range(min(6, len(tbodies))):
+                    tbody = tbodies[i]
+                    b_num = i + 1
+                    
+                    # 1. 選手名取得
+                    name_div = tbody.find('div', class_='is-name')
+                    if name_div and name_div.find('a'):
+                        raw_name = name_div.find('a').text
+                        name = re.sub(r'[\s\u3000]+', '', raw_name)
+                    else:
+                        name = f"選手{b_num}"
+                    
+                    # 2. 級別取得
+                    class_span = tbody.find('span', class_='is-class')
+                    rank = class_span.text.strip() if class_span else "B1"
+                    
+                    # 3. 勝率・モーター2連率の抽出
+                    tds = tbody.find_all('td')
+                    all_text = " ".join([td.text.strip() for td in tds])
+                    
+                    win_rate = "0.00"
+                    motor_2ren = "0.0%"
+                    
+                    rates = re.findall(r'\d\.\d{2}', all_text)
+                    if len(rates) >= 1:
+                        win_rate = rates[0]
+                    
+                    motor_match = re.findall(r'\d+\.\d{2}%|\d+\.\d+%', all_text)
+                    if len(motor_match) >= 3:
+                        motor_2ren = motor_match[2]
+                    elif len(motor_match) >= 1:
+                        motor_2ren = motor_match[0]
 
-                w_num = float(win_rate) if win_rate != "0.00" else 4.0
-                m_num = float(motor_2ren.replace('%', '')) if motor_2ren != "0.0%" else 30.0
+                    w_num = float(win_rate) if win_rate != "0.00" else 4.5
+                    m_num = float(motor_2ren.replace('%', '')) if motor_2ren != "0.0%" else 30.0
+                    
+                    # AI予測スコア計算
+                    score = (w_num * 7.5) + (m_num * 0.2) + (18 if b_num == 1 else 8 if b_num == 2 else 0) + (10 if rank == 'A1' else 5 if rank == 'A2' else 0)
+                    
+                    data.append({
+                        '艇番': b_num,
+                        '選手名': name,
+                        '級別': rank,
+                        '全国勝率': win_rate,
+                        'モーター2連率': motor_2ren,
+                        'AI予測スコア': round(score, 1)
+                    })
                 
-                # AI予測スコア計算（1コース有利・A1優遇・勝率・モーター加味）
-                score = (w_num * 7.5) + (m_num * 0.2) + (18 if b_num == 1 else 8 if b_num == 2 else 0) + (10 if rank == 'A1' else 5 if rank == 'A2' else 0)
-                
-                data.append({
-                    '艇番': b_num,
-                    '選手名': name,
-                    '級別': rank,
-                    '全国勝率': win_rate,
-                    'モーター2連率': motor_2ren,
-                    'AI予測スコア': round(score, 1)
-                })
-            
-            if len(data) == 6:
-                df = pd.DataFrame(data)
-                df = df.sort_values(by='AI予測スコア', ascending=False).reset_index(drop=True)
-                marks = ['◎', '○', '▲', '△', '注', '–']
-                df.insert(0, '印', marks[:len(df)])
-                return df
+                if len(data) == 6:
+                    df = pd.DataFrame(data)
+                    df = df.sort_values(by='AI予測スコア', ascending=False).reset_index(drop=True)
+                    marks = ['◎', '○', '▲', '△', '注', '–']
+                    df.insert(0, '印', marks[:len(df)])
+                    return df
     except Exception:
         return None
 
@@ -141,11 +137,11 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 結果表示 ---
 if predict_clicked:
-    with st.spinner(f"🌐 【{selected_venue} {selected_race}】公式出走表をリアルタイム取得中..."):
-        df_result = fetch_real_boatrace_data(selected_venue, selected_race)
+    with st.spinner(f"🌐 【{selected_venue} {selected_race}】公式データをプロキシ取得中..."):
+        df_result = fetch_real_boatrace_data_via_proxy(selected_venue, selected_race)
         
         if df_result is not None and not df_result.empty:
-            st.success(f"✅ 【{selected_venue} {selected_race}】公式データ取得成功")
+            st.success(f"✅ 【{selected_venue} {selected_race}】公式データ取得成功！")
             
             st.dataframe(
                 df_result[['印', '艇番', '選手名', '級別', '全国勝率', 'モーター2連率', 'AI予測スコア']], 
@@ -164,6 +160,6 @@ if predict_clicked:
                 f"• **注目軸選手:** {t1['艇番']}号艇 **{t1['選手名']}** （{t1['級別']} / 勝率: {t1['全国勝率']}）"
             )
         else:
-            st.error(f"⚠️ 【{selected_venue} {selected_race}】の公式データを取得できませんでした。\n\n・本日未開催の場/レース番号\n・レース直前/締切後の通信制限\nなどが考えられます。別の開催場をお選びください。")
+            st.error(f"❌ 【{selected_venue} {selected_race}】の公式番組表を取得できませんでした。本日開催されている場（例：びわこ等）を選択してお試しください。")
 
 st.caption("※「やっちゃんの競艇AI予想」公式システム")

@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import itertools
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
@@ -152,7 +153,7 @@ def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code != 200: return None
         soup = BeautifulSoup(res.text, "html.parser")
         tbodies = soup.find_all("tbody")
@@ -189,20 +190,26 @@ def get_detailed_racers(jcd, rno, date_str):
     except Exception:
         return None
 
-# --- 本日の開催場一覧を取得 ---
-@st.cache_data(ttl=3600)
+# --- 本日の開催場一覧を【高速並列アクセス】で取得 ---
+@st.cache_data(ttl=7200)  # キャッシュ保持時間を2時間に延長
 def check_active_venues(date_str):
     active_dict = {}
-    for name, code in VENUE_CODES.items():
+    
+    def check_single(v_tuple):
+        name, code = v_tuple
         df = get_detailed_racers(code, "1", date_str)
-        if df is not None and not df.empty:
-            active_dict[name] = True
-        else:
-            active_dict[name] = False
+        return name, (df is not None and not df.empty)
+
+    # 12スレッドで24場へ同時並列アクセス
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        results = executor.map(check_single, VENUE_CODES.items())
+        for name, is_active in results:
+            active_dict[name] = is_active
+            
     return active_dict
 
 # --- 最もイン逃げ率が高い会場・レースの自動判定 ---
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=7200)
 def find_best_in_race(date_str):
     best_venue = "大村"
     best_rno = "1"
@@ -211,7 +218,7 @@ def find_best_in_race(date_str):
 
     check_venues = ["大村", "徳山", "芦屋", "下関", "住之江", "尼崎"]
     
-    for v in check_venues:
+    def check_in_venue(v):
         jcd = VENUE_CODES[v]
         df = get_detailed_racers(jcd, "1", date_str)
         if df is not None and not df.empty:
@@ -219,11 +226,16 @@ def find_best_in_race(date_str):
             in_adj = VENUE_CHARACTERISTICS[v]["in_adj"]
             rank_score = 20 if r1["級別"] == "A1" else (10 if r1["級別"] == "A2" else 0)
             score = (r1["全国勝率"] * 10) + (r1["当地勝率"] * 5) + in_adj + rank_score
-            
+            return v, "1", r1["選手名"], score
+        return v, "1", "不明", -1.0
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        results = executor.map(check_in_venue, check_venues)
+        for v, r, name, score in results:
             if score > highest_score:
                 highest_score = score
                 best_venue = v
-                best_racer = r1["選手名"]
+                best_racer = name
 
     return best_venue, best_rno, best_racer, highest_score
 
@@ -289,7 +301,7 @@ def get_before_info(jcd, rno, date_str):
     headers = {"User-Agent": "Mozilla/5.0"}
     info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "中潮/平常"}
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code != 200: return info
         soup = BeautifulSoup(res.text, "html.parser")
         
@@ -415,7 +427,7 @@ def calculate_predictions(df, venue, weather_info, investment):
         })
         
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-    return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
+    return pd.DataFrame(bet_list), tenkai_msg, v_desc
 
 # --- 予想実行 ---
 if st.button(f"🚀 {st.session_state.selected_venue} {race_num} をAI予想する", type="primary", use_container_width=True):

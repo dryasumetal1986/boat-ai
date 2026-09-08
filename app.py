@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import itertools
 import re
-import time
 
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
@@ -13,35 +12,13 @@ st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="�
 # --- カスタムCSS ---
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #F8FAFC;
-    }
-    h1, h2, h3, .stSubheader, p, span {
-        color: #0F172A !important;
-    }
-    .main-title {
-        font-size: 1.4rem !important;
-        font-weight: 800;
-        margin-bottom: 0px;
-        color: #1E293B !important;
-    }
-    .sub-date {
-        font-size: 0.8rem !important;
-        color: #64748B !important;
-        margin-bottom: 12px;
-    }
-    .pickup-card {
-        background-color: #EFF6FF;
-        border-left: 4px solid #2563EB;
-        padding: 8px 12px;
-        border-radius: 6px;
-        margin-bottom: 6px;
-        font-size: 0.85rem;
-    }
+    .stApp { background-color: #F8FAFC; }
+    h1, h2, h3, .stSubheader, p, span { color: #0F172A !important; }
+    .main-title { font-size: 1.4rem !important; font-weight: 800; color: #1E293B !important; }
+    .sub-date { font-size: 0.8rem !important; color: #64748B !important; margin-bottom: 12px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 日付設定
 JST = timezone(timedelta(hours=+9), 'JST')
 now_jst = datetime.now(JST)
 today_str = now_jst.strftime("%Y%m%d")
@@ -81,25 +58,25 @@ VENUE_CHARACTERISTICS = {
     "戸田": {"water": "淡水", "in_adj": -15, "makuri_adj": 10, "desc": "【淡水/イン弱点No.1】1M超狭くセンターまくり炸裂。"}
 }
 
-# --- 通信関数 ---
-def get_html_with_retry(url):
-    session = requests.Session()
+# --- 堅牢通信レイヤー ---
+def fetch_url(url):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://www.boatrace.jp/"
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.7,en;q=0.3',
+        'Cache-Control': 'no-cache',
     }
     try:
-        res = session.get(url, headers=headers, timeout=6)
+        res = requests.get(url, headers=headers, timeout=8)
         if res.status_code == 200:
             return res.text
     except Exception:
         pass
     return None
 
-# --- 出走表データ取得（強力パース版） ---
 def get_detailed_racers(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={date_str}"
-    html = get_html_with_retry(url)
+    html = fetch_url(url)
     if not html:
         return None
         
@@ -109,19 +86,15 @@ def get_detailed_racers(jcd, rno, date_str):
     racers = []
     for tbody in tbodies:
         text = tbody.get_text(separator=" ", strip=True)
-        
-        # 級別の検索
         rank_match = re.search(r"\b(A1|A2|B1|B2)\b", text)
         if not rank_match:
             continue
         rank = rank_match.group(1)
-            
-        # 選手名の抽出
-        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18") or tbody.find("a")
-        name = name_el.get_text(strip=True) if name_el else "選手"
-        name = re.sub(r"[0-9\s/]+", "", name)[:4]  # 登録番号などを除外
         
-        # 数値（勝率等）の抽出
+        name_el = tbody.find("div", class_="is-fs18") or tbody.find("span", class_="is-fs18")
+        name = name_el.get_text(strip=True) if name_el else "選手"
+        name = re.sub(r"[0-9\s/]+", "", name)[:4]
+        
         floats = re.findall(r"\d+\.\d+", text)
         national_win = float(floats[0]) if len(floats) >= 1 else 5.00
         local_win = float(floats[1]) if len(floats) >= 2 else national_win
@@ -139,11 +112,10 @@ def get_detailed_racers(jcd, rno, date_str):
         
     return pd.DataFrame(racers) if len(racers) == 6 else None
 
-# --- 直前情報＆展示タイム取得 ---
 def get_before_info(jcd, rno, date_str):
     url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={date_str}"
     info = {"wind_speed": 0, "wind_dir": "無風", "tenji": [6.80]*6, "tide": "平常"}
-    html = get_html_with_retry(url)
+    html = fetch_url(url)
     if not html:
         return info
         
@@ -173,7 +145,6 @@ def get_before_info(jcd, rno, date_str):
         
     return info
 
-# --- AI分析ロジック ---
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
@@ -271,15 +242,13 @@ def calculate_predictions(df, venue, weather_info, investment):
         })
         
     tenkai_msg = "⚡ 潮位・干潮まくり展開警戒" if is_makuri_tenkai else "🎯 満潮・イン堅調展開"
-    return pd.DataFrame(bet_list), tenkai_msg, v_desc if 'v_desc' in locals() else v_param["desc"]
+    return pd.DataFrame(bet_list), tenkai_msg, v_param["desc"]
 
-# --- ヘッダー ---
+# --- UI構築 ---
 st.markdown('<p class="main-title">🚤 やっちゃんの競艇AI予想</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="sub-date">日付: {date_display}</p>', unsafe_allow_html=True)
 
-# --- レース選択フォーム ---
 st.write("📍 **予想するレースを選択**")
-
 selected_v = st.selectbox("会場を選択", list(VENUE_CODES.keys()))
 
 col_r, col_m = st.columns(2)
@@ -288,20 +257,18 @@ with col_r:
 with col_m:
     investment = st.number_input("投資金額 (円)", min_value=1000, value=5000, step=1000)
 
-# --- 予想実行 ---
 if st.button(f"🚀 {selected_v} {race_num} をAI予想する", type="primary", use_container_width=True):
     jcd = VENUE_CODES[selected_v]
     rno = race_num.replace("R", "")
     
-    with st.spinner("出走表・展示・水面・潮位情報を取得中..."):
+    with st.spinner("データ取得中..."):
         df_racers = get_detailed_racers(jcd, rno, today_str)
         weather_info = get_before_info(jcd, rno, today_str)
     
     if df_racers is None or df_racers.empty:
-        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。\n※締め切り直前〜レース中、または本日開催のない会場・レースの可能性があります。次のレースでお試しください！")
+        st.error(f"❌ {selected_v} {race_num} の出走表を取得できませんでした。\nアクセス制限、または本日開催のない会場・レースの可能性があります。他の開催場やレースでお試しください。")
     else:
         df_bets, tenkai_msg, v_desc = calculate_predictions(df_racers, selected_v, weather_info, investment)
-        
         st.info(f"🏟️ **会場特性**: {v_desc}\n\n🌀 **コンディション**: {weather_info['wind_dir']} {weather_info['wind_speed']}m / {weather_info['tide']}")
         
         df_display = df_racers.copy()

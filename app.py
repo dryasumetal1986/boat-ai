@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 # ページ設定
 st.set_page_config(page_title="やっちゃんの競艇AI予想", page_icon="🚤", layout="centered")
 
-# --- カスタムCSS（エラー修正・UI再現・文字消え防止） ---
+# --- カスタムCSS（UI再現・文字色補正） ---
 st.markdown("""
     <style>
     /* 全体背景 */
@@ -263,33 +263,22 @@ st.markdown(top_html, unsafe_allow_html=True)
 
 st.subheader("本日 のレース")
 
-# --- 画像風の24会場グリッド（HTML出力・SyntaxError修正） ---
+# --- 画像風の24会場グリッド（HTML出力・修正版） ---
 grid_html = '<div class="venue-grid">'
 for v_name in VENUE_CODES.keys():
     is_active = active_venues.get(v_name, False)
     if is_active:
-        grid_html += f"""
-        <div class="venue-card-active">
-            <span class="tag">一般</span>
-            <div class="name">{v_name}</div>
-            <div class="sub">1R 開催中</div>
-        </div>
-        """
+        grid_html += f'''<div class="venue-card-active"><span class="tag">一般</span><div class="name">{v_name}</div><div class="sub">1R 開催中</div></div>'''
     else:
-        grid_html += f"""
-        <div class="venue-card-inactive">
-            <div class="name">{v_name}</div>
-        </div>
-        """
+        grid_html += f'''<div class="venue-card-inactive"><div class="name">{v_name}</div></div>'''
 grid_html += '</div>'
 
-# HTMLでカード一覧を表示
+# ★ここに unsafe_allow_html=True を追加して修正
 st.markdown(grid_html, unsafe_allow_html=True)
 
 # --- 会場選択エリア ---
 st.divider()
 st.markdown("##### 📍 予想する会場を選択してください")
-# セレクトボックスで会場を選択
 selected_v = st.selectbox(
     "会場選択",
     active_list if active_list else list(VENUE_CODES.keys()),
@@ -342,6 +331,7 @@ def get_before_info(jcd, rno, date_str):
 def calculate_predictions(df, venue, weather_info, investment):
     course_base = {1: 45, 2: 25, 3: 20, 4: 15, 5: 10, 6: 5}
     v_param = VENUE_CHARACTERISTICS.get(venue, {"water": "淡水", "in_adj": 0, "makuri_adj": 0, "desc": "標準水面"})
+    v_desc = v_param["desc"]
     
     tide_status = weather_info["tide"]
     tide_in_adj = 0

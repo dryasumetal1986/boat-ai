@@ -178,8 +178,9 @@ if predict_clicked:
         
         st.success(f"✅ 【{selected_venue} {selected_race}】予想結果")
         
+        display_cols = [c for c in ['印', '艇番', '選手名', '級別', '全国勝率', 'モーター2連率', 'AI予測スコア'] if c in df_result.columns]
         st.dataframe(
-            df_result[['印', '艇番', '選手名', '級別', '全国勝率', 'モーター2连率', 'AI予測スコア']], 
+            df_result[display_cols], 
             use_container_width=True,
             hide_index=True
         )

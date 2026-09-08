@@ -42,6 +42,16 @@ STADIUMS = {
 }
 
 
+TECHNIQUES = {
+    1: "逃げ",
+    2: "差し",
+    3: "まくり",
+    4: "まくり差し",
+    5: "抜き",
+    6: "恵まれ"
+}
+
+
 def num(x):
     try:
         return float(x)
@@ -174,7 +184,6 @@ def get_course_stats(target_date):
                     )
 
                     if key not in stats:
-
                         stats[key] = {
                             "出走": 0,
                             "1着": 0
@@ -189,6 +198,89 @@ def get_course_stats(target_date):
 
                     if place == 1:
                         stats[key]["1着"] += 1
+
+    return stats
+
+
+def get_technique_stats(target_date):
+
+    stats = {}
+
+    for day in range(1, 15):
+
+        d = target_date - timedelta(days=day)
+
+        if d < date(2026, 1, 1):
+            continue
+
+        try:
+            data = get_data(d)
+        except:
+            continue
+
+        stadiums = data.get(
+            "programs",
+            {}
+        ).get(
+            "stadiums",
+            {}
+        )
+
+        for stadium in stadiums.values():
+
+            races = stadium.get(
+                "races",
+                {}
+            )
+
+            for race in races.values():
+
+                result = race.get(
+                    "result",
+                    {}
+                )
+
+                racers = result.get(
+                    "racers",
+                    {}
+                )
+
+                if not racers:
+                    continue
+
+                for racer in racers.values():
+
+                    player_number = str(
+                        racer.get(
+                            "number",
+                            ""
+                        )
+                    )
+
+                    technique = racer.get(
+                        "technique_number"
+                    )
+
+                    if not player_number:
+                        continue
+
+                    try:
+                        technique = int(technique)
+                    except:
+                        continue
+
+                    if technique < 1 or technique > 6:
+                        continue
+
+                    key = (
+                        player_number,
+                        technique
+                    )
+
+                    if key not in stats:
+                        stats[key] = 0
+
+                    stats[key] += 1
 
     return stats
 
@@ -278,8 +370,8 @@ def make_table(race):
 
 def add_course_stats(df, stats):
 
-    course_rates = []
-    course_starts = []
+    rates = []
+    starts = []
 
     for _, row in df.iterrows():
 
@@ -301,21 +393,21 @@ def add_course_stats(df, stats):
             {}
         )
 
-        starts = item.get(
+        start_count = item.get(
             "出走",
             0
         )
 
-        wins = item.get(
+        win_count = item.get(
             "1着",
             0
         )
 
-        if starts > 0:
+        if start_count > 0:
 
             rate = (
-                wins
-                / starts
+                win_count
+                / start_count
                 * 100
             )
 
@@ -323,19 +415,102 @@ def add_course_stats(df, stats):
 
             rate = 0
 
-        course_rates.append(
+        rates.append(
             round(rate, 1)
         )
 
-        course_starts.append(
-            starts
+        starts.append(
+            start_count
         )
 
-    df["コース1着率"] = course_rates
-
-    df["コース出走数"] = course_starts
+    df["コース1着率"] = rates
+    df["コース出走数"] = starts
 
     return df
+
+
+def add_technique_stats(df, stats):
+
+    technique_names = []
+    technique_counts = []
+
+    for _, row in df.iterrows():
+
+        player = str(
+            row["選手番号"]
+        )
+
+        best_name = "なし"
+        best_count = 0
+
+        for number, name in TECHNIQUES.items():
+
+            key = (
+                player,
+                number
+            )
+
+            count = stats.get(
+                key,
+                0
+            )
+
+            if count > best_count:
+
+                best_count = count
+                best_name = name
+
+        technique_names.append(
+            best_name
+        )
+
+        technique_counts.append(
+            best_count
+        )
+
+    df["得意決まり手"] = technique_names
+    df["決まり手回数"] = technique_counts
+
+    return df
+
+
+def technique_bonus(row):
+
+    lane = int(
+        row["枠"]
+    )
+
+    technique = row[
+        "得意決まり手"
+    ]
+
+    bonus = 0
+
+    if lane == 1 and technique == "逃げ":
+        bonus = 8
+
+    elif lane == 2 and technique == "差し":
+        bonus = 8
+
+    elif lane == 3 and technique == "まくり":
+        bonus = 7
+
+    elif lane == 3 and technique == "まくり差し":
+        bonus = 7
+
+    elif lane == 4 and technique == "まくり":
+        bonus = 7
+
+    elif lane == 4 and technique == "まくり差し":
+        bonus = 7
+
+    elif lane == 5 and technique == "まくり差し":
+        bonus = 5
+
+    elif lane == 6 and technique == "まくり差し":
+        bonus = 4
+
+    return bonus
 
 
 def calculate_score(row):
@@ -349,7 +524,6 @@ def calculate_score(row):
     s += row["当地勝率"] * 5
 
     s += row["モーター2連率"] * 0.12
-
 
     st_time = row["平均ST"]
 
@@ -366,7 +540,6 @@ def calculate_score(row):
 
         elif st_time >= 0.22:
             s -= 4
-
 
     lane = int(
         row["枠"]
@@ -385,7 +558,6 @@ def calculate_score(row):
         lane,
         0
     )
-
 
     course_rate = row[
         "コース1着率"
@@ -406,6 +578,7 @@ def calculate_score(row):
     elif course_rate > 0:
         s += 1
 
+    s += technique_bonus(row)
 
     exhibition = row[
         "展示タイム"
@@ -424,7 +597,6 @@ def calculate_score(row):
 
         elif exhibition >= 6.90:
             s -= 2
-
 
     return s
 
@@ -549,10 +721,14 @@ if st.button(
 
 
     with st.spinner(
-        "📊 過去14日分のコース成績を分析中..."
+        "📊 過去14日分を分析中..."
     ):
 
         course_stats = get_course_stats(
+            target_date
+        )
+
+        technique_stats = get_technique_stats(
             target_date
         )
 
@@ -560,6 +736,18 @@ if st.button(
     df = add_course_stats(
         df,
         course_stats
+    )
+
+
+    df = add_technique_stats(
+        df,
+        technique_stats
+    )
+
+
+    df["決まり手補正"] = df.apply(
+        technique_bonus,
+        axis=1
     )
 
 
@@ -622,6 +810,9 @@ if st.button(
         "展示タイム",
         "コース1着率",
         "コース出走数",
+        "得意決まり手",
+        "決まり手回数",
+        "決まり手補正",
         "AI1着評価"
     ]
 
@@ -649,6 +840,8 @@ if st.button(
         + "　コース1着率 "
         + str(top["コース1着率"])
         + "%"
+        + "　得意決まり手 "
+        + str(top["得意決まり手"])
         + "　AI評価 "
         + str(top["AI1着評価"])
     )
@@ -663,9 +856,8 @@ if st.button(
             + str(int(second["枠"]))
             + "号艇 "
             + str(second["選手名"])
-            + "　コース1着率 "
-            + str(second["コース1着率"])
-            + "%"
+            + "　得意決まり手 "
+            + str(second["得意決まり手"])
         )
 
 
@@ -678,9 +870,8 @@ if st.button(
             + str(int(third["枠"]))
             + "号艇 "
             + str(third["選手名"])
-            + "　コース1着率 "
-            + str(third["コース1着率"])
-            + "%"
+            + "　得意決まり手 "
+            + str(third["得意決まり手"])
         )
 
 
@@ -768,7 +959,11 @@ if st.button(
     )
 
     st.write(
-        "・過去14日間のコース出走数"
+        "・選手別決まり手傾向"
+    )
+
+    st.write(
+        "・過去14日間のデータ"
     )
 
 
@@ -785,4 +980,4 @@ else:
 
     st.info(
         "競艇場とレースを選んでください"
-    )
+)

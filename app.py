@@ -10,7 +10,7 @@ from ai import tri_ai
 # =========================================================
 
 st.set_page_config(
-    page_title="やっちゃんのAI予想PRO",
+    page_title="やっちゃんの競艇AI予想PRO",
     page_icon="🚤",
     layout="centered",
 )

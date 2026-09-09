@@ -24,12 +24,19 @@ FEATURES = [
 def _num(value, default=0.0):
 
     try:
+
         if value is None:
             return default
 
         text = str(value).strip()
 
-        if text in ("", "-", "--", "None", "null"):
+        if text in (
+            "",
+            "-",
+            "--",
+            "None",
+            "null",
+        ):
             return default
 
         text = text.replace("%", "")
@@ -38,6 +45,7 @@ def _num(value, default=0.0):
         return float(text)
 
     except Exception:
+
         return default
 
 
@@ -115,36 +123,48 @@ def _exhibition_score(df):
     score = np.zeros(len(work))
 
     exhibition_st = work["展示ST"]
-    valid_st = exhibition_st[exhibition_st > 0]
+
+    valid_st = exhibition_st[
+        exhibition_st > 0
+    ]
 
     if len(valid_st):
 
         score += (
-            valid_st.mean() - exhibition_st
+            valid_st.mean()
+            - exhibition_st
         ) * 35.0
 
     avg_st = work["平均ST"]
-    valid_avg = avg_st[avg_st > 0]
+
+    valid_avg = avg_st[
+        avg_st > 0
+    ]
 
     if len(valid_avg):
 
         score += (
-            valid_avg.mean() - avg_st
+            valid_avg.mean()
+            - avg_st
         ) * 18.0
 
     exhibition_time = work["展示タイム"]
+
     valid_time = exhibition_time[
         exhibition_time > 0
     ]
 
     if len(valid_time):
 
+        # 展示タイムは小さいほど良い
         score += (
-            valid_time.mean() - exhibition_time
-        ) * -8.0
+            valid_time.mean()
+            - exhibition_time
+        ) * 8.0
 
     score += (
-        work["枠"] - work["展示進入"]
+        work["枠"]
+        - work["展示進入"]
     ) * 1.8
 
     return score
@@ -191,7 +211,8 @@ def _course_score(df):
     )
 
     score += (
-        work["枠"] - work["展示進入"]
+        work["枠"]
+        - work["展示進入"]
     ) * 0.9
 
     return score
@@ -215,9 +236,13 @@ def _machine_prob(current_df, history):
     ):
         return None
 
-    required = set(FEATURES + ["1着"])
+    required = set(
+        FEATURES + ["1着"]
+    )
 
-    if not required.issubset(history.columns):
+    if not required.issubset(
+        history.columns
+    ):
         return None
 
     train = history.copy()
@@ -265,7 +290,9 @@ def _machine_prob(current_df, history):
             _prepare_features(current_df)
         )
 
-        classes = list(model.classes_)
+        classes = list(
+            model.classes_
+        )
 
         if 1 not in classes:
             return None
@@ -276,6 +303,7 @@ def _machine_prob(current_df, history):
         ]
 
     except Exception:
+
         return None
 
 
@@ -301,12 +329,17 @@ def _normalize(values):
     total = values.sum()
 
     if total <= 0:
-        return np.ones(len(values)) / len(values)
+        return np.ones(
+            len(values)
+        ) / len(values)
 
     return values / total
 
 
-def _rank_scores(df, first_prob):
+def _rank_scores(
+    df,
+    first_prob,
+):
 
     base = _base_score(df)
 
@@ -321,7 +354,9 @@ def _rank_scores(df, first_prob):
         0.0,
     )
 
-    first_prob_final = _normalize(first)
+    first_prob_final = _normalize(
+        first
+    )
 
     second = (
         base * 0.75
@@ -340,7 +375,9 @@ def _rank_scores(df, first_prob):
         0.0,
     )
 
-    second_prob = _normalize(second)
+    second_prob = _normalize(
+        second
+    )
 
     third = (
         base * 0.60
@@ -353,7 +390,9 @@ def _rank_scores(df, first_prob):
         0.0,
     )
 
-    third_prob = _normalize(third)
+    third_prob = _normalize(
+        third
+    )
 
     return (
         first_prob_final,
@@ -378,9 +417,17 @@ def _combination_score(
         * third_prob[c] ** 0.85
     )
 
-    lane_a = int(_num(df.iloc[a]["枠"]))
-    lane_b = int(_num(df.iloc[b]["枠"]))
-    lane_c = int(_num(df.iloc[c]["枠"]))
+    lane_a = int(
+        _num(df.iloc[a]["枠"])
+    )
+
+    lane_b = int(
+        _num(df.iloc[b]["枠"])
+    )
+
+    lane_c = int(
+        _num(df.iloc[c]["枠"])
+    )
 
     if lane_a == 1:
         probability *= 1.18
@@ -405,6 +452,7 @@ def _find_hole(
     combinations,
     main_combo,
     counter_combo,
+    df,
 ):
 
     for combo, _ in combinations:
@@ -415,8 +463,15 @@ def _find_hole(
         ):
             continue
 
-        # 4～6号艇が1着の組み合わせを穴候補
-        if combo[0] >= 3:
+        first_lane = int(
+            _num(
+                df.iloc[
+                    combo[0]
+                ]["枠"]
+            )
+        )
+
+        if first_lane >= 4:
             return combo
 
     for combo, _ in combinations:
@@ -430,20 +485,32 @@ def _find_hole(
     return main_combo
 
 
-def _combo_lanes(combo, df):
+def _combo_lanes(
+    combo,
+    df,
+):
 
     return [
-        int(_num(df.iloc[i]["枠"]))
+        int(
+            _num(
+                df.iloc[i]["枠"]
+            )
+        )
         for i in combo
     ]
 
 
-def tri_ai(df, history=None):
+def tri_ai(
+    df,
+    history=None,
+):
 
     work = df.copy()
 
     if len(work) != 6:
-        raise ValueError("6艇のデータが必要です。")
+        raise ValueError(
+            "6艇のデータが必要です。"
+        )
 
     ml_prob = _machine_prob(
         work,
@@ -461,7 +528,9 @@ def tri_ai(df, history=None):
 
     if ml_prob is not None:
 
-        ml_prob = _normalize(ml_prob)
+        ml_prob = _normalize(
+            ml_prob
+        )
 
         first_prob = (
             ml_prob * 0.70
@@ -509,27 +578,23 @@ def tri_ai(df, history=None):
 
     main_combo = combinations[0][0]
 
-    # 対抗は本命との差を少し作る
     counter_combo = None
 
+    main_lanes = _combo_lanes(
+        main_combo,
+        work,
+    )
+
     for combo, _ in combinations[1:]:
-
-        if combo == main_combo:
-            continue
-
-        main_lanes = _combo_lanes(
-            main_combo,
-            work,
-        )
 
         combo_lanes = _combo_lanes(
             combo,
             work,
         )
 
-        # 3艇全部同じような組み合わせを避ける
         overlap = len(
-            set(main_lanes) & set(combo_lanes)
+            set(main_lanes)
+            & set(combo_lanes)
         )
 
         if overlap <= 2:
@@ -543,6 +608,7 @@ def tri_ai(df, history=None):
         combinations,
         main_combo,
         counter_combo,
+        work,
     )
 
     boat_probs = {}
@@ -550,7 +616,9 @@ def tri_ai(df, history=None):
     for i in range(6):
 
         lane = int(
-            _num(work.iloc[i]["枠"])
+            _num(
+                work.iloc[i]["枠"]
+            )
         )
 
         boat_probs[lane] = float(
@@ -571,4 +639,4 @@ def tri_ai(df, history=None):
             work,
         ),
         "boat_probs": boat_probs,
-    }
+        }

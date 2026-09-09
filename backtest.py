@@ -23,62 +23,53 @@ def _money(v):
         return 0
 
 
-def _search_payout(obj):
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            key = str(k).lower()
-            if any(x in key for x in [
-                "trifecta",
-                "3連単",
-                "3連単払戻",
-            ]):
-                if isinstance(v, (dict, list)):
-                    found = _search_payout(v)
-                    if found > 0:
-                        return found
-                else:
-                    money = _money(v)
-                    if money > 0:
-                        return money
+def trifecta_payout(race):
+    result = data.get_result(race)
 
-            found = _search_payout(v)
-            if found > 0:
-                return found
+    if not isinstance(result, dict):
+        return 0
 
-    elif isinstance(obj, list):
-        for item in obj:
-            found = _search_payout(item)
-            if found > 0:
-                return found
+    payouts = result.get("payouts", {})
 
-    elif isinstance(obj, (str, int, float)):
-        money = _money(obj)
-        if money > 0:
-            return money
+    if not isinstance(payouts, dict):
+        return 0
+
+    trifecta = payouts.get("trifecta", [])
+
+    if not isinstance(trifecta, list):
+        return 0
+
+    for item in trifecta:
+        if not isinstance(item, dict):
+            continue
+
+        amount = _money(item.get("amount"))
+
+        if amount > 0:
+            return amount
 
     return 0
 
 
-def trifecta_payout(race):
-    result = data.get_result(race)
-
-    if not result:
-        return 0
-
-    return _search_payout(result)
-
-
 def make_bets(ai):
-    ranking = ai.get("ranking", [])
+    main = int(ai.get("main", 0))
+    counter = int(ai.get("counter", 0))
+    hole = int(ai.get("hole", 0))
 
-    if len(ranking) < 4:
+    if not all(
+        1 <= x <= 6
+        for x in [main, counter, hole]
+    ):
         return []
 
-    main = int(ai.get("main", ranking[0]))
-    counter = int(ai.get("counter", ranking[1]))
-    hole = int(ai.get("hole", ranking[2]))
+    if len({
+        main,
+        counter,
+        hole,
+    }) < 3:
+        return []
 
-    candidates = [
+    return [
         (main, counter, hole),
         (main, hole, counter),
         (counter, main, hole),
@@ -86,14 +77,6 @@ def make_bets(ai):
         (hole, main, counter),
         (hole, counter, main),
     ]
-
-    bets = []
-
-    for bet in candidates:
-        if len(set(bet)) == 3 and bet not in bets:
-            bets.append(bet)
-
-    return bets
 
 
 def _history(stadium, race_no, target):
@@ -106,7 +89,11 @@ def _history(stadium, race_no, target):
             break
 
         raw = data.get_data(d)
-        race = data.get_race(raw, stadium, race_no)
+        race = data.get_race(
+            raw,
+            stadium,
+            race_no,
+        )
 
         if not race:
             continue
@@ -122,6 +109,7 @@ def _history(stadium, race_no, target):
             continue
 
         df = df.copy()
+
         places = {
             boat: i + 1
             for i, boat in enumerate(order)
@@ -137,7 +125,10 @@ def _history(stadium, race_no, target):
     if not rows:
         return pd.DataFrame()
 
-    return pd.concat(rows, ignore_index=True)
+    return pd.concat(
+        rows,
+        ignore_index=True,
+    )
 
 
 def run_backtest(
@@ -149,7 +140,10 @@ def run_backtest(
     except Exception:
         target_count = 100
 
-    target_count = max(1, target_count)
+    target_count = max(
+        1,
+        target_count,
+    )
 
     current = (
         datetime.now(JST).date()
@@ -200,21 +194,33 @@ def run_backtest(
                 except Exception:
                     continue
 
-                ranking = ai.get("ranking", [])
+                ranking = ai.get(
+                    "ranking",
+                    [],
+                )
 
                 if len(ranking) < 3:
                     continue
 
                 main = int(
-                    ai.get("main", ranking[0])
+                    ai.get(
+                        "main",
+                        ranking[0],
+                    )
                 )
 
                 counter = int(
-                    ai.get("counter", ranking[1])
+                    ai.get(
+                        "counter",
+                        ranking[1],
+                    )
                 )
 
                 hole = int(
-                    ai.get("hole", ranking[2])
+                    ai.get(
+                        "hole",
+                        ranking[2],
+                    )
                 )
 
                 bets = make_bets(ai)
@@ -226,37 +232,72 @@ def run_backtest(
 
                 hit = actual in bets
 
-                payout = trifecta_payout(race)
+                payout = (
+                    trifecta_payout(race)
+                    if hit
+                    else 0
+                )
 
                 result_rows.append({
-                    "日付": current.isoformat(),
-                    "場番号": stadium,
-                    "場": data.stadium_name(stadium),
-                    "R": race_no,
-                    "本命": main,
-                    "対抗": counter,
-                    "穴": hole,
-                    "実着1": actual[0],
-                    "実着2": actual[1],
-                    "実着3": actual[2],
+                    "日付":
+                        current.isoformat(),
+
+                    "場番号":
+                        stadium,
+
+                    "場":
+                        data.stadium_name(
+                            stadium
+                        ),
+
+                    "R":
+                        race_no,
+
+                    "本命":
+                        main,
+
+                    "対抗":
+                        counter,
+
+                    "穴":
+                        hole,
+
+                    "実着1":
+                        actual[0],
+
+                    "実着2":
+                        actual[1],
+
+                    "実着3":
+                        actual[2],
+
                     "本命1着":
                         main == actual[0],
+
                     "本命3連対":
                         main in actual,
+
                     "AI上位3艇3連対":
                         all(
                             x in actual
                             for x in ranking[:3]
                         ),
-                    "3連単的中":
+
+                    "3連単完全的中":
                         (
                             main,
                             counter,
                             hole,
                         ) == actual,
-                    "買い目的中": hit,
-                    "買い目数": len(bets),
-                    "3連単配当": payout,
+
+                    "買い目的中":
+                        hit,
+
+                    "買い目数":
+                        len(bets),
+
+                    "3連単配当":
+                        payout,
                 })
 
                 if progress_callback:
@@ -290,7 +331,10 @@ def calculate_metrics(df):
 
     count = len(df)
 
-    win = df["本命1着"].mean() * 100
+    win = (
+        df["本命1着"].mean()
+        * 100
+    )
 
     top3 = (
         df["本命3連対"].mean()
@@ -303,7 +347,7 @@ def calculate_metrics(df):
     )
 
     tri = (
-        df["3連単的中"].mean()
+        df["3連単完全的中"].mean()
         * 100
     )
 
@@ -320,10 +364,7 @@ def calculate_metrics(df):
     )
 
     payout = (
-        df.loc[
-            df["買い目的中"],
-            "3連単配当",
-        ]
+        df["3連単配当"]
         .fillna(0)
         .apply(_money)
         .sum()
@@ -423,11 +464,10 @@ def render_backtest():
             )
         )
 
-        name = data.stadium_name(stadium)
-
         status.info(
             f"🔄 {target_date} "
-            f"{name} {race_no}Rを検証中"
+            f"{data.stadium_name(stadium)} "
+            f"{race_no}Rを検証中"
         )
 
         counter.write(
@@ -440,7 +480,8 @@ def render_backtest():
 
         boats.write(
             " ".join(
-                "🚤" if i == boat else "▫️"
+                "🚤" if i == boat
+                else "▫️"
                 for i in range(1, 7)
             )
         )
@@ -454,6 +495,7 @@ def render_backtest():
         )
 
     bar.progress(1.0)
+
     boats.write(
         "🚤 **バックテスト完了！**"
     )
@@ -531,7 +573,8 @@ def render_backtest():
     )
 
     st.markdown(
-        f"### 🤖 AI評価 {'★' * m['stars']}"
+        f"### 🤖 AI評価 "
+        f"{'★' * m['stars']}"
     )
 
     with st.expander(

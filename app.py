@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 st.title("🚤 やっちゃんの競艇AI予想 PRO")
-st.write("過去データを使って3連単120通りを評価するAI")
+st.write("展示タイム＋選手データ＋過去14日データで3連単120通りを評価")
 
 today=datetime.now(
     ZoneInfo("Asia/Tokyo")
@@ -72,18 +72,30 @@ if st.button(
         st.stop()
 
     rows=[]
+
     rs=race.get("racers",{})
+    preview=race.get("preview",{}).get("racers",{})
+
+    if not isinstance(rs,dict):
+        rs={}
+
+    if not isinstance(preview,dict):
+        preview={}
 
     for lane in range(1,7):
 
-        r=(
-            rs.get(str(lane),{})
-            if isinstance(rs,dict)
-            else {}
-        )
+        r=rs.get(str(lane),{})
+        p=preview.get(str(lane),{})
 
         if not r:
             continue
+
+        ex=p.get("exhibition_time",0)
+
+        try:
+            ex=float(ex or 0)
+        except:
+            ex=0
 
         rows.append({
             "枠":lane,
@@ -105,9 +117,7 @@ if st.button(
             "平均ST":float(
                 r.get("average_start_timing") or 0
             ),
-            "展示タイム":float(
-                r.get("exhibition_time") or 0
-            )
+            "展示タイム":ex
         })
 
     df=pd.DataFrame(rows)
@@ -138,16 +148,16 @@ if st.button(
 
     st.subheader("🏆 AI順位")
 
+    labels=[
+        "🥇 本命",
+        "🥈 対抗",
+        "🥉 穴"
+    ]
+
     for i,row in df.head(3).iterrows():
 
-        label=[
-            "🥇 本命",
-            "🥈 対抗",
-            "🥉 穴"
-        ][i]
-
         st.write(
-            f"{label} "
+            f"{labels[i]} "
             f"{int(row['枠'])}号艇 "
             f"{row['選手名']}　"
             f"AI {row['学習AI']}"
@@ -215,9 +225,7 @@ if st.button(
             hide_index=True
         )
 
-        st.subheader(
-            "📊 上位4点"
-        )
+        st.subheader("📊 上位4点")
 
         st.write(
             f"🥇 本線：{top['3連単']} "
@@ -244,4 +252,4 @@ else:
     st.info(
         "開催日・競艇場・レースを選んで"
         "「AI予想を実行」を押してください。"
-    )
+        )

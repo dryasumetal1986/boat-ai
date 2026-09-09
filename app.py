@@ -12,15 +12,12 @@ from ai import tri_ai
 st.set_page_config(
     page_title="やっちゃんのAI予想PRO",
     page_icon="🚤",
-    layout="wide",
+    layout="centered",
 )
-
-st.title("🚤 やっちゃんのAI予想PRO")
-st.caption("出走表・直前情報・過去データを使ったAI予想")
 
 
 # =========================================================
-# 場名
+# 会場
 # =========================================================
 
 STADIUMS = {
@@ -51,12 +48,15 @@ STADIUMS = {
 }
 
 
-def stadium_name(no):
-    return STADIUMS.get(int(no), f"場{no}")
+# =========================================================
+# タイトル
+# =========================================================
+
+st.title("🚤 やっちゃんのAI予想PRO")
 
 
 # =========================================================
-# 日付
+# 開催日
 # =========================================================
 
 today = pd.Timestamp.now().date()
@@ -68,61 +68,67 @@ target_date = st.date_input(
 
 
 # =========================================================
-# 場・R
+# 会場・R
 # =========================================================
 
 col1, col2 = st.columns(2)
 
 with col1:
 
-    stadium_options = {
-        f"{no:02d} {name}": no
-        for no, name in STADIUMS.items()
-    }
-
-    selected_stadium = st.selectbox(
-        "レース場",
-        list(stadium_options.keys()),
+    # 表示は「桐生」「戸田」のように名前だけ
+    stadium_name_selected = st.selectbox(
+        "場",
+        list(STADIUMS.values()),
     )
 
-    stadium_no = stadium_options[selected_stadium]
+    # 名前から場番号を取得
+    stadium_no = next(
+        no
+        for no, name in STADIUMS.items()
+        if name == stadium_name_selected
+    )
 
 
 with col2:
 
     race_no = st.selectbox(
-        "レース",
+        "R",
         list(range(1, 13)),
         format_func=lambda x: f"{x}R",
     )
 
 
 # =========================================================
-# 予想ボタン
+# AI予想ボタン
 # =========================================================
 
 if st.button(
-    "🚤 このレースをAI予想",
+    "🚤 AI予想する",
     type="primary",
     use_container_width=True,
 ):
 
     # -----------------------------------------------------
-    # API取得
+    # データ取得
     # -----------------------------------------------------
 
     try:
 
-        raw = data.get_data(target_date)
+        raw = data.get_data(
+            target_date
+        )
 
     except Exception as e:
 
-        st.error("開催日のデータを取得できませんでした。")
-        st.code(str(e))
+        st.error(
+            "データを取得できませんでした。"
+        )
+
         st.stop()
 
+
     # -----------------------------------------------------
-    # 指定した場・Rを取得
+    # 指定会場・指定Rを取得
     # -----------------------------------------------------
 
     try:
@@ -133,18 +139,18 @@ if st.button(
             race_no,
         )
 
-    except Exception as e:
+    except Exception:
 
         st.error(
-            f"{stadium_name(stadium_no)} {race_no}R "
-            "のデータを取得できませんでした。"
+            f"{stadium_name_selected} {race_no}R "
+            "のデータが見つかりません。"
         )
 
-        st.code(str(e))
         st.stop()
 
+
     # -----------------------------------------------------
-    # レース整合性チェック
+    # レース確認
     # -----------------------------------------------------
 
     try:
@@ -156,19 +162,23 @@ if st.button(
             target_date,
         )
 
-    except Exception as e:
+    except Exception:
 
         valid = False
-        message = str(e)
+        message = "レースデータの確認に失敗しました。"
+
 
     if not valid:
 
-        st.error("レースデータの整合性チェックに失敗しました。")
-        st.code(message)
+        st.error(
+            "選択したレースのデータが正しくありません。"
+        )
+
         st.stop()
 
+
     # -----------------------------------------------------
-    # 6選手取得
+    # 選手取得
     # -----------------------------------------------------
 
     try:
@@ -180,100 +190,42 @@ if st.button(
             target_date,
         )
 
-    except Exception as e:
+    except Exception:
 
-        st.error("出走選手データの取得に失敗しました。")
-        st.code(str(e))
+        st.error(
+            "出走選手データを取得できませんでした。"
+        )
+
         st.stop()
+
+
+    # -----------------------------------------------------
+    # 6艇確認
+    # -----------------------------------------------------
 
     if len(df) != 6:
 
         st.error(
-            f"出走選手が6人ではありません。取得数={len(df)}"
+            "6艇の出走選手を取得できませんでした。"
         )
+
         st.stop()
 
-    # =====================================================
-    # レース確認
-    # =====================================================
-
-    st.success(
-        f"✅ {target_date} "
-        f"{stadium_name(stadium_no)} "
-        f"{race_no}R を取得しました"
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric(
-            "開催場",
-            stadium_name(stadium_no),
-        )
-
-    with c2:
-        st.metric(
-            "レース",
-            f"{race_no}R",
-        )
-
-    with c3:
-        st.metric(
-            "出走艇",
-            "6艇",
-        )
-
-    # =====================================================
-    # 出走選手
-    # =====================================================
-
-    st.subheader("🚤 出走選手")
-
-    display_df = df[
-        [
-            "枠",
-            "選手名",
-            "展示進入",
-            "全国勝率",
-            "全国2連率",
-            "当地勝率",
-            "当地2連率",
-            "モーター2連率",
-            "平均ST",
-            "展示ST",
-            "展示タイム",
-        ]
-    ].copy()
-
-    display_df = display_df.rename(
-        columns={
-            "枠": "艇",
-            "選手名": "選手",
-            "展示進入": "進入",
-            "全国2連率": "全国2連率%",
-            "当地2連率": "当地2連率%",
-            "モーター2連率": "モーター2連率%",
-        }
-    )
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-    )
 
     # =====================================================
     # 過去データ
     # =====================================================
 
-    with st.spinner(
-        "過去データを読み込んでAIを学習しています..."
-    ):
+    try:
 
-        try:
-            history = data.history14(target_date)
-        except Exception:
-            history = pd.DataFrame()
+        history = data.history14(
+            target_date
+        )
+
+    except Exception:
+
+        history = pd.DataFrame()
+
 
     # =====================================================
     # AI予想
@@ -286,150 +238,124 @@ if st.button(
             history,
         )
 
-    except Exception as e:
+    except Exception:
 
-        st.error("AI予想の計算中にエラーが発生しました。")
-        st.code(str(e))
+        st.error(
+            "AI予想の計算に失敗しました。"
+        )
+
         st.stop()
 
+
     # =====================================================
-    # 本命
+    # レースタイトル
     # =====================================================
 
-    st.subheader("🎯 AI本命")
+    st.markdown("---")
 
-    best = result.iloc[0]
+    st.subheader(
+        f"{stadium_name_selected} {race_no}R"
+    )
+
+
+    # =====================================================
+    # 6選手
+    # =====================================================
+
+    for _, row in df.iterrows():
+
+        lane = int(row["枠"])
+        name = row["選手名"]
+
+        st.markdown(
+            f"**{lane}号艇　{name}**"
+        )
+
+
+    # =====================================================
+    # 上位3予想
+    # =====================================================
+
+    st.markdown("---")
+
+    if len(result) >= 3:
+
+        main = result.iloc[0]
+        second = result.iloc[1]
+        hole = result.iloc[2]
+
+        # -------------------------------------------------
+        # 本命
+        # -------------------------------------------------
+
+        st.markdown("### 🎯 本命")
+
+        st.markdown(
+            f"# {main['買い目']}"
+        )
+
+
+        # -------------------------------------------------
+        # 対抗
+        # -------------------------------------------------
+
+        st.markdown("### 🔥 対抗")
+
+        st.markdown(
+            f"## {second['買い目']}"
+        )
+
+
+        # -------------------------------------------------
+        # 穴
+        # -------------------------------------------------
+
+        st.markdown("### 💥 穴")
+
+        st.markdown(
+            f"## {hole['買い目']}"
+        )
+
+
+    # =====================================================
+    # AI自信度
+    # =====================================================
+
+    # 上位3点の確率差を利用
+    try:
+
+        p1 = float(result.iloc[0]["確率"])
+        p2 = float(result.iloc[1]["確率"])
+        p3 = float(result.iloc[2]["確率"])
+
+        gap = p1 - p2
+
+        if gap >= 2.0:
+            confidence = "★★★★★"
+
+        elif gap >= 1.0:
+            confidence = "★★★★☆"
+
+        elif gap >= 0.5:
+            confidence = "★★★☆☆"
+
+        elif gap >= 0.2:
+            confidence = "★★☆☆☆"
+
+        else:
+            confidence = "★☆☆☆☆"
+
+    except Exception:
+
+        confidence = "★★★☆☆"
+
+
+    # =====================================================
+    # 自信度表示
+    # =====================================================
+
+    st.markdown("---")
 
     st.markdown(
-        f"""
-## 🚤 {best["買い目"]}
-
-### AI確率 {best["確率"]:.2f}%
-"""
-    )
-
-    # =====================================================
-    # 3連単ランキング
-    # =====================================================
-
-    st.subheader("🏆 AI 3連単ランキング")
-
-    top5 = result.head(5).copy()
-
-    top5["確率"] = top5["確率"].map(
-        lambda x: f"{x:.2f}%"
-    )
-
-    st.dataframe(
-        top5[
-            [
-                "順位",
-                "買い目",
-                "確率",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    # =====================================================
-    # 1着確率
-    # =====================================================
-
-    st.subheader("📊 各艇の1着確率")
-
-    prob_display = boat_probs.copy()
-
-    prob_display["1着確率"] = (
-        prob_display["1着確率"]
-        .map(lambda x: f"{x:.2f}%")
-    )
-
-    prob_display["AIスコア"] = (
-        prob_display["AIスコア"]
-        .map(lambda x: f"{x:.2f}")
-    )
-
-    prob_display = prob_display.rename(
-        columns={
-            "枠": "艇",
-            "選手名": "選手",
-        }
-    )
-
-    st.dataframe(
-        prob_display[
-            [
-                "艇",
-                "選手",
-                "1着確率",
-                "AIスコア",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    # =====================================================
-    # グラフ
-    # =====================================================
-
-    chart_df = boat_probs[
-        [
-            "枠",
-            "1着確率",
-        ]
-    ].copy()
-
-    chart_df = chart_df.set_index("枠")
-
-    st.bar_chart(chart_df)
-
-    # =====================================================
-    # データ取得確認
-    # =====================================================
-
-    st.subheader("🔍 データ取得確認")
-
-    check = pd.DataFrame(
-        [
-            {
-                "項目": "開催日",
-                "値": str(target_date),
-            },
-            {
-                "項目": "選択場",
-                "値": f"{stadium_no:02d} {stadium_name(stadium_no)}",
-            },
-            {
-                "項目": "選択R",
-                "値": f"{race_no}R",
-            },
-            {
-                "項目": "API場番号",
-                "値": str(race.get("stadium_number")),
-            },
-            {
-                "項目": "APIレース番号",
-                "値": str(race.get("race_number")),
-            },
-            {
-                "項目": "API開催日",
-                "値": str(race.get("date")),
-            },
-            {
-                "項目": "選手数",
-                "値": str(len(df)),
-            },
-        ]
-    )
-
-    st.dataframe(
-        check,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.caption(
-        "※ AI確率は予測モデルによる参考値です。"
+        f"### AI自信度　{confidence}"
     )

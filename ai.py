@@ -1,23 +1,61 @@
+import numpy as np
 import pandas as pd
+
 from itertools import permutations
+from sklearn.ensemble import RandomForestClassifier
 
 
-# =========================
-# 選手基本AI
-# =========================
+# ============================================================
+# AI特徴量
+# ============================================================
+
+FEATURES = [
+    "枠",
+    "展示進入",
+    "全国勝率",
+    "全国2連率",
+    "当地勝率",
+    "モーター2連率",
+    "平均ST",
+    "展示ST",
+    "展示タイム",
+    "場",
+]
+
+
+# ============================================================
+# 数値変換
+# ============================================================
+
+def to_float(value, default=0.0):
+
+    try:
+        if value is None:
+            return default
+
+        if pd.isna(value):
+            return default
+
+        return float(value)
+
+    except Exception:
+        return default
+
+
+# ============================================================
+# 旧AIスコア
+# ============================================================
 
 def score(r):
 
     s = 0.0
 
-    # 選手能力
-    s += r["全国勝率"] * 10
-    s += r["全国2連率"] * 0.25
-    s += r["当地勝率"] * 5
-    s += r["モーター2連率"] * 0.12
+    s += to_float(r.get("全国勝率")) * 10
+    s += to_float(r.get("全国2連率")) * 0.25
+    s += to_float(r.get("当地勝率")) * 5
+    s += to_float(r.get("モーター2連率")) * 0.12
 
-    # 平均ST
-    st = r["平均ST"]
+    st = to_float(r.get("平均ST"))
 
     if 0 < st <= 0.12:
         s += 12
@@ -28,8 +66,9 @@ def score(r):
     elif st >= 0.22:
         s -= 4
 
-    # 枠
-    lane = int(r["枠"])
+    lane = int(
+        to_float(r.get("枠"), 1)
+    )
 
     lane_bonus = {
         1: 20,
@@ -40,13 +79,11 @@ def score(r):
         6: 0,
     }
 
-    s += lane_bonus.get(
-        lane,
-        0,
-    )
+    s += lane_bonus.get(lane, 0)
 
-    # 展示タイム
-    ex = r["展示タイム"]
+    ex = to_float(
+        r.get("展示タイム")
+    )
 
     if 0 < ex <= 6.70:
         s += 6
@@ -57,21 +94,9 @@ def score(r):
     elif ex >= 6.90:
         s -= 2
 
-    # =========================
-    # 展示ST
-    # =========================
-
-    exhibition_st = r.get(
-        "展示ST",
-        0,
+    exhibition_st = to_float(
+        r.get("展示ST")
     )
-
-    try:
-        exhibition_st = float(
-            exhibition_st or 0
-        )
-    except Exception:
-        exhibition_st = 0
 
     if 0 < exhibition_st <= 0.08:
         s += 10
@@ -83,10 +108,6 @@ def score(r):
         s += 3
     elif exhibition_st >= 0.20:
         s -= 3
-
-    # =========================
-    # 展示進入
-    # =========================
 
     exhibition_course = r.get(
         "展示進入",
@@ -100,493 +121,472 @@ def score(r):
     except Exception:
         exhibition_course = lane
 
-    # 進入コースが枠より内側ならプラス
     if exhibition_course < lane:
         s += 4
 
-    # 進入コースが外側なら少しマイナス
     elif exhibition_course > lane:
         s -= 2
 
-    return round(
-        s,
-        2,
+    return round(s, 2)
+
+
+# ============================================================
+# 機械学習モデル
+# ============================================================
+
+def _make_model():
+
+    return RandomForestClassifier(
+        n_estimators=250,
+        max_depth=12,
+        min_samples_leaf=4,
+        random_state=42,
+        n_jobs=-1,
+        class_weight="balanced_subsample",
     )
 
 
-# =========================
-# 着順別補正
-# =========================
+# ============================================================
+# 学習データ準備
+# ============================================================
 
-def place_score(
-    base,
-    place,
-):
-
-    if place == 1:
-        return base * 1.00
-
-    if place == 2:
-        return base * 0.72
-
-    if place == 3:
-        return base * 0.48
-
-    return base
-
-
-# =========================
-# 過去データ補正
-# =========================
-
-def history_bonus(
-    history,
-    number,
-    place,
-):
+def prepare_training_data(history):
 
     if history is None:
-        return 0.0
+        return None
 
-    if history.empty:
-        return 0.0
+    if len(history) == 0:
+        return None
 
-    if "選手番号" not in history.columns:
-        return 0.0
+    df = pd.DataFrame(history).copy()
 
-    if place == 1:
-        column = "1着"
-        multiplier = 18
-
-    elif place == 2:
-        column = "2着"
-        multiplier = 12
-
-    else:
-        column = "3着"
-        multiplier = 8
-
-    if column not in history.columns:
-        return 0.0
-
-    h = history[
-        history["選手番号"]
-        == str(number)
+    required = FEATURES + [
+        "1着",
+        "2着",
+        "3着",
     ]
 
-    if h.empty:
-        return 0.0
+    for column in required:
 
-    value = pd.to_numeric(
-        h[column],
-        errors="coerce",
-    ).mean()
+        if column not in df.columns:
+            return None
 
-    if pd.isna(value):
-        return 0.0
+    for column in FEATURES + [
+        "1着",
+        "2着",
+        "3着",
+    ]:
 
-    return float(
-        value * multiplier
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        ).fillna(0)
+
+    return df
+
+
+# ============================================================
+# AI学習
+# ============================================================
+
+def train_ai(history):
+
+    df = prepare_training_data(
+        history
     )
 
+    if df is None:
+        return None
 
-# =========================
-# コース補正
-# =========================
+    # あまりに少ないデータでは学習しない
+    if len(df) < 300:
+        return None
 
-def course_bonus(
-    lane,
-    place,
-):
+    X = df[FEATURES]
 
-    # 1号艇は1着を強化
-    if lane == 1 and place == 1:
-        return 5.0
+    models = {}
 
-    # 2〜4号艇は2着・3着を少し強化
-    if lane in [2, 3, 4]:
+    for place in [1, 2, 3]:
 
-        if place == 2:
-            return 2.0
+        target = df[f"{place}着"]
 
-        if place == 3:
-            return 1.5
+        # 0/1の両方が必要
+        if target.nunique() < 2:
+            continue
 
-    # 5・6号艇は1着を少し抑える
-    if lane in [5, 6] and place == 1:
-        return -1.5
+        model = _make_model()
 
-    return 0.0
-
-
-# =========================
-# 展示ST補正
-# =========================
-
-def exhibition_st_bonus(
-    row,
-    place,
-):
-
-    value = row.get(
-        "展示ST",
-        0,
-    )
-
-    try:
-        value = float(
-            value or 0
+        model.fit(
+            X,
+            target,
         )
-    except Exception:
-        return 0.0
 
-    if value <= 0:
-        return 0.0
+        models[place] = model
 
-    # 展示STは1着評価を強めにする
-    if place == 1:
+    if len(models) != 3:
+        return None
 
-        if value <= 0.08:
-            return 7.0
-
-        if value <= 0.10:
-            return 5.0
-
-        if value <= 0.12:
-            return 3.0
-
-        if value >= 0.20:
-            return -3.0
-
-    # 2着
-    if place == 2:
-
-        if value <= 0.10:
-            return 3.0
-
-        if value <= 0.12:
-            return 2.0
-
-    # 3着
-    if place == 3:
-
-        if value <= 0.12:
-            return 1.5
-
-    return 0.0
+    return models
 
 
-# =========================
-# 展示進入補正
-# =========================
+# ============================================================
+# 各艇の着順確率
+# ============================================================
 
-def exhibition_course_bonus(
-    row,
-    place,
+def predict_boats(
+    df,
+    models,
 ):
 
-    lane = int(
-        row["枠"]
-    )
+    result = df.copy()
 
-    course = row.get(
-        "展示進入",
-        lane,
-    )
+    X = result[FEATURES].copy()
 
-    try:
-        course = int(course)
-    except Exception:
-        course = lane
+    for column in FEATURES:
 
-    # 内に入った選手
-    if course < lane:
+        X[column] = pd.to_numeric(
+            X[column],
+            errors="coerce",
+        ).fillna(0)
 
-        if place == 1:
-            return 4.0
+    for place in [1, 2, 3]:
 
-        if place == 2:
-            return 2.5
+        model = models[place]
 
-        if place == 3:
-            return 1.5
+        probabilities = model.predict_proba(
+            X
+        )
 
-    # 外に出た選手
-    if course > lane:
+        classes = list(
+            model.classes_
+        )
 
-        if place == 1:
-            return -2.0
+        if 1 in classes:
 
-        if place == 2:
-            return -1.0
+            index = classes.index(1)
 
-    return 0.0
+            result[
+                f"{place}着確率"
+            ] = probabilities[:, index]
+
+        else:
+
+            result[
+                f"{place}着確率"
+            ] = 0.0
+
+    return result
 
 
-# =========================
+# ============================================================
 # 3連単AI
-# =========================
+# ============================================================
 
 def tri_ai(
     df,
-    history,
+    history=None,
 ):
 
-    # -------------------------
-    # 選手基本スコア
-    # -------------------------
+    df = df.copy()
 
-    scores = {}
+    if df.empty:
+        return pd.DataFrame()
 
-    numbers = {}
+    # --------------------------------------------------------
+    # 機械学習
+    # --------------------------------------------------------
+
+    models = train_ai(
+        history
+    )
+
+    if models is not None:
+
+        df = predict_boats(
+            df,
+            models,
+        )
+
+        # MLの1着確率をAIスコアとして表示
+        df["学習AI"] = (
+            df["1着確率"] * 100
+        ).round(2)
+
+    else:
+
+        # 学習できない場合は旧スコア
+        df["学習AI"] = df.apply(
+            score,
+            axis=1,
+        )
+
+        for place in [1, 2, 3]:
+
+            df[
+                f"{place}着確率"
+            ] = 0.0
+
+    # --------------------------------------------------------
+    # 枠 → 行
+    # --------------------------------------------------------
 
     rows = {}
 
-    for _, r in df.iterrows():
+    for _, row in df.iterrows():
 
         lane = int(
-            r["枠"]
+            row["枠"]
         )
 
-        scores[lane] = float(
-            r["学習AI"]
-        )
+        rows[lane] = row
 
-        numbers[lane] = str(
-            r["選手番号"]
-        )
+    lanes = sorted(
+        rows.keys()
+    )
 
-        rows[lane] = r
-
-
-    out = []
-
-
-    # -------------------------
+    # --------------------------------------------------------
     # 120通り
-    # -------------------------
+    # --------------------------------------------------------
+
+    output = []
 
     for a, b, c in permutations(
-        scores,
+        lanes,
         3,
     ):
 
-        first = 0.0
-        second = 0.0
-        third = 0.0
+        ra = rows[a]
+        rb = rows[b]
+        rc = rows[c]
 
-        # =====================
-        # 基本AI
-        # =====================
+        # --------------------------------------------
+        # 機械学習確率
+        # --------------------------------------------
 
-        first += place_score(
-            scores[a],
-            1,
-        )
+        if models is not None:
 
-        second += place_score(
-            scores[b],
-            2,
-        )
+            p1 = float(
+                ra["1着確率"]
+            )
 
-        third += place_score(
-            scores[c],
-            3,
-        )
+            p2 = float(
+                rb["2着確率"]
+            )
 
+            p3 = float(
+                rc["3着確率"]
+            )
 
-        # =====================
-        # 過去14日
-        # =====================
+            # 3連単確率
+            probability = (
+                p1
+                * p2
+                * p3
+            )
 
-        first += history_bonus(
-            history,
-            numbers[a],
-            1,
-        )
+        else:
 
-        second += history_bonus(
-            history,
-            numbers[b],
-            2,
-        )
+            # ----------------------------------------
+            # fallback
+            # ----------------------------------------
 
-        third += history_bonus(
-            history,
-            numbers[c],
-            3,
-        )
+            s1 = max(
+                float(ra["学習AI"]),
+                0.1,
+            )
 
+            s2 = max(
+                float(rb["学習AI"]),
+                0.1,
+            )
 
-        # =====================
-        # コース
-        # =====================
+            s3 = max(
+                float(rc["学習AI"]),
+                0.1,
+            )
 
-        first += course_bonus(
-            a,
-            1,
-        )
+            probability = (
+                s1
+                * s2
+                * s3
+            )
 
-        second += course_bonus(
-            b,
-            2,
-        )
-
-        third += course_bonus(
-            c,
-            3,
-        )
-
-
-        # =====================
-        # 展示ST
-        # =====================
-
-        first += exhibition_st_bonus(
-            rows[a],
-            1,
-        )
-
-        second += exhibition_st_bonus(
-            rows[b],
-            2,
-        )
-
-        third += exhibition_st_bonus(
-            rows[c],
-            3,
-        )
-
-
-        # =====================
-        # 展示進入
-        # =====================
-
-        first += exhibition_course_bonus(
-            rows[a],
-            1,
-        )
-
-        second += exhibition_course_bonus(
-            rows[b],
-            2,
-        )
-
-        third += exhibition_course_bonus(
-            rows[c],
-            3,
-        )
-
-
-        # =====================
-        # 1号艇の逃げ補正
-        # =====================
+        # --------------------------------------------
+        # 1号艇逃げ
+        # --------------------------------------------
 
         if a == 1:
-            first += 4.0
+            probability *= 1.12
 
-        # 3・4号艇の攻め
+        # --------------------------------------------
+        # 展示進入
+        # --------------------------------------------
+
+        try:
+
+            course_a = int(
+                ra.get(
+                    "展示進入",
+                    a,
+                )
+            )
+
+            if course_a < a:
+                probability *= 1.05
+
+            elif course_a > a:
+                probability *= 0.95
+
+        except Exception:
+            pass
+
+        # --------------------------------------------
+        # 3・4号艇攻め
+        # --------------------------------------------
+
         if a in [3, 4]:
-            first += 1.0
+            probability *= 1.02
 
-        # 2〜4号艇の2着
-        if b in [2, 3, 4]:
-            second += 1.0
+        # --------------------------------------------
+        # 同一艇防止
+        # permutationsで保証済み
+        # --------------------------------------------
 
-
-        # =====================
-        # 合計
-        # =====================
-
-        total = (
-            first
-            + second
-            + third
-        )
-
-
-        out.append({
+        output.append({
 
             "3連単":
                 f"{a}-{b}-{c}",
 
             "1着AI":
                 round(
-                    first,
+                    float(
+                        ra.get(
+                            "1着確率",
+                            0,
+                        )
+                    ) * 100,
                     2,
                 ),
 
             "2着AI":
                 round(
-                    second,
+                    float(
+                        rb.get(
+                            "2着確率",
+                            0,
+                        )
+                    ) * 100,
                     2,
                 ),
 
             "3着AI":
                 round(
-                    third,
+                    float(
+                        rc.get(
+                            "3着確率",
+                            0,
+                        )
+                    ) * 100,
                     2,
                 ),
 
-            "AIスコア":
-                round(
-                    total,
-                    2,
-                ),
+            "AI確率":
+                probability,
+
         })
 
-
     result = pd.DataFrame(
-        out
+        output
     )
-
 
     if result.empty:
         return result
 
+    # ========================================================
+    # 確率を120通り合計100%に正規化
+    # ========================================================
 
-    # =========================
-    # AI順位
-    # =========================
+    total = result[
+        "AI確率"
+    ].sum()
 
-    result = result.sort_values(
-        "AIスコア",
-        ascending=False,
-    ).reset_index(
-        drop=True
-    )
+    if total > 0:
 
+        result[
+            "AI確率"
+        ] = (
+            result["AI確率"]
+            / total
+            * 100
+        )
 
-    # =========================
+    else:
+
+        result[
+            "AI確率"
+        ] = 0.0
+
+    result[
+        "AI確率"
+    ] = result[
+        "AI確率"
+    ].round(2)
+
+    # ========================================================
+    # AIスコア
+    # ========================================================
+
+    result[
+        "AIスコア"
+    ] = (
+        result["AI確率"] * 10
+    ).round(2)
+
+    # ========================================================
     # 信頼度
-    # =========================
+    #
+    # 旧方式のmin-maxではなく、
+    # 上位予想の確率を基準にする
+    # ========================================================
 
-    minimum = result[
-        "AIスコア"
-    ].min()
-
-    maximum = result[
-        "AIスコア"
+    max_probability = result[
+        "AI確率"
     ].max()
 
+    if max_probability > 0:
 
-    if maximum > minimum:
-
-        result["信頼度"] = (
-            (
-                result["AIスコア"]
-                - minimum
-            )
-            / (
-                maximum
-                - minimum
-            )
+        result[
+            "信頼度"
+        ] = (
+            result["AI確率"]
+            / max_probability
             * 100
         ).round(1)
 
     else:
 
-        result["信頼度"] = 50.0
+        result[
+            "信頼度"
+        ] = 0.0
 
+    # ========================================================
+    # 順位
+    # ========================================================
+
+    result = result.sort_values(
+        "AI確率",
+        ascending=False,
+    ).reset_index(
+        drop=True
+    )
+
+    result.insert(
+        0,
+        "AI順位",
+        range(
+            1,
+            len(result) + 1,
+        ),
+    )
 
     return result

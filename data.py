@@ -936,3 +936,98 @@ def clear_odds_cache():
     except Exception:
 
         pass
+@st.cache_data(ttl=1800)
+def backtest_races(start_date, days=14):
+    rows = []
+
+    for i in range(days):
+        d = start_date - timedelta(days=i)
+
+        if d < date(2026, 1, 1):
+            continue
+
+        try:
+            data = get_data(d)
+        except Exception:
+            continue
+
+        stadiums = (
+            data
+            .get("programs", {})
+            .get("stadiums", {})
+        )
+
+        for sno, stadium in stadiums.items():
+            races = stadium.get("races", {})
+
+            for rno, race in races.items():
+                result = race.get("result", {})
+                result_racers = result.get(
+                    "racers", {}
+                )
+
+                places = {}
+
+                for x in racers(result_racers):
+                    place = str(
+                        x.get("place_number", "")
+                    )
+                    number = str(
+                        x.get("number", "")
+                    )
+
+                    if place in ["1", "2", "3"]:
+                        if number:
+                            places[place] = number
+
+                if len(places) < 3:
+                    continue
+
+                actual = (
+                    f"{places['1']}-"
+                    f"{places['2']}-"
+                    f"{places['3']}"
+                )
+
+                payout = 0
+
+                payouts = result.get(
+                    "payouts", {}
+                )
+
+                if isinstance(payouts, dict):
+                    trifecta = payouts.get(
+                        "trifecta", []
+                    )
+
+                    if isinstance(trifecta, list):
+                        for item in trifecta:
+                            if not isinstance(item, dict):
+                                continue
+
+                            if str(
+                                item.get(
+                                    "combination",
+                                    ""
+                                )
+                            ) == actual:
+                                try:
+                                    payout = int(
+                                        item.get(
+                                            "amount",
+                                            0
+                                        ) or 0
+                                    )
+                                except Exception:
+                                    payout = 0
+                                break
+
+                rows.append({
+                    "日付": d,
+                    "場": int(sno),
+                    "レース": int(rno),
+                    "実際の3連単": actual,
+                    "払戻金": payout,
+                })
+
+    return rows

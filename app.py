@@ -24,7 +24,6 @@ st.set_page_config(
     page_title="やっちゃんの競艇AI予想PRO",
     page_icon="🚤",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
 
@@ -34,275 +33,186 @@ st.set_page_config(
 
 st.markdown(
     """
-    <style>
+<style>
 
-    .stApp {
-        background:
-            radial-gradient(
-                circle at top,
-                #172033 0%,
-                #0b1020 42%,
-                #070b14 100%
-            );
-        color: #f5f7fb;
-    }
+.stApp {
+    background: linear-gradient(
+        180deg,
+        #0b1020 0%,
+        #080d18 100%
+    );
+    color: #ffffff;
+}
 
-    .block-container {
-        max-width: 1100px;
-        padding-top: 1.2rem;
-        padding-bottom: 4rem;
-    }
+.block-container {
+    max-width: 1100px;
+    padding-top: 1.5rem;
+    padding-bottom: 4rem;
+}
 
-    /* -----------------------------------------
-       タイトル
-    ----------------------------------------- */
+.app-title {
+    font-size: 2.1rem;
+    font-weight: 900;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
 
-    .app-title {
-        font-size: 2.15rem;
-        font-weight: 900;
-        letter-spacing: 0.02em;
-        color: #ffffff;
-        margin-bottom: 0.1rem;
-    }
+.app-subtitle {
+    color: #aeb8c9;
+    font-size: 0.95rem;
+    margin-bottom: 24px;
+}
 
-    .app-subtitle {
-        color: #aeb8c9;
-        font-size: 0.95rem;
-        margin-bottom: 1.5rem;
-    }
+.section-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #ffffff;
+    margin-top: 18px;
+    margin-bottom: 10px;
+}
 
-    /* -----------------------------------------
-       セクションタイトル
-    ----------------------------------------- */
+.race-header {
+    background: #141d30;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px;
+    padding: 18px;
+    margin: 12px 0 18px 0;
+}
 
-    .section-title {
-        font-size: 1.25rem;
-        font-weight: 800;
-        color: #ffffff;
-        margin-top: 1.2rem;
-        margin-bottom: 0.6rem;
-    }
+.race-date {
+    color: #aeb8c9;
+    font-size: 0.95rem;
+}
 
-    /* -----------------------------------------
-       レースヘッダー
-    ----------------------------------------- */
+.race-title {
+    color: #ffffff;
+    font-size: 1.55rem;
+    font-weight: 900;
+    margin-top: 5px;
+}
 
-    .race-header {
-        background:
-            linear-gradient(
-                135deg,
-                rgba(31, 41, 65, 0.98),
-                rgba(13, 20, 35, 0.98)
-            );
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 18px;
-        padding: 18px 20px;
-        margin: 14px 0 20px 0;
-        box-shadow:
-            0 10px 30px rgba(0,0,0,0.25);
-    }
+.prediction-card {
+    background: #141d30;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px;
+    padding: 18px;
+    min-height: 145px;
+    margin-bottom: 12px;
+}
 
-    .race-date {
-        color: #b8c2d4;
-        font-size: 0.95rem;
-        margin-bottom: 4px;
-    }
+.pred-label {
+    color: #aeb8c9;
+    font-size: 0.95rem;
+    font-weight: 800;
+}
 
-    .race-title {
-        color: #ffffff;
-        font-size: 1.65rem;
-        font-weight: 900;
-    }
+.pred-boat {
+    color: #ffffff;
+    font-size: 2rem;
+    font-weight: 900;
+    margin-top: 8px;
+}
 
-    /* -----------------------------------------
-       予想カード
-    ----------------------------------------- */
+.pred-small {
+    color: #8793a8;
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
 
-    .prediction-card {
-        background:
-            linear-gradient(
-                145deg,
-                rgba(25, 34, 54, 0.98),
-                rgba(13, 19, 32, 0.98)
-            );
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 18px;
-        padding: 20px;
-        min-height: 150px;
-        box-shadow:
-            0 10px 28px rgba(0,0,0,0.22);
-        margin-bottom: 12px;
-    }
+.confidence-card {
+    background: #141d30;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 16px;
+    padding: 15px;
+    text-align: center;
+    margin: 10px 0 20px 0;
+}
 
-    .pred-label {
-        font-size: 0.95rem;
-        color: #b8c2d4;
-        font-weight: 700;
-        margin-bottom: 6px;
-    }
+.confidence-label {
+    color: #aeb8c9;
+    font-size: 0.9rem;
+}
 
-    .pred-boat {
-        font-size: 2rem;
-        font-weight: 900;
-        color: #ffffff;
-    }
+.confidence-stars {
+    color: #ffffff;
+    font-size: 1.55rem;
+    font-weight: 900;
+    letter-spacing: 3px;
+    margin-top: 4px;
+}
 
-    .pred-small {
-        color: #8f9bb0;
-        font-size: 0.82rem;
-        margin-top: 4px;
-    }
+.boat-card {
+    background: #172238;
+    border: 1px solid rgba(255,255,255,0.11);
+    border-radius: 16px;
+    padding: 15px;
+    min-height: 135px;
+    margin-bottom: 12px;
+}
 
-    /* -----------------------------------------
-       自信度
-    ----------------------------------------- */
+.boat-number {
+    color: #9eabc0;
+    font-size: 0.85rem;
+    font-weight: 800;
+}
 
-    .confidence-card {
-        background:
-            linear-gradient(
-                135deg,
-                rgba(24, 34, 54, 0.98),
-                rgba(12, 18, 31, 0.98)
-            );
-        border-radius: 16px;
-        border: 1px solid rgba(255,255,255,0.09);
-        padding: 14px 18px;
-        margin: 12px 0 18px 0;
-        text-align: center;
-    }
+.boat-name {
+    color: #ffffff;
+    font-size: 1.05rem;
+    font-weight: 900;
+    margin-top: 7px;
+    min-height: 30px;
+}
 
-    .confidence-label {
-        color: #aeb8c9;
-        font-size: 0.9rem;
-        margin-bottom: 4px;
-    }
+.boat-mark {
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-weight: 900;
+    margin-top: 10px;
+    min-height: 22px;
+}
 
-    .confidence-stars {
-        font-size: 1.5rem;
-        letter-spacing: 0.12em;
-        color: #ffffff;
-        font-weight: 900;
-    }
+.ranking-card {
+    background: #141d30;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 14px;
+    padding: 13px 16px;
+    margin-bottom: 8px;
+}
 
-    /* -----------------------------------------
-       出走艇
-    ----------------------------------------- */
+.ranking-number {
+    color: #ffffff;
+    font-weight: 900;
+}
 
-    .boat-card {
-        background:
-            linear-gradient(
-                145deg,
-                #1b263b,
-                #111827
-            );
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 16px;
-        padding: 15px 14px;
-        min-height: 145px;
-        margin-bottom: 12px;
-        box-shadow:
-            0 8px 22px rgba(0,0,0,0.22);
-    }
+.ranking-boat {
+    color: #ffffff;
+    font-weight: 800;
+    margin-left: 10px;
+}
 
-    .boat-number {
-        font-size: 0.85rem;
-        color: #9eabc0;
-        font-weight: 700;
-    }
+.ranking-prob {
+    color: #d6deeb;
+    font-weight: 800;
+    float: right;
+}
 
-    .boat-name {
-        font-size: 1.05rem;
-        font-weight: 900;
-        color: #ffffff;
-        margin-top: 6px;
-        margin-bottom: 10px;
-        min-height: 30px;
-    }
-
-    .boat-mark {
-        font-size: 0.85rem;
-        font-weight: 800;
-        color: #ffffff;
-        min-height: 22px;
-    }
-
-    /* -----------------------------------------
-       ランキング
-    ----------------------------------------- */
-
-    .ranking-card {
-        background:
-            linear-gradient(
-                145deg,
-                #182238,
-                #101725
-            );
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 14px;
-        padding: 13px 16px;
-        margin-bottom: 8px;
-    }
-
-    .ranking-number {
-        font-weight: 900;
-        color: #ffffff;
-        font-size: 1.05rem;
-    }
-
-    .ranking-boat {
-        font-weight: 800;
-        color: #ffffff;
-        margin-left: 8px;
-    }
-
-    .ranking-prob {
-        float: right;
-        color: #d7deea;
-        font-weight: 800;
-    }
-
-    /* -----------------------------------------
-       説明
-    ----------------------------------------- */
-
-    .info-box {
-        background: rgba(20, 29, 47, 0.82);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 14px;
-        padding: 14px 16px;
-        color: #b9c4d5;
-        line-height: 1.7;
-        margin-bottom: 14px;
-    }
-
-    /* -----------------------------------------
-       ボタン
-    ----------------------------------------- */
-
-    div.stButton > button {
-        width: 100%;
-        min-height: 52px;
-        border-radius: 14px;
-        font-weight: 900;
-        font-size: 1.05rem;
-    }
-
-    </style>
-    """,
+</style>
+""",
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# HTML表示ヘルパー
+# HTML表示
 # =========================================================
 
-def show_html(html: str):
+def show_html(html_text):
     """
     Streamlit 1.49.1 の st.html を使用。
-    HTMLがそのまま画面に表示される問題を防止。
+    HTMLタグが文字として表示されるのを防ぐ。
     """
-    st.html(html)
+    st.html(html_text)
 
 
 # =========================================================
@@ -312,9 +222,6 @@ def show_html(html: str):
 if "prediction_cache" not in st.session_state:
     st.session_state.prediction_cache = {}
 
-if "selected_race_key" not in st.session_state:
-    st.session_state.selected_race_key = None
-
 
 # =========================================================
 # タイトル
@@ -322,18 +229,14 @@ if "selected_race_key" not in st.session_state:
 
 show_html(
     """
-    <div class="app-title">
-        🚤 やっちゃんの競艇AI予想PRO
-    </div>
-    <div class="app-subtitle">
-        AI × 展示 × 選手成績 × モーター解析
-    </div>
-    """
+<div class="app-title">🚤 やっちゃんの競艇AI予想PRO</div>
+<div class="app-subtitle">AI × 展示 × 選手成績 × モーター解析</div>
+"""
 )
 
 
 # =========================================================
-# 基準日
+# 日付
 # =========================================================
 
 try:
@@ -344,41 +247,22 @@ except Exception:
 
 
 # =========================================================
-# 当日データ取得
+# APIデータ
 # =========================================================
 
 raw = get_data(target_date)
 
-
 if raw is None:
-    st.error(
-        "⚠️ 本日のレースデータを取得できませんでした。"
-    )
-
+    st.error("⚠️ 本日のレースデータを取得できませんでした。")
     st.info(
         "APIから本日のデータを取得できていません。"
         "少し時間を置いて再読み込みしてください。"
     )
-
     st.stop()
 
 
 # =========================================================
-# 開催場一覧
-# =========================================================
-
-stadium_numbers = available_stadiums(raw)
-
-
-if not stadium_numbers:
-    st.warning(
-        "⚠️ 現在、開催場データを取得できません。"
-    )
-    st.stop()
-
-
-# =========================================================
-# 開催場選択
+# 開催場
 # =========================================================
 
 st.markdown(
@@ -386,29 +270,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+stadium_numbers = available_stadiums(raw)
+
+if not stadium_numbers:
+    st.warning("⚠️ 開催場データがありません。")
+    st.stop()
+
+
 stadium_options = []
 
 for number in stadium_numbers:
-    name = STADIUM_NAMES.get(
-        int(number),
-        f"{number}場",
+    number = int(number)
+
+    stadium_name = STADIUM_NAMES.get(
+        number,
+        f"{number}号場",
     )
 
     stadium_options.append(
-        (int(number), name)
+        (number, stadium_name)
     )
 
 
-stadium_labels = [
-    name
-    for _, name in stadium_options
+stadium_names = [
+    item[1]
+    for item in stadium_options
 ]
 
 
 selected_stadium_name = st.selectbox(
     "開催場を選択",
-    stadium_labels,
-    label_visibility="visible",
+    stadium_names,
 )
 
 
@@ -420,14 +312,18 @@ selected_stadium = next(
 
 
 # =========================================================
-# レース一覧
+# レース
 # =========================================================
+
+st.markdown(
+    '<div class="section-title">🏁 レース</div>',
+    unsafe_allow_html=True,
+)
 
 race_numbers = available_races(
     raw,
     selected_stadium,
 )
-
 
 if not race_numbers:
     st.warning(
@@ -436,22 +332,15 @@ if not race_numbers:
     st.stop()
 
 
-race_options = [
-    f"{int(race)}R"
-    for race in race_numbers
+race_labels = [
+    f"{int(number)}R"
+    for number in race_numbers
 ]
-
-
-st.markdown(
-    '<div class="section-title">🏁 レース</div>',
-    unsafe_allow_html=True,
-)
 
 
 selected_race_label = st.selectbox(
     "レースを選択",
-    race_options,
-    label_visibility="visible",
+    race_labels,
 )
 
 
@@ -461,7 +350,7 @@ selected_race = int(
 
 
 # =========================================================
-# 現在のレースキー
+# レースキー
 # =========================================================
 
 race_key = (
@@ -471,46 +360,13 @@ race_key = (
 )
 
 
-# =========================================================
-# レース選択が変わったら以前の予想を表示しない
-# =========================================================
-
-if (
-    st.session_state.selected_race_key
-    != race_key
-):
-    st.session_state.selected_race_key = race_key
-
-
-# =========================================================
-# 現在のレース
-# =========================================================
-
-race = get_race(
-    raw,
-    selected_stadium,
-    selected_race,
-)
-
-
-if race is None:
-    st.warning(
-        "⚠️ 選択したレースのデータを取得できませんでした。"
-    )
-    st.stop()
-
-
-# =========================================================
-# 予想開始前
-# =========================================================
-
 prediction = st.session_state.prediction_cache.get(
     race_key
 )
 
 
 # =========================================================
-# AI予想セクション
+# AI予想
 # =========================================================
 
 st.markdown(
@@ -520,7 +376,7 @@ st.markdown(
 
 
 # =========================================================
-# 予想開始前は説明＋ボタンだけ
+# 予想前
 # =========================================================
 
 if prediction is None:
@@ -530,35 +386,46 @@ if prediction is None:
         "展示・選手成績・モーターなどを解析します。"
     )
 
-    predict_clicked = st.button(
+    if st.button(
         "🚀 AI予想開始",
         type="primary",
         use_container_width=True,
-        key="predict_button",
-    )
+        key="ai_predict_button",
+    ):
 
-    if predict_clicked:
+        race = get_race(
+            raw,
+            selected_stadium,
+            selected_race,
+        )
+
+        if race is None:
+            st.error(
+                "⚠️ レースデータを取得できませんでした。"
+            )
+            st.stop()
+
 
         with st.spinner(
-            "🤖 AIが展示・選手成績・モーターを解析中..."
+            "🤖 AIがレースを解析しています..."
         ):
-
-            # -----------------------------------------
-            # 出走データ
-            # -----------------------------------------
 
             race_df = get_race_rows(
                 race
             )
 
-            if race_df is None or race_df.empty:
+            if (
+                race_df is None
+                or race_df.empty
+            ):
                 st.error(
                     "⚠️ 出走艇データを取得できませんでした。"
                 )
                 st.stop()
 
+
             # -----------------------------------------
-            # 過去14日データ
+            # 過去データ
             # -----------------------------------------
 
             try:
@@ -567,21 +434,24 @@ if prediction is None:
                     selected_race,
                     target_date,
                 )
+
             except TypeError:
-                # 旧形式との互換
+
                 try:
                     hist = history14(
                         selected_stadium,
                         selected_race,
                     )
+
                 except Exception:
                     hist = pd.DataFrame()
 
             except Exception:
                 hist = pd.DataFrame()
 
+
             # -----------------------------------------
-            # AI予想
+            # AI
             # -----------------------------------------
 
             prediction = tri_ai(
@@ -590,122 +460,110 @@ if prediction is None:
                 selected_stadium,
             )
 
-            # -----------------------------------------
-            # 保存
-            # -----------------------------------------
 
             st.session_state.prediction_cache[
                 race_key
             ] = prediction
 
-        # 再描画
+
         st.rerun()
 
 
 # =========================================================
-# ここから予想結果
+# 予想結果
 # =========================================================
 
 if prediction is not None:
 
-    # =====================================================
+    # -----------------------------------------------------
     # レース情報
-    # =====================================================
+    # -----------------------------------------------------
 
     show_html(
         f"""
-        <div class="race-header">
-            <div class="race-date">
-                🗓 {target_date.strftime("%Y-%m-%d")}
-            </div>
-            <div class="race-title">
-                📍 {selected_stadium_name}　{selected_race}R
-            </div>
-        </div>
-        """
+<div class="race-header">
+    <div class="race-date">
+        🗓 {target_date.strftime("%Y-%m-%d")}
+    </div>
+    <div class="race-title">
+        📍 {selected_stadium_name}　{selected_race}R
+    </div>
+</div>
+"""
     )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # 本命・対抗・穴
-    # =====================================================
+    # -----------------------------------------------------
 
     main = int(
-        prediction.get("main", 1)
+        prediction.get(
+            "main",
+            1,
+        )
     )
 
     counter = int(
-        prediction.get("counter", 2)
+        prediction.get(
+            "counter",
+            2,
+        )
     )
 
     hole = int(
-        prediction.get("hole", 3)
+        prediction.get(
+            "hole",
+            3,
+        )
     )
 
 
-    pred_cols = st.columns(3)
+    columns = st.columns(3)
 
 
-    with pred_cols[0]:
-
-        show_html(
-            f"""
-            <div class="prediction-card">
-                <div class="pred-label">
-                    🎯 本命
-                </div>
-                <div class="pred-boat">
-                    {main}号艇
-                </div>
-                <div class="pred-small">
-                    AI最上位評価
-                </div>
-            </div>
-            """
-        )
-
-
-    with pred_cols[1]:
+    with columns[0]:
 
         show_html(
             f"""
-            <div class="prediction-card">
-                <div class="pred-label">
-                    🔥 対抗
-                </div>
-                <div class="pred-boat">
-                    {counter}号艇
-                </div>
-                <div class="pred-small">
-                    AI第2位評価
-                </div>
-            </div>
-            """
+<div class="prediction-card">
+    <div class="pred-label">🎯 本命</div>
+    <div class="pred-boat">{main}号艇</div>
+    <div class="pred-small">AI最上位評価</div>
+</div>
+"""
         )
 
 
-    with pred_cols[2]:
+    with columns[1]:
 
         show_html(
             f"""
-            <div class="prediction-card">
-                <div class="pred-label">
-                    💥 穴
-                </div>
-                <div class="pred-boat">
-                    {hole}号艇
-                </div>
-                <div class="pred-small">
-                    穴候補として選択
-                </div>
-            </div>
-            """
+<div class="prediction-card">
+    <div class="pred-label">🔥 対抗</div>
+    <div class="pred-boat">{counter}号艇</div>
+    <div class="pred-small">AI第2位評価</div>
+</div>
+"""
         )
 
 
-    # =====================================================
+    with columns[2]:
+
+        show_html(
+            f"""
+<div class="prediction-card">
+    <div class="pred-label">💥 穴</div>
+    <div class="pred-boat">{hole}号艇</div>
+    <div class="pred-small">AI穴候補</div>
+</div>
+"""
+        )
+
+
+    # -----------------------------------------------------
     # 自信度
-    # =====================================================
+    # -----------------------------------------------------
 
     confidence = float(
         prediction.get(
@@ -739,21 +597,21 @@ if prediction is not None:
 
     show_html(
         f"""
-        <div class="confidence-card">
-            <div class="confidence-label">
-                🤖 AI自信度　{confidence_percent}%
-            </div>
-            <div class="confidence-stars">
-                {star_text}
-            </div>
-        </div>
-        """
+<div class="confidence-card">
+    <div class="confidence-label">
+        🤖 AI自信度　{confidence_percent}%
+    </div>
+    <div class="confidence-stars">
+        {star_text}
+    </div>
+</div>
+"""
     )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # 出走艇
-    # =====================================================
+    # -----------------------------------------------------
 
     st.markdown(
         '<div class="section-title">🚤 出走艇</div>',
@@ -765,77 +623,82 @@ if prediction is not None:
         "data"
     )
 
-    if race_df is None:
+
+    if (
+        race_df is None
+        or not isinstance(
+            race_df,
+            pd.DataFrame,
+        )
+        or race_df.empty
+    ):
+
+        race = get_race(
+            raw,
+            selected_stadium,
+            selected_race,
+        )
+
         race_df = get_race_rows(
             race
         )
 
 
-    if race_df is None:
-        race_df = pd.DataFrame()
-
-
-    # 6艇表示
-    for start in range(0, 6, 3):
+    for row_start in range(0, 6, 3):
 
         cols = st.columns(3)
 
-        for offset, col in enumerate(cols):
+        for index, col in enumerate(cols):
 
-            boat_no = start + offset + 1
+            boat_number = (
+                row_start + index + 1
+            )
 
             with col:
-
-                row = None
 
                 if (
                     isinstance(
                         race_df,
                         pd.DataFrame,
                     )
-                    and not race_df.empty
-                    and len(race_df) >= boat_no
+                    and len(race_df) >= boat_number
                 ):
+
                     try:
                         row = race_df.iloc[
-                            boat_no - 1
+                            boat_number - 1
                         ]
-                    except Exception:
-                        row = None
 
-
-                if row is not None:
-
-                    name = str(
-                        row.get(
-                            "選手名",
-                            f"{boat_no}号艇",
+                        boat_name = str(
+                            row.get(
+                                "選手名",
+                                f"{boat_number}号艇",
+                            )
                         )
-                    )
+
+                    except Exception:
+
+                        boat_name = (
+                            f"{boat_number}号艇"
+                        )
 
                 else:
 
-                    name = (
-                        f"{boat_no}号艇"
+                    boat_name = (
+                        f"{boat_number}号艇"
                     )
 
 
                 marks = []
 
-                if boat_no == main:
-                    marks.append(
-                        "🎯 本命"
-                    )
+                if boat_number == main:
+                    marks.append("🎯 本命")
 
-                if boat_no == counter:
-                    marks.append(
-                        "🔥 対抗"
-                    )
+                if boat_number == counter:
+                    marks.append("🔥 対抗")
 
-                if boat_no == hole:
-                    marks.append(
-                        "💥 穴"
-                    )
+                if boat_number == hole:
+                    marks.append("💥 穴")
 
                 mark_text = " ".join(
                     marks
@@ -844,26 +707,24 @@ if prediction is not None:
 
                 show_html(
                     f"""
-                    <div class="boat-card">
-                        <div class="boat-number">
-                            {boat_no}号艇
-                        </div>
-
-                        <div class="boat-name">
-                            {name}
-                        </div>
-
-                        <div class="boat-mark">
-                            {mark_text}
-                        </div>
-                    </div>
-                    """
+<div class="boat-card">
+    <div class="boat-number">
+        {boat_number}号艇
+    </div>
+    <div class="boat-name">
+        {boat_name}
+    </div>
+    <div class="boat-mark">
+        {mark_text}
+    </div>
+</div>
+"""
                 )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # AI予測確率
-    # =====================================================
+    # -----------------------------------------------------
 
     st.markdown(
         '<div class="section-title">📊 AI予測確率</div>',
@@ -877,40 +738,40 @@ if prediction is not None:
     )
 
 
-    probability_rows = []
+    probability_data = []
 
     for boat in range(1, 7):
 
-        prob = float(
+        probability = float(
             boat_probs.get(
                 boat,
                 0.0,
             )
         )
 
-        probability_rows.append(
+        probability_data.append(
             {
                 "艇": f"{boat}号艇",
-                "AI確率": prob,
+                "AI確率": probability,
             }
         )
 
 
-    prob_df = pd.DataFrame(
-        probability_rows
+    probability_df = pd.DataFrame(
+        probability_data
     )
 
 
     st.bar_chart(
-        prob_df.set_index("艇"),
+        probability_df.set_index("艇"),
         y="AI確率",
         height=330,
     )
 
 
-    # =====================================================
-    # AI総合ランキング
-    # =====================================================
+    # -----------------------------------------------------
+    # AIランキング
+    # -----------------------------------------------------
 
     st.markdown(
         '<div class="section-title">🏆 AI総合ランキング</div>',
@@ -943,7 +804,7 @@ if prediction is not None:
 
         boat = int(boat)
 
-        prob = float(
+        probability = float(
             boat_probs.get(
                 boat,
                 0.0,
@@ -953,14 +814,83 @@ if prediction is not None:
 
         show_html(
             f"""
-            <div class="ranking-card">
-                <span class="ranking-number">
-                    {rank}位
-                </span>
+<div class="ranking-card">
+    <span class="ranking-number">
+        {rank}位
+    </span>
+    <span class="ranking-boat">
+        {boat}号艇
+    </span>
+    <span class="ranking-prob">
+        {probability * 100:.1f}%
+    </span>
+</div>
+"""
+        )
 
-                <span class="ranking-boat">
-                    {boat}号艇
-                </span>
 
-                <span class="ranking-prob">
-      
+    # -----------------------------------------------------
+    # 予想データ
+    # -----------------------------------------------------
+
+    st.markdown(
+        '<div class="section-title">📋 予想データ</div>',
+        unsafe_allow_html=True,
+    )
+
+
+    if (
+        isinstance(
+            race_df,
+            pd.DataFrame,
+        )
+        and not race_df.empty
+    ):
+
+        display_columns = [
+            "枠",
+            "選手名",
+            "展示進入",
+            "全国勝率",
+            "全国2連率",
+            "全国3連率",
+            "当地勝率",
+            "当地2連率",
+            "モーター2連率",
+            "平均ST",
+            "展示ST",
+            "展示タイム",
+        ]
+
+
+        available_columns = [
+            column
+            for column in display_columns
+            if column in race_df.columns
+        ]
+
+
+        if available_columns:
+
+            display_df = race_df[
+                available_columns
+            ].copy()
+
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
+    # -----------------------------------------------------
+    # バックテスト
+    # -----------------------------------------------------
+
+    st.markdown(
+        "<br>",
+        unsafe_allow_html=True,
+    )
+
+    render_backtest()

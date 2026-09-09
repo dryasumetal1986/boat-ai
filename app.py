@@ -9,6 +9,7 @@ from data import (
     get_race,
     history14,
     get_odds,
+    backtest_races,
 )
 
 from ai import score, tri_ai
@@ -66,7 +67,7 @@ st.title(
 )
 
 st.write(
-    "選手データ＋展示タイム＋展示ST＋展示進入＋天候＋過去14日＋3連単オッズ"
+    "選手データ＋展示＋過去データ＋オッズ＋バックテスト"
 )
 
 
@@ -80,600 +81,76 @@ today = datetime.now(
 
 
 # =========================
-# 入力
+# タブ
 # =========================
 
-c1, c2, c3 = st.columns(3)
-
-with c1:
-
-    td = st.date_input(
-        "開催日",
-        today,
-        min_value=date(2026, 1, 1),
-    )
+tab1, tab2 = st.tabs([
+    "🚤 AI予想",
+    "🧪 バックテスト",
+])
 
 
-with c2:
+# =========================================================
+# AI予想
+# =========================================================
 
-    name = st.selectbox(
-        "競艇場",
-        list(STADIUMS.values()),
-    )
+with tab1:
 
+    c1, c2, c3 = st.columns(3)
 
-with c3:
+    with c1:
 
-    rno = st.selectbox(
-        "レース",
-        range(1, 13),
-        format_func=lambda x: f"{x}R",
-    )
-
-
-sno = list(STADIUMS)[
-    list(STADIUMS.values()).index(name)
-]
-
-
-# =========================
-# AI実行
-# =========================
-
-if st.button(
-    "🚀 AI予想を実行",
-    type="primary",
-    use_container_width=True,
-):
-
-    # =========================
-    # レース取得
-    # =========================
-
-    try:
-
-        data = get_data(td)
-
-        race = get_race(
-            data,
-            sno,
-            rno,
+        td = st.date_input(
+            "開催日",
+            today,
+            min_value=date(2026, 1, 1),
+            key="race_date",
         )
 
-    except Exception as e:
+    with c2:
 
-        st.error(
-            "レースデータ取得に失敗しました"
+        name = st.selectbox(
+            "競艇場",
+            list(STADIUMS.values()),
+            key="stadium",
         )
 
-        st.exception(e)
-
-        st.stop()
-
-
-    if race is None:
-
-        st.error(
-            "このレースのデータがありません"
-        )
-
-        st.stop()
-
-
-    # =========================
-    # 出走データ
-    # =========================
-
-    racers_data = race.get(
-        "racers",
-        {},
-    )
-
-    preview_data = race.get(
-        "preview",
-        {},
-    ).get(
-        "racers",
-        {},
-    )
-
-
-    if not isinstance(
-        racers_data,
-        dict,
-    ):
-
-        racers_data = {}
-
-
-    # =========================
-    # 展示データを枠番号へ変換
-    # =========================
-
-    preview_map = {}
-
-    if isinstance(
-        preview_data,
-        dict,
-    ):
-
-        preview_items = preview_data.values()
-
-    elif isinstance(
-        preview_data,
-        list,
-    ):
-
-        preview_items = preview_data
-
-    else:
-
-        preview_items = []
-
-
-    for p in preview_items:
-
-        if not isinstance(
-            p,
-            dict,
-        ):
-
-            continue
-
-        entry = p.get(
-            "entry_number"
-        )
-
-        course = p.get(
-            "course_number"
-        )
-
-        if entry is not None:
-
-            preview_map[
-                str(entry)
-            ] = p
-
-        if course is not None:
-
-            preview_map.setdefault(
-                str(course),
-                p,
-            )
-
-
-    # =========================
-    # 天候
-    # =========================
-
-    result_data = race.get(
-        "result",
-        {}
-    )
-
-    if not isinstance(
-        result_data,
-        dict,
-    ):
-
-        result_data = {}
-
-
-    wind_speed = result_data.get(
-        "wind_speed",
-        0,
-    )
-
-    wind_direction = result_data.get(
-        "wind_direction_number",
-        0,
-    )
-
-    wave_height = result_data.get(
-        "wave_height",
-        0,
-    )
-
-    air_temperature = result_data.get(
-        "air_temperature",
-        0,
-    )
-
-    water_temperature = result_data.get(
-        "water_temperature",
-        0,
-    )
-
-
-    # =========================
-    # 数値変換
-    # =========================
-
-    def num(value):
-
-        try:
-
-            return float(
-                value or 0
-            )
-
-        except Exception:
-
-            return 0.0
-
-
-    wind_speed = num(
-        wind_speed
-    )
-
-    wave_height = num(
-        wave_height
-    )
-
-    air_temperature = num(
-        air_temperature
-    )
-
-    water_temperature = num(
-        water_temperature
-    )
-
-
-    # =========================
-    # 天候表示
-    # =========================
-
-    direction_names = {
-        1: "北",
-        2: "北東",
-        3: "東",
-        4: "南東",
-        5: "南",
-        6: "南西",
-        7: "西",
-        8: "北西",
-    }
-
-    try:
-
-        direction_text = direction_names.get(
-            int(wind_direction),
-            "不明",
-        )
-
-    except Exception:
-
-        direction_text = "不明"
-
-
-    # =========================
-    # 天候表示
-    # =========================
-
-    st.subheader(
-        "🌤️ レース直前情報"
-    )
-
-    w1, w2, w3, w4, w5, w6 = st.columns(6)
-
-    with w1:
-
-        st.metric(
-            "風速",
-            f"{wind_speed:g} m",
-        )
-
-    with w2:
-
-        st.metric(
-            "風向",
-            direction_text,
-        )
-
-    with w3:
-
-        st.metric(
-            "波高",
-            f"{wave_height:g} cm",
-        )
-
-    with w4:
-
-        st.metric(
-            "気温",
-            f"{air_temperature:g} ℃",
-        )
-
-    with w5:
-
-        st.metric(
-            "水温",
-            f"{water_temperature:g} ℃",
-        )
-
-    with w6:
-
-        st.metric(
-            "展示情報",
-            "取得済み",
+    with c3:
+
+        rno = st.selectbox(
+            "レース",
+            range(1, 13),
+            format_func=lambda x: f"{x}R",
+            key="race_no",
         )
 
 
-    # =========================
-    # 選手データ
-    # =========================
-
-    rows = []
-
-
-    for lane in range(1, 7):
-
-        racer = racers_data.get(
-            str(lane),
-            {},
-        )
-
-        preview = preview_map.get(
-            str(lane),
-            {},
-        )
-
-
-        if not racer:
-
-            continue
-
-
-        # -------------------------
-        # 展示タイム
-        # -------------------------
-
-        exhibition = num(
-            preview.get(
-                "exhibition_time",
-                0,
-            )
-        )
-
-
-        # -------------------------
-        # 展示ST
-        # -------------------------
-
-        exhibition_st = num(
-            preview.get(
-                "start_timing",
-                0,
-            )
-        )
-
-
-        # -------------------------
-        # 展示進入
-        # -------------------------
-
-        exhibition_course = preview.get(
-            "course_number",
-            lane,
-        )
-
-
-        try:
-
-            exhibition_course = int(
-                exhibition_course
-            )
-
-        except Exception:
-
-            exhibition_course = lane
-
-
-        # -------------------------
-        # 選手情報
-        # -------------------------
-
-        rows.append({
-
-            "枠": lane,
-
-            "展示進入": exhibition_course,
-
-            "選手名": racer.get(
-                "name",
-                "不明",
-            ),
-
-            "選手番号": str(
-                racer.get(
-                    "number",
-                    "",
-                )
-            ),
-
-            "級別": racer.get(
-                "rank_number",
-                "",
-            ),
-
-            "全国勝率": num(
-                racer.get(
-                    "national_win_rate",
-                    0,
-                )
-            ),
-
-            "全国2連率": num(
-                racer.get(
-                    "national_top_2_percent",
-                    0,
-                )
-            ),
-
-            "当地勝率": num(
-                racer.get(
-                    "local_win_rate",
-                    0,
-                )
-            ),
-
-            "モーター2連率": num(
-                racer.get(
-                    "motor_top_2_percent",
-                    0,
-                )
-            ),
-
-            "平均ST": num(
-                racer.get(
-                    "average_start_timing",
-                    0,
-                )
-            ),
-
-            "展示ST": exhibition_st,
-
-            "展示タイム": exhibition,
-        })
-
-
-    df = pd.DataFrame(
-        rows
-    )
-
-
-    if df.empty:
-
-        st.error(
-            "出走表がありません"
-        )
-
-        st.stop()
-
-
-    # =========================
-    # 選手AI
-    # =========================
-
-    df["学習AI"] = df.apply(
-        score,
-        axis=1,
-    )
-
-
-    df = df.sort_values(
-        "学習AI",
-        ascending=False,
-    ).reset_index(
-        drop=True
-    )
-
-
-    # =========================
-    # 出走表
-    # =========================
-
-    st.subheader(
-        f"🤖 {name} {rno}R AI評価"
-    )
-
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-    # =========================
-    # 展示確認
-    # =========================
-
-    st.subheader(
-        "🔎 展示データ確認"
-    )
-
-
-    exhibition_view = df[
-        [
-            "枠",
-            "展示進入",
-            "選手名",
-            "展示ST",
-            "展示タイム",
-        ]
-    ].copy()
-
-
-    st.dataframe(
-        exhibition_view,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-    # =========================
-    # AI順位
-    # =========================
-
-    st.subheader(
-        "🏆 AI順位"
-    )
-
-
-    labels = [
-        "🥇 本命",
-        "🥈 対抗",
-        "🥉 穴",
+    sno = list(STADIUMS)[
+        list(STADIUMS.values()).index(name)
     ]
 
 
-    for i, row in df.head(3).iterrows():
-
-        st.write(
-            f"{labels[i]} "
-            f"{int(row['枠'])}号艇 "
-            f"{row['選手名']} "
-            f"AI {row['学習AI']}"
-        )
-
-
-    # =========================
-    # 過去14日
-    # =========================
-
-    try:
-
-        history = pd.DataFrame(
-            history14(td)
-        )
-
-    except Exception as e:
-
-        st.warning(
-            "過去14日データの取得に失敗しました"
-        )
-
-        history = pd.DataFrame()
-
-
-    # =========================
-    # 3連単AI
-    # =========================
-
-    if len(df) >= 3:
+    if st.button(
+        "🚀 AI予想を実行",
+        type="primary",
+        use_container_width=True,
+        key="predict",
+    ):
 
         try:
 
-            tri = tri_ai(
-                df,
-                history,
+            data = get_data(td)
+
+            race = get_race(
+                data,
+                sno,
+                rno,
             )
 
         except Exception as e:
 
             st.error(
-                "3連単AI計算でエラーが発生しました"
+                "レースデータ取得に失敗しました"
             )
 
             st.exception(e)
@@ -681,289 +158,418 @@ if st.button(
             st.stop()
 
 
-        # =========================
-        # オッズ
-        # =========================
+        if race is None:
+
+            st.error(
+                "このレースのデータがありません"
+            )
+
+            st.stop()
+
+
+        racers_data = race.get(
+            "racers",
+            {}
+        )
+
+        preview_data = race.get(
+            "preview",
+            {}
+        ).get(
+            "racers",
+            {}
+        )
+
+
+        if not isinstance(
+            racers_data,
+            dict,
+        ):
+
+            racers_data = {}
+
+
+        preview_map = {}
+
+
+        if isinstance(
+            preview_data,
+            dict,
+        ):
+
+            preview_items = (
+                preview_data.values()
+            )
+
+        elif isinstance(
+            preview_data,
+            list,
+        ):
+
+            preview_items = preview_data
+
+        else:
+
+            preview_items = []
+
+
+        for p in preview_items:
+
+            if not isinstance(
+                p,
+                dict,
+            ):
+
+                continue
+
+            entry = p.get(
+                "entry_number"
+            )
+
+            course = p.get(
+                "course_number"
+            )
+
+            if entry is not None:
+
+                preview_map[
+                    str(entry)
+                ] = p
+
+            if course is not None:
+
+                preview_map.setdefault(
+                    str(course),
+                    p,
+                )
+
+
+        result_data = race.get(
+            "result",
+            {}
+        )
+
+        if not isinstance(
+            result_data,
+            dict,
+        ):
+
+            result_data = {}
+
+
+        def num(value):
+
+            try:
+
+                return float(
+                    value or 0
+                )
+
+            except Exception:
+
+                return 0.0
+
+
+        wind_speed = num(
+            result_data.get(
+                "wind_speed",
+                0,
+            )
+        )
+
+        wind_direction = result_data.get(
+            "wind_direction_number",
+            0,
+        )
+
+        wave_height = num(
+            result_data.get(
+                "wave_height",
+                0,
+            )
+        )
+
+        air_temperature = num(
+            result_data.get(
+                "air_temperature",
+                0,
+            )
+        )
+
+        water_temperature = num(
+            result_data.get(
+                "water_temperature",
+                0,
+            )
+        )
+
+
+        direction_names = {
+            1: "北",
+            2: "北東",
+            3: "東",
+            4: "南東",
+            5: "南",
+            6: "南西",
+            7: "西",
+            8: "北西",
+        }
+
 
         try:
 
-            odds = get_odds(
-                td,
-                sno,
-                rno,
+            direction_text = (
+                direction_names.get(
+                    int(wind_direction),
+                    "不明",
+                )
             )
 
-        except Exception as e:
+        except Exception:
 
-            st.warning(
-                "3連単オッズを取得できませんでした"
+            direction_text = "不明"
+
+
+        st.subheader(
+            "🌤️ レース直前情報"
+        )
+
+
+        w1, w2, w3, w4, w5, w6 = (
+            st.columns(6)
+        )
+
+
+        with w1:
+
+            st.metric(
+                "風速",
+                f"{wind_speed:g} m",
             )
 
-            odds = {}
 
+        with w2:
 
-        if odds:
-
-            tri["オッズ"] = (
-                tri["3連単"].map(odds)
+            st.metric(
+                "風向",
+                direction_text,
             )
 
-        else:
 
-            tri["オッズ"] = None
+        with w3:
 
-
-        # =========================
-        # 最終AI
-        # =========================
-
-        tri["最終AI"] = tri[
-            "AIスコア"
-        ]
+            st.metric(
+                "波高",
+                f"{wave_height:g} cm",
+            )
 
 
-        for idx in tri.index:
+        with w4:
 
-            odd = tri.loc[
-                idx,
-                "オッズ",
-            ]
+            st.metric(
+                "気温",
+                f"{air_temperature:g} ℃",
+            )
 
-            if pd.notna(odd):
 
-                try:
+        with w5:
 
-                    odd = float(odd)
+            st.metric(
+                "水温",
+                f"{water_temperature:g} ℃",
+            )
 
-                    odds_bonus = (
-                        math.log(
-                            max(
-                                odd,
-                                1,
-                            )
+
+        with w6:
+
+            st.metric(
+                "展示情報",
+                "取得済み",
+            )
+
+
+        rows = []
+
+
+        for lane in range(1, 7):
+
+            racer = racers_data.get(
+                str(lane),
+                {}
+            )
+
+            preview = preview_map.get(
+                str(lane),
+                {}
+            )
+
+
+            if not racer:
+
+                continue
+
+
+            exhibition = num(
+                preview.get(
+                    "exhibition_time",
+                    0,
+                )
+            )
+
+
+            exhibition_st = num(
+                preview.get(
+                    "start_timing",
+                    0,
+                )
+            )
+
+
+            exhibition_course = preview.get(
+                "course_number",
+                lane,
+            )
+
+
+            try:
+
+                exhibition_course = int(
+                    exhibition_course
+                )
+
+            except Exception:
+
+                exhibition_course = lane
+
+
+            rows.append({
+
+                "枠": lane,
+
+                "展示進入":
+                    exhibition_course,
+
+                "選手名":
+                    racer.get(
+                        "name",
+                        "不明",
+                    ),
+
+                "選手番号":
+                    str(
+                        racer.get(
+                            "number",
+                            "",
                         )
-                        * 2.0
-                    )
+                    ),
 
-                    tri.loc[
-                        idx,
-                        "最終AI",
-                    ] += odds_bonus
+                "級別":
+                    racer.get(
+                        "rank_number",
+                        "",
+                    ),
 
-                except Exception:
+                "全国勝率":
+                    num(
+                        racer.get(
+                            "national_win_rate",
+                            0,
+                        )
+                    ),
 
-                    pass
+                "全国2連率":
+                    num(
+                        racer.get(
+                            "national_top_2_percent",
+                            0,
+                        )
+                    ),
 
+                "当地勝率":
+                    num(
+                        racer.get(
+                            "local_win_rate",
+                            0,
+                        )
+                    ),
 
-        # =========================
-        # 信頼度
-        # =========================
+                "モーター2連率":
+                    num(
+                        racer.get(
+                            "motor_top_2_percent",
+                            0,
+                        )
+                    ),
 
-        min_score = tri[
-            "最終AI"
-        ].min()
+                "平均ST":
+                    num(
+                        racer.get(
+                            "average_start_timing",
+                            0,
+                        )
+                    ),
 
-        max_score = tri[
-            "最終AI"
-        ].max()
+                "展示ST":
+                    exhibition_st,
 
-
-        if max_score > min_score:
-
-            tri["信頼度"] = (
-                (
-                    tri["最終AI"]
-                    - min_score
-                )
-                / (
-                    max_score
-                    - min_score
-                )
-                * 100
-            ).round(1)
-
-        else:
-
-            tri["信頼度"] = 50.0
-
-
-        # =========================
-        # 穴度
-        # =========================
-
-        tri["穴度"] = 0.0
-
-
-        if tri["オッズ"].notna().any():
-
-            valid_odds = tri[
-                "オッズ"
-            ].dropna()
+                "展示タイム":
+                    exhibition,
+            })
 
 
-            if len(valid_odds) > 0:
-
-                q75 = valid_odds.quantile(
-                    0.75
-                )
+        df = pd.DataFrame(
+            rows
+        )
 
 
-                for idx in tri.index:
+        if df.empty:
 
-                    odd = tri.loc[
-                        idx,
-                        "オッズ",
-                    ]
+            st.error(
+                "出走表がありません"
+            )
 
-
-                    if pd.notna(odd):
-
-                        try:
-
-                            odd = float(
-                                odd
-                            )
-
-                            if q75 > 0:
-
-                                hole = (
-                                    odd
-                                    / q75
-                                    * 100
-                                )
-
-                                tri.loc[
-                                    idx,
-                                    "穴度",
-                                ] = round(
-                                    min(
-                                        hole,
-                                        100,
-                                    ),
-                                    1,
-                                )
-
-                        except Exception:
-
-                            pass
+            st.stop()
 
 
-        # =========================
-        # 並び替え
-        # =========================
+        df["学習AI"] = df.apply(
+            score,
+            axis=1,
+        )
 
-        tri = tri.sort_values(
-            "最終AI",
+
+        df = df.sort_values(
+            "学習AI",
             ascending=False,
         ).reset_index(
             drop=True
         )
 
 
-        # =========================
-        # TOP
-        # =========================
-
-        top = tri.iloc[0]
-
-        second = tri.iloc[1]
-
-        third = tri.iloc[2]
-
-
-        hole_candidates = tri[
-            tri["オッズ"].notna()
-        ].sort_values(
-            "オッズ",
-            ascending=False,
-        )
-
-
-        if len(hole_candidates) > 0:
-
-            hole = (
-                hole_candidates.iloc[0]
-            )
-
-        else:
-
-            hole = tri.iloc[-1]
-
-
-        # =========================
-        # 120通り
-        # =========================
-
         st.subheader(
-            "🔥 120通り3連単AI"
+            f"🤖 {name} {rno}R AI評価"
         )
-
-
-        a, b, c, d = st.columns(4)
-
-
-        with a:
-
-            st.metric(
-                "🥇 AI本線",
-                top["3連単"],
-                f"信頼度 {top['信頼度']}%",
-            )
-
-
-        with b:
-
-            st.metric(
-                "🥈 AI対抗",
-                second["3連単"],
-                f"信頼度 {second['信頼度']}%",
-            )
-
-
-        with c:
-
-            st.metric(
-                "🎯 AI押さえ",
-                third["3連単"],
-                f"信頼度 {third['信頼度']}%",
-            )
-
-
-        with d:
-
-            st.metric(
-                "💥 AI穴",
-                hole["3連単"],
-                f"穴度 {hole['穴度']}%",
-            )
-
-
-        # =========================
-        # TOP10
-        # =========================
-
-        st.subheader(
-            "📈 120通りAIランキング TOP10"
-        )
-
-
-        top10 = tri.head(
-            10
-        ).copy()
 
 
         st.dataframe(
-            top10[
+            df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+        st.subheader(
+            "🔎 展示データ確認"
+        )
+
+
+        st.dataframe(
+            df[
                 [
-                    "3連単",
-                    "1着AI",
-                    "2着AI",
-                    "3着AI",
-                    "AIスコア",
-                    "オッズ",
-                    "最終AI",
-                    "信頼度",
-                    "穴度",
+                    "枠",
+                    "展示進入",
+                    "選手名",
+                    "展示ST",
+                    "展示タイム",
                 ]
             ],
             use_container_width=True,
@@ -971,51 +577,543 @@ if st.button(
         )
 
 
-        # =========================
-        # 上位4点
-        # =========================
+        st.subheader(
+            "🏆 AI順位"
+        )
+
+
+        labels = [
+            "🥇 本命",
+            "🥈 対抗",
+            "🥉 穴",
+        ]
+
+
+        for i, row in df.head(3).iterrows():
+
+            st.write(
+                f"{labels[i]} "
+                f"{int(row['枠'])}号艇 "
+                f"{row['選手名']} "
+                f"AI {row['学習AI']}"
+            )
+
+
+        try:
+
+            history = pd.DataFrame(
+                history14(td)
+            )
+
+        except Exception:
+
+            history = pd.DataFrame()
+
+
+        if len(df) >= 3:
+
+            try:
+
+                tri = tri_ai(
+                    df,
+                    history,
+                )
+
+            except Exception as e:
+
+                st.error(
+                    "3連単AI計算でエラーが発生しました"
+                )
+
+                st.exception(e)
+
+                st.stop()
+
+
+            try:
+
+                odds = get_odds(
+                    td,
+                    sno,
+                    rno,
+                )
+
+            except Exception:
+
+                odds = {}
+
+
+            if odds:
+
+                tri["オッズ"] = (
+                    tri["3連単"].map(
+                        odds
+                    )
+                )
+
+            else:
+
+                tri["オッズ"] = None
+
+
+            tri["最終AI"] = (
+                tri["AIスコア"]
+            )
+
+
+            for idx in tri.index:
+
+                odd = tri.loc[
+                    idx,
+                    "オッズ",
+                ]
+
+                if pd.notna(odd):
+
+                    try:
+
+                        odd = float(
+                            odd
+                        )
+
+                        tri.loc[
+                            idx,
+                            "最終AI",
+                        ] += (
+                            math.log(
+                                max(
+                                    odd,
+                                    1,
+                                )
+                            )
+                            * 2.0
+                        )
+
+                    except Exception:
+
+                        pass
+
+
+            minimum = tri[
+                "最終AI"
+            ].min()
+
+            maximum = tri[
+                "最終AI"
+            ].max()
+
+
+            if maximum > minimum:
+
+                tri["信頼度"] = (
+                    (
+                        tri["最終AI"]
+                        - minimum
+                    )
+                    / (
+                        maximum
+                        - minimum
+                    )
+                    * 100
+                ).round(1)
+
+            else:
+
+                tri["信頼度"] = 50.0
+
+
+            tri["穴度"] = 0.0
+
+
+            if tri[
+                "オッズ"
+            ].notna().any():
+
+                valid_odds = tri[
+                    "オッズ"
+                ].dropna()
+
+
+                if len(
+                    valid_odds
+                ) > 0:
+
+                    q75 = (
+                        valid_odds
+                        .quantile(0.75)
+                    )
+
+
+                    for idx in tri.index:
+
+                        odd = tri.loc[
+                            idx,
+                            "オッズ",
+                        ]
+
+
+                        if pd.notna(odd):
+
+                            try:
+
+                                odd = float(
+                                    odd
+                                )
+
+                                if q75 > 0:
+
+                                    hole = (
+                                        odd
+                                        / q75
+                                        * 100
+                                    )
+
+                                    tri.loc[
+                                        idx,
+                                        "穴度",
+                                    ] = round(
+                                        min(
+                                            hole,
+                                            100,
+                                        ),
+                                        1,
+                                    )
+
+                            except Exception:
+
+                                pass
+
+
+            tri = tri.sort_values(
+                "最終AI",
+                ascending=False,
+            ).reset_index(
+                drop=True
+            )
+
+
+            top = tri.iloc[0]
+            second = tri.iloc[1]
+            third = tri.iloc[2]
+
+
+            hole_candidates = tri[
+                tri["オッズ"].notna()
+            ].sort_values(
+                "オッズ",
+                ascending=False,
+            )
+
+
+            if len(
+                hole_candidates
+            ) > 0:
+
+                hole = (
+                    hole_candidates
+                    .iloc[0]
+                )
+
+            else:
+
+                hole = tri.iloc[-1]
+
+
+            st.subheader(
+                "🔥 120通り3連単AI"
+            )
+
+
+            a, b, c, d = (
+                st.columns(4)
+            )
+
+
+            with a:
+
+                st.metric(
+                    "🥇 AI本線",
+                    top["3連単"],
+                    f"信頼度 {top['信頼度']}%",
+                )
+
+
+            with b:
+
+                st.metric(
+                    "🥈 AI対抗",
+                    second["3連単"],
+                    f"信頼度 {second['信頼度']}%",
+                )
+
+
+            with c:
+
+                st.metric(
+                    "🎯 AI押さえ",
+                    third["3連単"],
+                    f"信頼度 {third['信頼度']}%",
+                )
+
+
+            with d:
+
+                st.metric(
+                    "💥 AI穴",
+                    hole["3連単"],
+                    f"穴度 {hole['穴度']}%",
+                )
+
+
+            st.subheader(
+                "📈 120通りAIランキング TOP10"
+            )
+
+
+            st.dataframe(
+                tri.head(10)[
+                    [
+                        "3連単",
+                        "1着AI",
+                        "2着AI",
+                        "3着AI",
+                        "AIスコア",
+                        "オッズ",
+                        "最終AI",
+                        "信頼度",
+                        "穴度",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
+            st.subheader(
+                "📊 上位4点"
+            )
+
+
+            st.write(
+                f"🥇 本線：{top['3連単']} "
+                f"（信頼度 {top['信頼度']}% / "
+                f"オッズ {top['オッズ']}）"
+            )
+
+
+            st.write(
+                f"🥈 対抗：{second['3連単']} "
+                f"（信頼度 {second['信頼度']}% / "
+                f"オッズ {second['オッズ']}）"
+            )
+
+
+            st.write(
+                f"🎯 押さえ：{third['3連単']} "
+                f"（信頼度 {third['信頼度']}% / "
+                f"オッズ {third['オッズ']}）"
+            )
+
+
+            st.write(
+                f"💥 穴：{hole['3連単']} "
+                f"（穴度 {hole['穴度']}% / "
+                f"オッズ {hole['オッズ']}）"
+            )
+
+
+# =========================================================
+# バックテスト
+# =========================================================
+
+with tab2:
+
+    st.subheader(
+        "🧪 AIバックテスト"
+    )
+
+    st.write(
+        "過去レースを使って、現在のAIがどれくらい当たるか確認します。"
+    )
+
+
+    bt_days = st.selectbox(
+        "検証期間",
+        [7, 14],
+        index=0,
+        format_func=lambda x: f"過去{x}日",
+    )
+
+
+    if st.button(
+        "🧪 バックテスト開始",
+        type="primary",
+        use_container_width=True,
+        key="backtest",
+    ):
+
+        with st.spinner(
+            "過去レースを集計中..."
+        ):
+
+            try:
+
+                bt = pd.DataFrame(
+                    backtest_races(
+                        today,
+                        bt_days,
+                    )
+                )
+
+            except Exception as e:
+
+                st.error(
+                    "バックテストデータ取得エラー"
+                )
+
+                st.exception(e)
+
+                st.stop()
+
+
+        if bt.empty:
+
+            st.warning(
+                "検証できる過去レースがありません。"
+            )
+
+            st.stop()
+
+
+        total = len(bt)
+
+
+        # =====================
+        # 3連単的中率
+        # =====================
+
+        # 現段階では実際のAI予想を
+        # 全過去レースに再構築する前段階。
+        # まず結果データの件数・払戻を確認する。
+
+
+        st.success(
+            f"{total}レース取得しました。"
+        )
+
+
+        # =====================
+        # 基本統計
+        # =====================
+
+        payouts = pd.to_numeric(
+            bt["払戻金"],
+            errors="coerce",
+        ).fillna(0)
+
+
+        valid_payouts = payouts[
+            payouts > 0
+        ]
+
+
+        average_payout = (
+            valid_payouts.mean()
+            if len(valid_payouts) > 0
+            else 0
+        )
+
+
+        hit_races = len(
+            valid_payouts
+        )
+
+
+        hit_rate = (
+            hit_races
+            / total
+            * 100
+            if total > 0
+            else 0
+        )
+
+
+        # =====================
+        # メトリクス
+        # =====================
+
+        m1, m2, m3, m4 = (
+            st.columns(4)
+        )
+
+
+        with m1:
+
+            st.metric(
+                "検証レース",
+                f"{total:,}",
+            )
+
+
+        with m2:
+
+            st.metric(
+                "結果取得率",
+                f"{hit_rate:.1f}%",
+            )
+
+
+        with m3:
+
+            st.metric(
+                "平均払戻",
+                f"{average_payout:,.0f}円",
+            )
+
+
+        with m4:
+
+            st.metric(
+                "最高払戻",
+                f"{payouts.max():,.0f}円",
+            )
+
+
+        # =====================
+        # 払戻統計
+        # =====================
 
         st.subheader(
-            "📊 上位4点"
+            "💰 払戻統計"
         )
 
 
-        st.write(
-            f"🥇 本線：{top['3連単']} "
-            f"（信頼度 {top['信頼度']}% / "
-            f"オッズ {top['オッズ']}）"
+        payout_view = bt[
+            [
+                "日付",
+                "場",
+                "レース",
+                "実際の3連単",
+                "払戻金",
+            ]
+        ].copy()
+
+
+        payout_view = payout_view.sort_values(
+            "払戻金",
+            ascending=False,
         )
 
 
-        st.write(
-            f"🥈 対抗：{second['3連単']} "
-            f"（信頼度 {second['信頼度']}% / "
-            f"オッズ {second['オッズ']}）"
+        st.dataframe(
+            payout_view.head(30),
+            use_container_width=True,
+            hide_index=True,
         )
 
 
-        st.write(
-            f"🎯 押さえ：{third['3連単']} "
-            f"（信頼度 {third['信頼度']}% / "
-            f"オッズ {third['オッズ']}）"
-        )
-
-
-        st.write(
-            f"💥 穴：{hole['3連単']} "
-            f"（穴度 {hole['穴度']}% / "
-            f"オッズ {hole['オッズ']}）"
-        )
-
-
-        st.caption(
-            "展示ST・展示進入・天候データを取得しています。"
-        )
-
-
-else:
-
-    st.info(
-        "開催日・競艇場・レースを選んで"
-        "「AI予想を実行」を押してください。"
-                            )
+        st.info(
+            "現在は過去結果の取得・統計確認までです。"
+            "次の段階で、この過去レースそれぞれにAI予想を再現して、"
+            "本命・TOP3・TOP10の的中率と回収率を計測します。"
+                   )

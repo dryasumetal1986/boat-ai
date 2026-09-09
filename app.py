@@ -21,7 +21,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* 全体 */
     .stApp {
         background: #f5f7fa;
     }
@@ -32,7 +31,6 @@ st.markdown(
         padding-bottom: 3rem;
     }
 
-    /* フォント */
     html, body, [class*="css"] {
         font-family:
             "Noto Sans JP",
@@ -42,7 +40,6 @@ st.markdown(
             sans-serif;
     }
 
-    /* タイトル */
     .pro-title {
         text-align: center;
         font-size: 2rem;
@@ -60,7 +57,6 @@ st.markdown(
         margin-bottom: 1.8rem;
     }
 
-    /* 選択エリア */
     .select-label {
         color: #475569;
         font-size: 0.85rem;
@@ -68,7 +64,6 @@ st.markdown(
         margin-bottom: 0.2rem;
     }
 
-    /* AIボタン */
     .stButton > button {
         width: 100%;
         height: 3.2rem;
@@ -89,7 +84,6 @@ st.markdown(
         box-shadow: 0 8px 22px rgba(37, 99, 235, 0.3);
     }
 
-    /* レースカード */
     .race-card {
         background: white;
         border-radius: 18px;
@@ -108,7 +102,6 @@ st.markdown(
         letter-spacing: 0.08em;
     }
 
-    /* 選手 */
     .racer {
         display: flex;
         align-items: center;
@@ -140,7 +133,6 @@ st.markdown(
         color: #1e293b;
     }
 
-    /* 予想 */
     .prediction-card {
         background: #ffffff;
         border-radius: 18px;
@@ -183,11 +175,10 @@ st.markdown(
         color: #f97316;
     }
 
-    .穴-label {
+    .hole-label {
         color: #dc2626;
     }
 
-    /* 自信度 */
     .confidence-card {
         margin-top: 1.2rem;
         background: #111827;
@@ -212,14 +203,6 @@ st.markdown(
         font-weight: 900;
     }
 
-    /* 区切り */
-    .section-line {
-        height: 1px;
-        background: #dbe3ec;
-        margin: 1.4rem 0;
-    }
-
-    /* スマホ */
     @media (max-width: 600px) {
         .main .block-container {
             padding-left: 1rem;
@@ -255,60 +238,26 @@ st.markdown(
 
 
 # =========================
-# 場・レース選択
+# 場
 # =========================
-STADIUMS = {
-    1: "桐生",
-    2: "戸田",
-    3: "江戸川",
-    4: "平和島",
-    5: "多摩川",
-    6: "浜名湖",
-    7: "蒲郡",
-    8: "常滑",
-    9: "津",
-    10: "三国",
-    11: "びわこ",
-    12: "住之江",
-    13: "尼崎",
-    14: "鳴門",
-    15: "丸亀",
-    16: "児島",
-    17: "宮島",
-    18: "徳山",
-    19: "下関",
-    20: "若松",
-    21: "芦屋",
-    22: "福岡",
-    23: "唐津",
-    24: "大村",
-}
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown('<div class="select-label">場</div>', unsafe_allow_html=True)
-
-    stadium_name = st.selectbox(
-        "場",
-        list(STADIUMS.values()),
-        label_visibility="collapsed",
-    )
-
-with col2:
-    st.markdown('<div class="select-label">R</div>', unsafe_allow_html=True)
-
-    race_no = st.selectbox(
-        "R",
-        list(range(1, 13)),
-        format_func=lambda x: f"{x}R",
-        label_visibility="collapsed",
-    )
-
+stadium_name = st.selectbox(
+    "場",
+    list(data.STADIUMS.values()),
+)
 
 stadium_no = next(
-    no for no, name in STADIUMS.items()
+    no for no, name in data.STADIUMS.items()
     if name == stadium_name
+)
+
+
+# =========================
+# R
+# =========================
+race_no = st.selectbox(
+    "R",
+    list(range(1, 13)),
+    format_func=lambda x: f"{x}R",
 )
 
 
@@ -317,19 +266,23 @@ stadium_no = next(
 # =========================
 if st.button("🚤 AI予想する", use_container_width=True):
 
-    target_date = date.today()
+    # APIへ渡す日付は文字列に統一
+    target_date = date.today().isoformat()
 
     with st.spinner("AIがレースを分析中…"):
 
         try:
+            # データ取得
             raw = data.get_data(target_date)
 
+            # 指定した場・Rを取得
             race = data.get_race(
                 raw,
                 stadium_no,
                 race_no,
             )
 
+            # データチェック
             data.validate_race(
                 race,
                 target_date,
@@ -337,21 +290,26 @@ if st.button("🚤 AI予想する", use_container_width=True):
                 race_no,
             )
 
+            # 6艇のデータ
             df = data.get_race_rows(
                 race,
                 stadium_no,
                 race_no,
             )
 
+            # 過去14日データ
             history = data.history14(target_date)
 
+            # AI予想
             result, boat_probs = tri_ai(
                 df,
                 history,
             )
 
         except Exception as e:
-            st.error(f"予想データの取得に失敗しました: {e}")
+            st.error(
+                f"予想データの取得に失敗しました: {e}"
+            )
             st.stop()
 
 
@@ -371,7 +329,7 @@ if st.button("🚤 AI予想する", use_container_width=True):
     for _, row in df.iterrows():
 
         lane = int(row["枠"])
-        name = row["選手名"]
+        name = str(row["選手名"])
 
         st.markdown(
             f"""
@@ -387,19 +345,17 @@ if st.button("🚤 AI予想する", use_container_width=True):
 
 
     # =========================
-    # 予想
+    # AI予想
     # =========================
     st.markdown(
-        """
-        <div class="prediction-card">
-        """,
+        '<div class="prediction-card">',
         unsafe_allow_html=True,
     )
 
     labels = [
         ("🎯 本命", "main-label", result[0]),
         ("🔥 対抗", "counter-label", result[1]),
-        ("💥 穴", "穴-label", result[2]),
+        ("💥 穴", "hole-label", result[2]),
     ]
 
     for label, label_class, prediction in labels:
@@ -422,9 +378,9 @@ if st.button("🚤 AI予想する", use_container_width=True):
 
 
     # =========================
-    # 自信度
+    # AI自信度
     # =========================
-    confidence = "★★★★★"
+    confidence = "★★★☆☆"
 
     if boat_probs:
         top_prob = max(boat_probs.values())
@@ -450,4 +406,4 @@ if st.button("🚤 AI予想する", use_container_width=True):
         </div>
         """,
         unsafe_allow_html=True,
-    )
+            )

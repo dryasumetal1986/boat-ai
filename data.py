@@ -1,13 +1,10 @@
-import re
-from datetime import date, timedelta
-
-import pandas as pd
 import requests
+import pandas as pd
 import streamlit as st
+from datetime import date, datetime, timedelta
 
 
 API = "https://boatraceopenapi.github.io/api/v1"
-
 
 STADIUMS = {
     1: "桐生",
@@ -37,545 +34,523 @@ STADIUMS = {
 }
 
 
-def _date_string(target_date):
+def _date_string(value):
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    return str(value)[:10]
 
-    if isinstance(target_date, date):
-        return target_date.isoformat()
 
-    value = str(target_date).strip()
+def _date_object(value):
+    if isinstance(value, datetime):
+        return value.date()
 
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+    if isinstance(value, date):
         return value
 
-    if re.fullmatch(r"\d{8}", value):
-        return (
-            f"{value[:4]}-{value[4:6]}-{value[6:8]}"
-        )
-
-    raise ValueError(
-        f"日付形式が不正です: {target_date}"
-    )
-
-
-def _date_object(target_date):
-    return date.fromisoformat(
-        _date_string(target_date)
-    )
+    return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
 
 
 def _num(value, default=0.0):
-
     try:
-
-        if value is None:
+        if value is None or value == "":
             return default
-
-        if isinstance(value, bool):
-            return default
-
-        text = str(value).strip()
-
-        if text in (
-            "",
-            "-",
-            "--",
-            "null",
-            "None",
-        ):
-            return default
-
-        text = text.replace("%", "")
-        text = text.replace("秒", "")
-
-        return float(text)
-
-    except Exception:
+        return float(value)
+    except (TypeError, ValueError):
         return default
 
 
 def _int(value, default=0):
-
     try:
+        if value is None or value == "":
+            return default
         return int(float(value))
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
 def _val(obj, *keys, default=None):
-
     if not isinstance(obj, dict):
         return default
 
     for key in keys:
-
-        if (
-            key in obj
-            and obj[key] not in (None, "")
-        ):
-            return obj[key]
+        value = obj.get(key)
+        if value is not None and value != "":
+            return value
 
     return default
 
 
 def stadium_name(stadium_no):
-
-    return STADIUMS.get(
-        _int(stadium_no),
-        str(stadium_no),
-    )
+    return STADIUMS.get(int(stadium_no), str(stadium_no))
 
 
-@st.cache_data(ttl=180)
+# =========================================================
+# API取得
+# =========================================================
+
+@st.cache_data(ttl=180, show_spinner=False)
 def get_data(target_date):
+    """
+    Boatrace Open API v1
+    YYYY/YYYYMMDD.json を取得
+    """
 
-    date_text = _date_string(target_date)
-
-    yyyy = date_text[:4]
-    yyyymmdd = date_text.replace("-", "")
+    target = _date_object(target_date)
 
     url = (
-        f"{API}/{yyyy}/{yyyymmdd}.json"
+        f"{API}/{target.year}/"
+        f"{target.strftime('%Y%m%d')}.json"
     )
 
-    response = requests.get(
-        url,
-        timeout=20,
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-
-
-def get_race(
-    raw,
-    stadium_no,
-    race_no,
-):
-
-    stadium_no = _int(stadium_no)
-    race_no = _int(race_no)
-
-    programs = raw.get(
-        "programs",
-        {},
-    )
-
-    stadiums = programs.get(
-        "stadiums",
-        {},
-    )
-
-    stadium = stadiums.get(
-        str(stadium_no)
-    )
-
-    if not isinstance(stadium, dict):
-        raise ValueError(
-            f"場番号 {stadium_no} のデータがありません。"
+    try:
+        response = requests.get(
+            url,
+            timeout=20,
+            headers={
+                "User-Agent": "YacchanBoatAI/1.0"
+            },
         )
 
-    races = stadium.get(
-        "races",
-        {},
-    )
+        if response.status_code == 404:
+            return None
 
-    race = races.get(
-        str(race_no)
-    )
+        response.raise_for_status()
 
-    if not isinstance(race, dict):
-        raise ValueError(
-            f"{stadium_name(stadium_no)} "
-            f"{race_no}R のデータがありません。"
+        return response.json()
+
+    except requests.RequestException:
+        return None
+
+    except ValueError:
+        return None
+
+
+# =========================================================
+# レース取得
+# =========================================================
+
+def get_race(raw, stadium_no, race_no):
+    if not raw:
+        return None
+
+    try:
+        stadiums = (
+            raw
+            .get("programs", {})
+            .get("stadiums", {})
         )
 
-    return race
+        stadium = stadiums.get(str(stadium_no))
 
+        if not stadium:
+            return None
+
+        races = stadium.get("races", {})
+        race = races.get(str(race_no))
+
+        if not race:
+            return None
+
+        # コピーして安全に扱う
+        race = dict(race)
+
+        # API v1では結果が race["result"] に入っている
+        result = race.get("result")
+
+        if isinstance(result, dict):
+            race["result"] = result
+
+        return race
+
+    except (AttributeError, TypeError):
+        return None
+
+
+# =========================================================
+# 結果取得 ★重要
+# =========================================================
+
+def get_result(raw, stadium_no, race_no):
+    """
+    API v1 の正しい結果位置:
+
+    programs
+      -> stadiums
+        -> {stadium}
+          -> races
+            -> {race}
+              -> result
+    """
+
+    race = get_race(raw, stadium_no, race_no)
+
+    if not race:
+        return None
+
+    result = race.get("result")
+
+    if not isinstance(result, dict):
+        return None
+
+    racers = result.get("racers")
+
+    if not isinstance(racers, dict):
+        return None
+
+    return result
+
+
+def get_result_order(raw, stadium_no, race_no):
+    """
+    完了レースなら
+
+    [1着艇, 2着艇, 3着艇, ... 6着艇]
+
+    を返す。
+
+    未完了・結果なしなら None。
+    """
+
+    result = get_result(raw, stadium_no, race_no)
+
+    if not result:
+        return None
+
+    racers = result.get("racers", {})
+
+    if not isinstance(racers, dict):
+        return None
+
+    order = []
+
+    for lane in range(1, 7):
+        racer = racers.get(str(lane))
+
+        if not isinstance(racer, dict):
+            continue
+
+        place = _int(
+            _val(
+                racer,
+                "place_number",
+                "finish_position",
+                "rank",
+                default=0,
+            ),
+            0,
+        )
+
+        if place >= 1:
+            order.append((place, lane))
+
+    # 着順で並べる
+    order.sort(key=lambda x: x[0])
+
+    # 1〜3着が存在しない場合は完了扱いしない
+    if len(order) < 3:
+        return None
+
+    first_three = [
+        lane
+        for place, lane in order
+        if place in (1, 2, 3)
+    ]
+
+    if len(first_three) != 3:
+        return None
+
+    return [
+        int(first_three[0]),
+        int(first_three[1]),
+        int(first_three[2]),
+    ]
+
+
+def is_completed_race(raw, stadium_no, race_no):
+    return get_result_order(
+        raw,
+        stadium_no,
+        race_no,
+    ) is not None
+
+
+# =========================================================
+# 出走選手
+# =========================================================
 
 def make_racer(
-    program_racer,
+    racer,
+    lane,
     preview_racer=None,
-    lane=0,
+    stadium_no=None,
 ):
-
-    program_racer = (
-        program_racer
-        if isinstance(program_racer, dict)
-        else {}
-    )
-
-    preview_racer = (
-        preview_racer
-        if isinstance(preview_racer, dict)
-        else {}
-    )
-
-    player = _val(
-        program_racer,
-        "player",
-        "racer",
-        default={},
-    )
-
-    if not isinstance(player, dict):
-        player = {}
-
-    name = _val(
-        program_racer,
-        "name",
-        "racer_name",
-        "racerName",
-    )
-
-    if not name:
-        name = _val(
-            player,
-            "name",
-            "racer_name",
-            "racerName",
-            default="",
-        )
-
-    register_number = _val(
-        program_racer,
-        "registration_number",
-        "registrationNumber",
-        "reg_no",
-    )
-
-    if register_number is None:
-        register_number = _val(
-            player,
-            "registration_number",
-            "registrationNumber",
-            "reg_no",
-            default=0,
-        )
-
-    grade = _val(
-        program_racer,
-        "grade",
-        "class",
-        "racer_grade",
-    )
-
-    if grade is None:
-        grade = _val(
-            player,
-            "grade",
-            "class",
-            "racer_grade",
-            default="",
-        )
-
-    national = _val(
-        program_racer,
-        "national",
-        "nation",
-        default={},
-    )
-
-    local = _val(
-        program_racer,
-        "local",
-        "stadium",
-        default={},
-    )
-
-    motor = _val(
-        program_racer,
-        "motor",
-        default={},
-    )
-
-    boat = _val(
-        program_racer,
-        "boat",
-        default={},
-    )
-
-    if not isinstance(national, dict):
-        national = {}
-
-    if not isinstance(local, dict):
-        local = {}
-
-    if not isinstance(motor, dict):
-        motor = {}
-
-    if not isinstance(boat, dict):
-        boat = {}
-
-    avg_st = _val(
-        program_racer,
-        "average_start_timing",
-        "averageStartTiming",
-        "avg_st",
-        "average_st",
-        default=0,
-    )
-
-    exhibition_st = _val(
-        preview_racer,
-        "start_timing",
-        "startTiming",
-        "exhibition_st",
-        "exhibitionStartTiming",
-        default=avg_st,
-    )
-
-    exhibition_time = _val(
-        preview_racer,
-        "exhibition_time",
-        "exhibitionTime",
-        "exhibition_time_second",
-        default=0,
-    )
-
-    exhibition_entry = _val(
-        preview_racer,
-        "entry",
-        "entry_number",
-        "entryNumber",
-        "start_course",
-        "startCourse",
-        default=lane,
-    )
+    racer = racer or {}
+    preview_racer = preview_racer or {}
 
     return {
-        "枠": lane,
-        "選手名": str(name),
-        "登録番号": _int(register_number),
-        "級別": str(grade),
-
-        "展示進入": _num(
-            exhibition_entry,
-            lane,
+        "艇番": lane,
+        "選手名": _val(
+            racer,
+            "name",
+            "racer_name",
+            default=f"{lane}号艇",
         ),
+
+        "枠": lane,
 
         "全国勝率": _num(
             _val(
-                national,
+                racer,
+                "national_win_rate",
                 "win_rate",
-                "winRate",
-                "rate",
                 default=0,
             )
         ),
 
         "全国2連率": _num(
             _val(
-                national,
-                "second_place_rate",
-                "secondPlaceRate",
-                "2ren_rate",
-                "2renRate",
+                racer,
+                "national_top_2_percent",
+                "national_2ren_rate",
+                "top_2_percent",
                 default=0,
             )
         ),
 
         "全国3連率": _num(
             _val(
-                national,
-                "third_place_rate",
-                "thirdPlaceRate",
-                "3ren_rate",
-                "3renRate",
+                racer,
+                "national_top_3_percent",
+                "national_3ren_rate",
+                "top_3_percent",
                 default=0,
             )
         ),
 
         "当地勝率": _num(
             _val(
-                local,
-                "win_rate",
-                "winRate",
-                "rate",
+                racer,
+                "local_win_rate",
+                "local_win",
                 default=0,
             )
         ),
 
         "当地2連率": _num(
             _val(
-                local,
-                "second_place_rate",
-                "secondPlaceRate",
-                "2ren_rate",
-                "2renRate",
-                default=0,
-            )
-        ),
-
-        "モーター": _int(
-            _val(
-                motor,
-                "number",
-                "motor_number",
-                "motorNumber",
+                racer,
+                "local_top_2_percent",
+                "local_2ren_rate",
                 default=0,
             )
         ),
 
         "モーター2連率": _num(
             _val(
-                motor,
-                "second_place_rate",
-                "secondPlaceRate",
-                "2ren_rate",
-                "2renRate",
+                racer,
+                "motor_top_2_percent",
+                "motor_2ren_rate",
                 default=0,
             )
         ),
 
-        "ボート": _int(
+        "平均ST": _num(
             _val(
-                boat,
-                "number",
-                "boat_number",
-                "boatNumber",
+                racer,
+                "average_start_timing",
+                "average_st",
+                "avg_st",
                 default=0,
             )
         ),
 
-        "平均ST": _num(avg_st),
-        "展示ST": _num(exhibition_st),
-        "展示タイム": _num(exhibition_time),
+        "展示ST": _num(
+            _val(
+                preview_racer,
+                "start_timing",
+                "exhibition_start_timing",
+                default=0,
+            )
+        ),
 
-        "場": 0,
+        "展示タイム": _num(
+            _val(
+                preview_racer,
+                "exhibition_time",
+                default=0,
+            )
+        ),
+
+        "展示進入": _int(
+            _val(
+                preview_racer,
+                "course_number",
+                "entry_course",
+                default=lane,
+            ),
+            lane,
+        ),
+
+        "場": _int(stadium_no, 0),
     }
 
 
-def official_preview(race):
+# =========================================================
+# 直前情報
+# =========================================================
 
-    preview = race.get(
-        "preview",
-        {},
-    )
+def official_preview(race):
+    if not race:
+        return {}
+
+    preview = race.get("preview", {})
 
     if not isinstance(preview, dict):
         return {}
 
-    racers = preview.get(
-        "racers",
-        {},
-    )
+    racers = preview.get("racers", {})
 
-    if isinstance(racers, list):
+    if not isinstance(racers, dict):
+        return {}
 
-        return {
-            str(i + 1): item
-            for i, item in enumerate(racers)
-        }
-
-    if isinstance(racers, dict):
-        return racers
-
-    return {}
+    return racers
 
 
-def get_race_rows(
-    race,
-    stadium_no,
-    race_no,
-):
+# =========================================================
+# AI用レースDataFrame
+# =========================================================
 
-    racers = race.get(
-        "racers",
-        {},
-    )
+def get_race_rows(race, stadium_no=None, race_no=None):
+    if not race:
+        return pd.DataFrame()
 
-    if isinstance(racers, list):
+    racers = race.get("racers", {})
 
-        program_racers = {
-            str(i + 1): item
-            for i, item in enumerate(racers)
-        }
-
-    elif isinstance(racers, dict):
-
-        program_racers = racers
-
-    else:
-
-        program_racers = {}
+    if not isinstance(racers, dict):
+        return pd.DataFrame()
 
     preview_racers = official_preview(race)
 
     rows = []
 
     for lane in range(1, 7):
-
-        row = make_racer(
-            program_racers.get(
-                str(lane),
-                {},
-            ),
-            preview_racers.get(
-                str(lane),
-                {},
-            ),
-            lane,
+        racer = (
+            racers.get(str(lane))
+            or racers.get(lane)
         )
 
-        row["場"] = _int(stadium_no)
+        if not isinstance(racer, dict):
+            continue
 
-        rows.append(row)
+        preview_racer = (
+            preview_racers.get(str(lane))
+            or preview_racers.get(lane)
+            or {}
+        )
+
+        rows.append(
+            make_racer(
+                racer,
+                lane,
+                preview_racer,
+                stadium_no,
+            )
+        )
 
     if len(rows) != 6:
-        raise ValueError(
-            "6艇分の選手データを取得できませんでした。"
-        )
-
-    names = [
-        str(row["選手名"]).strip()
-        for row in rows
-    ]
-
-    if any(not name for name in names):
-        raise ValueError(
-            "選手名を取得できない艇があります。"
-        )
+        return pd.DataFrame()
 
     return pd.DataFrame(rows)
 
 
+# =========================================================
+# レース検証
+# =========================================================
+
+def validate_race(
+    race,
+    target_date=None,
+    stadium_no=None,
+    race_no=None,
+):
+    if not isinstance(race, dict):
+        return False
+
+    racers = race.get("racers")
+
+    if not isinstance(racers, dict):
+        return False
+
+    # 6艇揃っているか
+    count = 0
+
+    for lane in range(1, 7):
+        racer = (
+            racers.get(str(lane))
+            or racers.get(lane)
+        )
+
+        if isinstance(racer, dict):
+            count += 1
+
+    if count != 6:
+        return False
+
+    if target_date is not None:
+        race_date = race.get("date")
+
+        if race_date:
+            if str(race_date)[:10] != _date_string(target_date):
+                return False
+
+    if stadium_no is not None:
+        actual_stadium = _int(
+            race.get("stadium_number"),
+            0,
+        )
+
+        if actual_stadium != int(stadium_no):
+            return False
+
+    if race_no is not None:
+        actual_race = _int(
+            race.get("race_number"),
+            0,
+        )
+
+        if actual_race != int(race_no):
+            return False
+
+    return True
+
+
+# =========================================================
+# 過去結果 → 学習データ
+# =========================================================
+
 def _build_history_rows(raw):
+    if not raw:
+        return []
 
     rows = []
 
-    programs = raw.get(
-        "programs",
-        {},
+    stadiums = (
+        raw
+        .get("programs", {})
+        .get("stadiums", {})
     )
-
-    stadiums = programs.get(
-        "stadiums",
-        {},
-    )
-
-    results = raw.get(
-        "results",
-        {},
-    )
-
-    if not isinstance(results, dict):
-        results = {}
 
     if not isinstance(stadiums, dict):
-        return pd.DataFrame()
+        return rows
 
-    for stadium_key, stadium_data in stadiums.items():
+    for stadium_key, stadium in stadiums.items():
 
-        stadium_no = _int(stadium_key)
-
-        if not isinstance(stadium_data, dict):
+        if not isinstance(stadium, dict):
             continue
 
-        races = stadium_data.get(
-            "races",
-            {},
-        )
+        stadium_no = _int(stadium_key, 0)
+
+        races = stadium.get("races", {})
 
         if not isinstance(races, dict):
             continue
@@ -585,216 +560,103 @@ def _build_history_rows(raw):
             if not isinstance(race, dict):
                 continue
 
-            race_no = _int(race_key)
+            race_no = _int(race_key, 0)
 
-            result_stadium = results.get(
-                str(stadium_no),
-                {},
-            )
+            # ★ API v1の正しい位置
+            result = race.get("result")
 
-            if not isinstance(
-                result_stadium,
-                dict,
-            ):
-                result_stadium = {}
-
-            result_race = result_stadium.get(
-                str(race_no),
-                {},
-            )
-
-            if not isinstance(
-                result_race,
-                dict,
-            ):
-                result_race = {}
-
-            racers = race.get(
-                "racers",
-                {},
-            )
-
-            if isinstance(racers, list):
-
-                racers = {
-                    str(i + 1): item
-                    for i, item in enumerate(racers)
-                }
-
-            if not isinstance(racers, dict):
+            if not isinstance(result, dict):
                 continue
 
-            result_racers = result_race.get(
-                "racers",
-                result_race.get(
-                    "results",
-                    {},
-                ),
-            )
+            result_racers = result.get("racers")
 
-            if isinstance(result_racers, list):
+            if not isinstance(result_racers, dict):
+                continue
 
-                result_racers = {
-                    str(i + 1): item
-                    for i, item in enumerate(result_racers)
-                }
+            program_racers = race.get("racers")
 
-            if not isinstance(
-                result_racers,
-                dict,
-            ):
-                result_racers = {}
+            if not isinstance(program_racers, dict):
+                continue
 
             for lane in range(1, 7):
 
-                racer = racers.get(
-                    str(lane),
-                    {},
+                program_racer = (
+                    program_racers.get(str(lane))
+                    or program_racers.get(lane)
                 )
 
-                result_racer = result_racers.get(
-                    str(lane),
-                    {},
+                result_racer = (
+                    result_racers.get(str(lane))
+                    or result_racers.get(lane)
                 )
 
-                if not isinstance(
-                    racer,
-                    dict,
-                ):
-                    racer = {}
+                if not isinstance(program_racer, dict):
+                    continue
 
-                if not isinstance(
-                    result_racer,
-                    dict,
-                ):
-                    result_racer = {}
+                if not isinstance(result_racer, dict):
+                    continue
+
+                place = _int(
+                    _val(
+                        result_racer,
+                        "place_number",
+                        default=0,
+                    ),
+                    0,
+                )
+
+                # 1〜6着以外は除外
+                if place < 1 or place > 6:
+                    continue
 
                 row = make_racer(
-                    racer,
-                    {},
+                    program_racer,
                     lane,
+                    {},
+                    stadium_no,
                 )
 
-                row["場"] = stadium_no
+                row["着順"] = place
 
-                finish = _val(
-                    result_racer,
-                    "finish_position",
-                    "finishPosition",
-                    "rank",
-                    "着順",
-                    "finish",
-                    default=0,
-                )
-
-                finish = _int(finish)
-
+                # 現在のAIが使っている1着ラベル
                 row["1着"] = (
-                    1 if finish == 1 else 0
+                    1 if place == 1 else 0
                 )
+
+                row["レース場"] = stadium_no
+                row["レース番号"] = race_no
 
                 rows.append(row)
 
-    if not rows:
-        return pd.DataFrame()
-
-    return pd.DataFrame(rows)
+    return rows
 
 
-@st.cache_data(ttl=900)
+# =========================================================
+# 過去14日
+# =========================================================
+
+@st.cache_data(ttl=600, show_spinner=False)
 def history14(target_date):
-
     target = _date_object(target_date)
 
     all_rows = []
 
-    for i in range(1, 15):
+    # 対象日より前の14日
+    for offset in range(1, 15):
 
-        d = target - timedelta(days=i)
+        day = target - timedelta(days=offset)
 
-        try:
+        raw = get_data(day)
 
-            raw = get_data(d)
-
-            df = _build_history_rows(raw)
-
-            if not df.empty:
-                all_rows.append(df)
-
-        except Exception:
+        if not raw:
             continue
+
+        rows = _build_history_rows(raw)
+
+        if rows:
+            all_rows.extend(rows)
 
     if not all_rows:
         return pd.DataFrame()
 
-    return pd.concat(
-        all_rows,
-        ignore_index=True,
-    )
-
-
-def validate_race(
-    race,
-    target_date,
-    stadium_no,
-    race_no,
-):
-
-    if not isinstance(race, dict):
-        raise ValueError(
-            "レースデータが不正です。"
-        )
-
-    stadium_no = _int(stadium_no)
-    race_no = _int(race_no)
-
-    expected_date = _date_string(
-        target_date
-    )
-
-    actual_stadium = _int(
-        _val(
-            race,
-            "stadium_number",
-            "stadiumNumber",
-            default=stadium_no,
-        )
-    )
-
-    actual_race = _int(
-        _val(
-            race,
-            "race_number",
-            "raceNumber",
-            default=race_no,
-        )
-    )
-
-    actual_date = _val(
-        race,
-        "date",
-        "race_date",
-        "raceDate",
-        default=expected_date,
-    )
-
-    if actual_stadium != stadium_no:
-        raise ValueError(
-            "場番号が一致しません。"
-        )
-
-    if actual_race != race_no:
-        raise ValueError(
-            "レース番号が一致しません。"
-        )
-
-    if actual_date:
-
-        actual_date = str(actual_date)[:10]
-
-        if actual_date != expected_date:
-            raise ValueError(
-                "日付が一致しません。"
-            )
-
-    return True
+    return pd.DataFrame(all_rows)

@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -9,22 +8,17 @@ from data import (
     get_race,
     history14,
     get_odds,
-    clear_odds_cache,
     odds_url,
 )
 
-from ai import (
-    score,
-    tri_ai,
-)
+from ai import score, tri_ai
 
 
-# =========================================================
+# =========================
 # 競艇場
-# =========================================================
+# =========================
 
 STADIUMS = {
-
     1: "桐生",
     2: "戸田",
     3: "江戸川",
@@ -49,911 +43,679 @@ STADIUMS = {
     22: "福岡",
     23: "唐津",
     24: "大村",
-
 }
 
 
-# =========================================================
+# =========================
 # Streamlit設定
-# =========================================================
+# =========================
 
 st.set_page_config(
-
     page_title="やっちゃんの競艇AI予想 PRO",
-
     page_icon="🚤",
-
     layout="wide",
-
 )
 
 
-# =========================================================
+# =========================
 # タイトル
-# =========================================================
+# =========================
 
-st.title(
-    "🚤 やっちゃんの競艇AI予想 PRO"
+st.title("🚤 やっちゃんの競艇AI予想 PRO")
+
+st.write(
+    "展示タイム＋選手データ＋過去14日データ＋3連単オッズで予想"
 )
 
-st.caption(
-    "展示タイム＋選手データ＋過去14日＋購入前3連単オッズ"
-)
 
-
-# =========================================================
+# =========================
 # 今日
-# =========================================================
+# =========================
 
 today = datetime.now(
     ZoneInfo("Asia/Tokyo")
 ).date()
 
 
-# =========================================================
+# =========================
 # 入力
-# =========================================================
+# =========================
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
 
-with col1:
-
+with c1:
     td = st.date_input(
-
         "開催日",
-
-        value=today,
-
-        min_value=date(
-            2026,
-            1,
-            1
-        ),
-
+        today,
+        min_value=date(2026, 1, 1),
     )
 
 
-with col2:
-
-    stadium_name = st.selectbox(
-
+with c2:
+    name = st.selectbox(
         "競艇場",
-
-        list(
-            STADIUMS.values()
-        ),
-
+        list(STADIUMS.values()),
     )
 
 
-with col3:
-
-    race_number = st.selectbox(
-
+with c3:
+    rno = st.selectbox(
         "レース",
-
         range(1, 13),
-
-        format_func=lambda x:
-        f"{x}R",
-
+        format_func=lambda x: f"{x}R",
     )
 
 
-stadium_number = next(
-
-    number
-
-    for number, name
-    in STADIUMS.items()
-
-    if name == stadium_name
-
-)
+sno = list(STADIUMS)[
+    list(STADIUMS.values()).index(name)
+]
 
 
-# =========================================================
-# オッズ更新
-# =========================================================
+# =========================
+# AI実行
+# =========================
 
-refresh_odds = st.button(
-    "🔄 購入前オッズを更新"
-)
-
-
-if refresh_odds:
-
-    clear_odds_cache()
-
-    st.success(
-        "オッズのキャッシュを更新しました。"
-    )
-
-
-# =========================================================
-# AI予想
-# =========================================================
-
-run_ai = st.button(
-
+if st.button(
     "🚀 AI予想を実行",
-
     type="primary",
-
     use_container_width=True,
-
-)
-
-
-if not run_ai:
-
-    st.info(
-
-        "開催日・競艇場・レースを選択して"
-        "「AI予想を実行」を押してください。"
-
-    )
-
-    st.stop()
-
-
-# =========================================================
-# レースデータ取得
-# =========================================================
-
-with st.spinner(
-    "レースデータを取得中..."
 ):
 
-    try:
+    # -------------------------
+    # レースデータ
+    # -------------------------
 
-        data = get_data(
-            td
-        )
+    try:
+        data = get_data(td)
 
         race = get_race(
             data,
-            stadium_number,
-            race_number
+            sno,
+            rno,
         )
 
-    except Exception as error:
+    except Exception as e:
+
+        st.error("レースデータ取得に失敗しました")
+
+        st.exception(e)
+
+        st.stop()
+
+
+    if race is None:
 
         st.error(
-            "レースデータの取得に失敗しました。"
-        )
-
-        st.code(
-            str(error)
+            "このレースのデータがありません"
         )
 
         st.stop()
 
 
-if race is None:
+    # -------------------------
+    # 出走選手
+    # -------------------------
 
-    st.error(
-        "このレースのデータがありません。"
+    rows = []
+
+    racers_data = race.get(
+        "racers",
+        {},
     )
 
-    st.stop()
-
-
-# =========================================================
-# 選手データ
-# =========================================================
-
-rows = []
-
-
-racers_data = race.get(
-    "racers",
-    {}
-)
-
-
-preview_data = (
-    race
-    .get("preview", {})
-    .get("racers", {})
-)
-
-
-if not isinstance(
-    racers_data,
-    dict
-):
-
-    racers_data = {}
-
-
-if not isinstance(
-    preview_data,
-    dict
-):
-
-    preview_data = {}
-
-
-# =========================================================
-# 6艇
-# =========================================================
-
-for lane in range(1, 7):
-
-    racer = racers_data.get(
-        str(lane),
-        {}
-    )
-
-    preview = preview_data.get(
-        str(lane),
-        {}
+    preview_data = race.get(
+        "preview",
+        {},
+    ).get(
+        "racers",
+        {},
     )
 
 
-    if not racer:
+    if not isinstance(
+        racers_data,
+        dict,
+    ):
+        racers_data = {}
 
-        continue
+
+    if not isinstance(
+        preview_data,
+        dict,
+    ):
+        preview_data = {}
 
 
-    # -----------------------------------------
-    # 展示タイム
-    # -----------------------------------------
+    for lane in range(1, 7):
 
-    exhibition = preview.get(
-        "exhibition_time",
-        0
+        racer = racers_data.get(
+            str(lane),
+            {},
+        )
+
+        preview = preview_data.get(
+            str(lane),
+            {},
+        )
+
+
+        if not racer:
+            continue
+
+
+        exhibition = preview.get(
+            "exhibition_time",
+            0,
+        )
+
+
+        try:
+            exhibition = float(
+                exhibition or 0
+            )
+
+        except Exception:
+            exhibition = 0
+
+
+        rows.append(
+            {
+                "枠": lane,
+
+                "選手名": racer.get(
+                    "name",
+                    "不明",
+                ),
+
+                "選手番号": str(
+                    racer.get(
+                        "number",
+                        "",
+                    )
+                ),
+
+                "級別": racer.get(
+                    "rank_number",
+                    "",
+                ),
+
+                "全国勝率": float(
+                    racer.get(
+                        "national_win_rate",
+                        0,
+                    )
+                    or 0
+                ),
+
+                "全国2連率": float(
+                    racer.get(
+                        "national_top_2_percent",
+                        0,
+                    )
+                    or 0
+                ),
+
+                "当地勝率": float(
+                    racer.get(
+                        "local_win_rate",
+                        0,
+                    )
+                    or 0
+                ),
+
+                "モーター2連率": float(
+                    racer.get(
+                        "motor_top_2_percent",
+                        0,
+                    )
+                    or 0
+                ),
+
+                "平均ST": float(
+                    racer.get(
+                        "average_start_timing",
+                        0,
+                    )
+                    or 0
+                ),
+
+                "展示タイム": exhibition,
+            }
+        )
+
+
+    df = pd.DataFrame(rows)
+
+
+    if df.empty:
+
+        st.error(
+            "出走表がありません"
+        )
+
+        st.stop()
+
+
+    # =========================
+    # 選手AI
+    # =========================
+
+    df["学習AI"] = df.apply(
+        score,
+        axis=1,
     )
 
+
+    df = df.sort_values(
+        "学習AI",
+        ascending=False,
+    ).reset_index(drop=True)
+
+
+    st.subheader(
+        f"🤖 {name} {rno}R AI評価"
+    )
+
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+    # =========================
+    # 選手ランキング
+    # =========================
+
+    st.subheader(
+        "🏆 AI順位"
+    )
+
+
+    labels = [
+        "🥇 本命",
+        "🥈 対抗",
+        "🥉 穴",
+    ]
+
+
+    for i, row in df.head(3).iterrows():
+
+        st.write(
+            f"{labels[i]} "
+            f"{int(row['枠'])}号艇 "
+            f"{row['選手名']} "
+            f"AI {row['学習AI']}"
+        )
+
+
+    # =========================
+    # 過去14日
+    # =========================
 
     try:
 
-        exhibition = float(
-            exhibition or 0
+        history = pd.DataFrame(
+            history14(td)
         )
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except Exception as e:
 
-        exhibition = 0.0
+        st.warning(
+            "過去14日データの取得に失敗しました"
+        )
+
+        history = pd.DataFrame()
 
 
-    # -----------------------------------------
-    # 各データ
-    # -----------------------------------------
+    # =========================
+    # 3連単AI
+    # =========================
 
-    rows.append({
+    if len(df) >= 3:
 
-        "枠": lane,
+        try:
 
-        "選手名": racer.get(
-            "name",
-            "不明"
-        ),
-
-        "選手番号": str(
-            racer.get(
-                "number",
-                ""
+            tri = tri_ai(
+                df,
+                history,
             )
-        ),
 
-        "級別": racer.get(
-            "rank_number",
-            ""
-        ),
+        except Exception as e:
 
-        "全国勝率": float(
-            racer.get(
-                "national_win_rate",
-                0
-            ) or 0
-        ),
+            st.error(
+                "3連単AI計算でエラーが発生しました"
+            )
 
-        "全国2連率": float(
-            racer.get(
-                "national_top_2_percent",
-                0
-            ) or 0
-        ),
+            st.exception(e)
 
-        "当地勝率": float(
-            racer.get(
-                "local_win_rate",
-                0
-            ) or 0
-        ),
+            st.stop()
 
-        "モーター2連率": float(
-            racer.get(
-                "motor_top_2_percent",
-                0
-            ) or 0
-        ),
 
-        "平均ST": float(
-            racer.get(
-                "average_start_timing",
-                0
-            ) or 0
-        ),
+        # -------------------------
+        # オッズ取得
+        # -------------------------
 
-        "展示タイム": exhibition,
+        try:
 
-    })
+            odds = get_odds(
+                td,
+                sno,
+                rno,
+            )
 
+        except Exception as e:
 
-# =========================================================
-# DataFrame
-# =========================================================
+            st.warning(
+                "3連単オッズを取得できませんでした"
+            )
 
-df = pd.DataFrame(
-    rows
-)
+            odds = {}
 
 
-if df.empty:
+        # -------------------------
+        # オッズをAIランキングに追加
+        # -------------------------
 
-    st.error(
-        "出走表が取得できませんでした。"
-    )
+        if odds:
 
-    st.stop()
+            tri["オッズ"] = tri["3連単"].map(
+                odds
+            )
 
+        else:
 
-# =========================================================
-# AIスコア
-# =========================================================
+            tri["オッズ"] = None
 
-df["学習AI"] = df.apply(
-    score,
-    axis=1
-)
 
+        # -------------------------
+        # 最終AIスコア
+        # -------------------------
 
-df = df.sort_values(
+        tri["最終AI"] = tri["AIスコア"]
 
-    "学習AI",
 
-    ascending=False,
+        for idx in tri.index:
 
-).reset_index(
-    drop=True
-)
+            odd = tri.loc[
+                idx,
+                "オッズ",
+            ]
 
+            if pd.notna(odd):
 
-# =========================================================
-# 選手AI評価
-# =========================================================
+                try:
 
-st.subheader(
-    f"🤖 {stadium_name} {race_number}R 選手AI評価"
-)
+                    odd = float(odd)
 
+                    # 人気過ぎる買い目だけに偏らないよう
+                    # オッズを弱めに評価
+                    import math
 
-st.dataframe(
+                    odds_bonus = (
+                        math.log(max(odd, 1))
+                        * 2.0
+                    )
 
-    df[
-        [
-            "枠",
-            "選手名",
-            "選手番号",
-            "級別",
-            "全国勝率",
-            "全国2連率",
-            "当地勝率",
-            "モーター2連率",
-            "平均ST",
-            "展示タイム",
-            "学習AI",
-        ]
-    ],
+                    tri.loc[
+                        idx,
+                        "最終AI",
+                    ] += odds_bonus
 
-    use_container_width=True,
+                except Exception:
+                    pass
 
-    hide_index=True,
 
-)
+        # -------------------------
+        # 信頼度
+        # -------------------------
 
+        min_score = tri["最終AI"].min()
+        max_score = tri["最終AI"].max()
 
-# =========================================================
-# AI上位3艇
-# =========================================================
 
-st.subheader(
-    "🏆 AI選手ランキング"
-)
+        if max_score > min_score:
 
+            tri["信頼度"] = (
+                (
+                    tri["最終AI"]
+                    - min_score
+                )
+                / (
+                    max_score
+                    - min_score
+                )
+                * 100
+            ).round(1)
 
-ranking_labels = [
+        else:
 
-    "🥇 本命",
+            tri["信頼度"] = 50.0
 
-    "🥈 対抗",
 
-    "🥉 穴",
+        # -------------------------
+        # 穴度
+        # -------------------------
 
-]
+        tri["穴度"] = 0.0
 
 
-top_three = df.head(
-    min(3, len(df))
-)
+        if tri["オッズ"].notna().any():
 
+            valid_odds = tri[
+                "オッズ"
+            ].dropna()
 
-for position, (_, row) in enumerate(
-    top_three.iterrows()
-):
 
-    st.write(
+            if len(valid_odds) > 0:
 
-        f"{ranking_labels[position]} "
+                q75 = valid_odds.quantile(
+                    0.75
+                )
 
-        f"**{int(row['枠'])}号艇 "
-        f"{row['選手名']}**　"
 
-        f"AIスコア "
-        f"**{row['学習AI']}**"
+                for idx in tri.index:
 
-    )
+                    odd = tri.loc[
+                        idx,
+                        "オッズ",
+                    ]
 
 
-# =========================================================
-# 過去14日
-# =========================================================
+                    if pd.notna(odd):
 
-with st.spinner(
-    "過去14日データを確認中..."
-):
+                        try:
 
-    history = pd.DataFrame(
-        history14(td)
-    )
+                            odd = float(odd)
 
+                            if q75 > 0:
 
-# =========================================================
-# オッズ取得
-# =========================================================
+                                hole = (
+                                    odd
+                                    / q75
+                                    * 100
+                                )
 
-st.subheader(
-    "💰 購入前3連単オッズ"
-)
+                                tri.loc[
+                                    idx,
+                                    "穴度",
+                                ] = round(
+                                    min(
+                                        hole,
+                                        100,
+                                    ),
+                                    1,
+                                )
 
+                        except Exception:
+                            pass
 
-with st.spinner(
-    "BOATRACE公式サイトからオッズを取得中..."
-):
 
-    odds = get_odds(
+        # -------------------------
+        # 並び替え
+        # -------------------------
 
-        td,
+        tri = tri.sort_values(
+            "最終AI",
+            ascending=False,
+        ).reset_index(drop=True)
 
-        stadium_number,
 
-        race_number,
+        # -------------------------
+        # TOP
+        # -------------------------
 
-    )
+        top = tri.iloc[0]
 
+        second = tri.iloc[1]
 
-# =========================================================
-# オッズ状態
-# =========================================================
+        third = tri.iloc[2]
 
-if len(odds) >= 100:
 
-    st.success(
+        # 穴はオッズ上位から選択
+        hole_candidates = tri[
+            tri["オッズ"].notna()
+        ].sort_values(
+            "オッズ",
+            ascending=False,
+        )
 
-        f"3連単オッズを "
-        f"**{len(odds)}通り** 取得しました。"
 
-    )
+        if len(hole_candidates) > 0:
 
-elif len(odds) > 0:
+            hole = hole_candidates.iloc[0]
 
-    st.warning(
+        else:
 
-        f"3連単オッズを "
-        f"{len(odds)}通り取得しました。"
-        f"120通りすべて取得できていません。"
+            hole = tri.iloc[-1]
 
-    )
+
+        # =========================
+        # 3連単AI表示
+        # =========================
+
+        st.subheader(
+            "🔥 120通り3連単AI"
+        )
+
+
+        a, b, c, d = st.columns(4)
+
+
+        with a:
+
+            st.metric(
+                "🥇 AI本線",
+                top["3連単"],
+                f"信頼度 {top['信頼度']}%",
+            )
+
+
+        with b:
+
+            st.metric(
+                "🥈 AI対抗",
+                second["3連単"],
+                f"信頼度 {second['信頼度']}%",
+            )
+
+
+        with c:
+
+            st.metric(
+                "🎯 AI押さえ",
+                third["3連単"],
+                f"信頼度 {third['信頼度']}%",
+            )
+
+
+        with d:
+
+            st.metric(
+                "💥 AI穴",
+                hole["3連単"],
+                f"穴度 {hole['穴度']}%",
+            )
+
+
+        # =========================
+        # TOP10
+        # =========================
+
+        st.subheader(
+            "📈 120通りAIランキング TOP10"
+        )
+
+
+        top10 = tri.head(10).copy()
+
+
+        st.dataframe(
+            top10[
+                [
+                    "3連単",
+                    "AIスコア",
+                    "オッズ",
+                    "最終AI",
+                    "信頼度",
+                    "穴度",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+        # =========================
+        # 上位4点
+        # =========================
+
+        st.subheader(
+            "📊 上位4点"
+        )
+
+
+        st.write(
+            f"🥇 本線：{top['3連単']} "
+            f"（信頼度 {top['信頼度']}% / "
+            f"オッズ {top['オッズ']}）"
+        )
+
+
+        st.write(
+            f"🥈 対抗：{second['3連単']} "
+            f"（信頼度 {second['信頼度']}% / "
+            f"オッズ {second['オッズ']}）"
+        )
+
+
+        st.write(
+            f"🎯 押さえ：{third['3連単']} "
+            f"（信頼度 {third['信頼度']}% / "
+            f"オッズ {third['オッズ']}）"
+        )
+
+
+        st.write(
+            f"💥 穴：{hole['3連単']} "
+            f"（穴度 {hole['穴度']}% / "
+            f"オッズ {hole['オッズ']}）"
+        )
+
+
+        # =========================
+        # オッズ取得先
+        # =========================
+
+        st.caption(
+            "直前3連単オッズを取得してAI評価に反映しています。"
+        )
 
 else:
 
-    st.error(
-
-        "購入前オッズを取得できませんでした。"
-        "AI予想のみ計算します。"
-
-    )
-
-
-# =========================================================
-# 公式オッズページ
-# =========================================================
-
-st.caption(
-    f"取得対象: {odds_url(td, stadium_number, race_number)}"
-)
-
-
-# =========================================================
-# 3連単AI
-# =========================================================
-
-tri = tri_ai(
-
-    df,
-
-    history,
-
-    odds,
-
-)
-
-
-if tri.empty:
-
-    st.error(
-        "3連単AIを計算できませんでした。"
-    )
-
-    st.stop()
-
-
-# =========================================================
-# AI TOP
-# =========================================================
-
-top = tri.iloc[0]
-
-second = tri.iloc[1]
-
-third = tri.iloc[2]
-
-
-# 穴は「AI確率」ではなく
-# 期待値を含めて低評価側から選ぶ
-hole_candidates = tri.sort_values(
-
-    [
-        "穴度",
-        "AI確率",
-    ],
-
-    ascending=[
-        False,
-        True,
-    ],
-
-)
-
-
-hole = hole_candidates.iloc[0]
-
-
-# =========================================================
-# AI本線
-# =========================================================
-
-st.subheader(
-    "🔥 AI本線"
-)
-
-
-c1, c2, c3, c4 = st.columns(4)
-
-
-with c1:
-
-    st.metric(
-
-        "🥇 本線",
-
-        top["3連単"],
-
-        f"AI {top['AI確率']}%",
-
-    )
-
-
-with c2:
-
-    st.metric(
-
-        "🥈 対抗",
-
-        second["3連単"],
-
-        f"AI {second['AI確率']}%",
-
-    )
-
-
-with c3:
-
-    st.metric(
-
-        "🎯 押さえ",
-
-        third["3連単"],
-
-        f"AI {third['AI確率']}%",
-
-    )
-
-
-with c4:
-
-    st.metric(
-
-        "💥 穴候補",
-
-        hole["3連単"],
-
-        f"AI {hole['AI確率']}%",
-
-    )
-
-
-# =========================================================
-# 本線詳細
-# =========================================================
-
-st.subheader(
-    "📌 上位買い目詳細"
-)
-
-
-summary = pd.DataFrame({
-
-    "区分": [
-        "🥇 本線",
-        "🥈 対抗",
-        "🎯 押さえ",
-        "💥 穴",
-    ],
-
-    "3連単": [
-        top["3連単"],
-        second["3連単"],
-        third["3連単"],
-        hole["3連単"],
-    ],
-
-    "AI確率": [
-        top["AI確率"],
-        second["AI確率"],
-        third["AI確率"],
-        hole["AI確率"],
-    ],
-
-    "オッズ": [
-        top["オッズ"],
-        second["オッズ"],
-        third["オッズ"],
-        hole["オッズ"],
-    ],
-
-    "市場確率": [
-        top["市場確率"],
-        second["市場確率"],
-        third["市場確率"],
-        hole["市場確率"],
-    ],
-
-    "AI乖離": [
-        top["AI乖離"],
-        second["AI乖離"],
-        third["AI乖離"],
-        hole["AI乖離"],
-    ],
-
-    "期待値倍率": [
-        top["期待値倍率"],
-        second["期待値倍率"],
-        third["期待値倍率"],
-        hole["期待値倍率"],
-    ],
-
-})
-
-
-st.dataframe(
-
-    summary,
-
-    use_container_width=True,
-
-    hide_index=True,
-
-)
-
-
-# =========================================================
-# 期待値ランキング
-# =========================================================
-
-st.subheader(
-    "💰 期待値ランキング TOP10"
-)
-
-
-ev_columns = [
-
-    "3連単",
-
-    "AI確率",
-
-    "オッズ",
-
-    "市場確率",
-
-    "AI乖離",
-
-    "期待値倍率",
-
-]
-
-
-ev_view = tri[
-    ev_columns
-].head(10)
-
-
-st.dataframe(
-
-    ev_view,
-
-    use_container_width=True,
-
-    hide_index=True,
-
-)
-
-
-# =========================================================
-# AIランキング
-# =========================================================
-
-st.subheader(
-    "📈 3連単120通り AIランキング"
-)
-
-
-ranking_columns = [
-
-    "3連単",
-
-    "AIスコア",
-
-    "AI確率",
-
-    "オッズ",
-
-    "市場確率",
-
-    "AI乖離",
-
-    "期待値倍率",
-
-    "信頼度",
-
-    "穴度",
-
-]
-
-
-st.dataframe(
-
-    tri[
-        ranking_columns
-    ],
-
-    use_container_width=True,
-
-    hide_index=True,
-
-)
-
-
-# =========================================================
-# 買い目候補
-# =========================================================
-
-st.subheader(
-    "🎯 最終候補"
-)
-
-
-def display_bet(
-    label,
-    row
-):
-
-    odds_text = (
-
-        f"{row['オッズ']:.1f}倍"
-
-        if pd.notna(
-            row["オッズ"]
-        )
-
-        else "取得なし"
-
-    )
-
-
-    ev_text = (
-
-        f"{row['期待値倍率']:.2f}倍"
-
-        if pd.notna(
-            row["期待値倍率"]
-        )
-
-        else "計算不可"
-
-    )
-
-
-    st.write(
-
-        f"{label} "
-
-        f"**{row['3連単']}**　"
-
-        f"AI確率 "
-        f"**{row['AI確率']:.2f}%**　"
-
-        f"オッズ "
-        f"**{odds_text}**　"
-
-        f"期待値 "
-        f"**{ev_text}**"
-
-    )
-
-
-display_bet(
-    "🥇 本線：",
-    top
-)
-
-
-display_bet(
-    "🥈 対抗：",
-    second
-)
-
-
-display_bet(
-    "🎯 押さえ：",
-    third
-)
-
-
-display_bet(
-    "💥 穴：",
-    hole
-)
-
-
-# =========================================================
-# 注意表示
-# =========================================================
-
-st.divider()
-
-st.caption(
-
-    "※ オッズは取得時点の公開情報です。"
-    "レース締切まで変動する可能性があります。"
-    "期待値倍率はAI確率が正しく校正されていることを前提とした"
-    "理論値であり、的中・利益を保証するものではありません。"
-
-)
+    st.info(
+        "開催日・競艇場・レースを選んで"
+        "「AI予想を実行」を押してください。"
+                    )

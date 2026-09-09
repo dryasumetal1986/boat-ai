@@ -8,11 +8,15 @@ import data
 from ai import tri_ai
 
 
+# =========================================================
+# 設定
+# =========================================================
+
 START_DATE = data.API_START_DATE
 
 
 # =========================================================
-# 結果着順
+# 実際の着順
 # =========================================================
 
 def get_actual_order(race):
@@ -24,39 +28,62 @@ def get_actual_order(race):
 # =========================================================
 
 def get_trifecta_payout(race, order):
+
     if len(order) < 3:
         return 0
 
     result = data.get_result(race)
+
     payouts = result.get("payouts", {})
 
     if not isinstance(payouts, dict):
         return 0
 
-    trifecta = payouts.get("trifecta", [])
+    trifecta = payouts.get(
+        "trifecta",
+        [],
+    )
 
     if not isinstance(trifecta, list):
         return 0
 
-    target = tuple(int(x) for x in order[:3])
+    target = tuple(
+        int(x)
+        for x in order[:3]
+    )
 
     for item in trifecta:
+
         if not isinstance(item, dict):
             continue
 
-        combo = item.get("combination", "")
-        nums = re.findall(r"\d+", str(combo))
+        combination = item.get(
+            "combination",
+            "",
+        )
+
+        nums = re.findall(
+            r"\d+",
+            str(combination),
+        )
 
         if len(nums) < 3:
             continue
 
-        combo_tuple = tuple(
-            int(x) for x in nums[:3]
+        combo = tuple(
+            int(x)
+            for x in nums[:3]
         )
 
-        if combo_tuple == target:
+        if combo == target:
+
             try:
-                return int(item.get("amount", 0))
+                return int(
+                    item.get(
+                        "amount",
+                        0,
+                    )
+                )
             except Exception:
                 return 0
 
@@ -68,27 +95,41 @@ def get_trifecta_payout(race, order):
 # =========================================================
 
 def normalize_ranking(ranking):
+
     result = []
 
-    if not isinstance(ranking, (list, tuple)):
+    if not isinstance(
+        ranking,
+        (list, tuple),
+    ):
         return result
 
     for item in ranking:
+
         try:
+
             if isinstance(item, dict):
+
                 value = item.get(
                     "boat",
                     item.get(
                         "艇番",
-                        item.get("number", 0),
+                        item.get(
+                            "number",
+                            0,
+                        ),
                     ),
                 )
+
             else:
                 value = item
 
             boat = int(value)
 
-            if 1 <= boat <= 6 and boat not in result:
+            if (
+                1 <= boat <= 6
+                and boat not in result
+            ):
                 result.append(boat)
 
         except Exception:
@@ -98,17 +139,46 @@ def normalize_ranking(ranking):
 
 
 # =========================================================
-# AI 6点買い
+# 6点買い
 # =========================================================
 
-def make_bets(main, counter, hole):
+def make_bets(
+    main,
+    counter,
+    hole,
+):
+
     bets = [
-        (main, counter, hole),
-        (main, hole, counter),
-        (counter, main, hole),
-        (counter, hole, main),
-        (hole, main, counter),
-        (hole, counter, main),
+        (
+            main,
+            counter,
+            hole,
+        ),
+        (
+            main,
+            hole,
+            counter,
+        ),
+        (
+            counter,
+            main,
+            hole,
+        ),
+        (
+            counter,
+            hole,
+            main,
+        ),
+        (
+            hole,
+            main,
+            counter,
+        ),
+        (
+            hole,
+            counter,
+            main,
+        ),
     ]
 
     return [
@@ -127,7 +197,10 @@ def analyze_race(
     stadium_no,
     race_no,
 ):
-    rows = data.get_race_rows(race)
+
+    rows = data.get_race_rows(
+        race
+    )
 
     if rows is None or rows.empty:
         return None
@@ -144,21 +217,32 @@ def analyze_race(
         stadium_no,
     )
 
-    actual = get_actual_order(race)
+    actual = get_actual_order(
+        race
+    )
 
     if len(actual) < 3:
         return None
 
     main = int(
-        prediction.get("main", 1)
+        prediction.get(
+            "main",
+            1,
+        )
     )
 
     counter = int(
-        prediction.get("counter", 2)
+        prediction.get(
+            "counter",
+            2,
+        )
     )
 
     hole = int(
-        prediction.get("hole", 3)
+        prediction.get(
+            "hole",
+            3,
+        )
     )
 
     bets = make_bets(
@@ -171,7 +255,10 @@ def analyze_race(
         actual[:3]
     )
 
-    hit = actual_trifecta in bets
+    hit = (
+        actual_trifecta
+        in bets
+    )
 
     payout = (
         get_trifecta_payout(
@@ -183,7 +270,10 @@ def analyze_race(
     )
 
     ranking = normalize_ranking(
-        prediction.get("ranking", [])
+        prediction.get(
+            "ranking",
+            [],
+        )
     )
 
     top3_hit = (
@@ -198,7 +288,10 @@ def analyze_race(
 
     return {
         "日付": str(
-            race.get("date", "")
+            race.get(
+                "date",
+                "",
+            )
         ),
         "開催場": data.stadium_name(
             stadium_no
@@ -212,33 +305,50 @@ def analyze_race(
             for x in actual[:3]
         ),
         "3連単配当": payout,
-        "本命1着": actual[0] == main,
-        "本命3連対": main in actual[:3],
-        "AI上位3艇3連対": top3_hit,
-        "AI买い的中": hit,
+        "本命1着": (
+            actual[0] == main
+        ),
+        "本命3連対": (
+            main in actual[:3]
+        ),
+        "AI上位3艇3連対": (
+            top3_hit
+        ),
+        "AI買い的中": hit,
         "3連単完全的中": hit,
     }
 
 
 # =========================================================
-# その日の全国24場
+# 1日分の全国24場を取得
 # =========================================================
 
 def get_completed_races_for_date(
     target_date,
 ):
-    raw = data.get_data(target_date)
+
+    raw = data.get_data(
+        target_date
+    )
 
     if not raw:
         return []
 
-    races = data.all_races_for_date(raw)
+    races = data.all_races_for_date(
+        raw
+    )
 
     completed = []
 
-    for stadium_no, race_no, race in races:
+    for (
+        stadium_no,
+        race_no,
+        race,
+    ) in races:
 
-        if not data.race_has_result(race):
+        if not data.race_has_result(
+            race
+        ):
             continue
 
         completed.append(
@@ -260,13 +370,14 @@ def get_completed_races_for_date(
 
 
 # =========================================================
-# バックテスト
+# バックテスト実行
 # =========================================================
 
 def run_backtest(
     limit,
     progress_callback=None,
 ):
+
     yesterday = (
         data.jst_today()
         - timedelta(days=1)
@@ -275,9 +386,11 @@ def run_backtest(
     current_date = yesterday
 
     records = []
+
     checked_days = 0
     available_races = 0
     completed_races = 0
+
     first_error = None
 
     while (
@@ -288,6 +401,7 @@ def run_backtest(
         checked_days += 1
 
         if progress_callback:
+
             progress_callback(
                 len(records),
                 limit,
@@ -298,20 +412,26 @@ def run_backtest(
             )
 
         try:
+
             races = (
                 get_completed_races_for_date(
                     current_date
                 )
             )
 
-            available_races += len(races)
+            available_races += len(
+                races
+            )
 
         except Exception as e:
 
             if first_error is None:
                 first_error = str(e)
 
-            current_date -= timedelta(days=1)
+            current_date -= timedelta(
+                days=1
+            )
+
             continue
 
         for (
@@ -324,6 +444,7 @@ def run_backtest(
                 break
 
             if progress_callback:
+
                 progress_callback(
                     len(records),
                     limit,
@@ -344,10 +465,14 @@ def run_backtest(
                 if result is None:
                     continue
 
-                records.append(result)
+                records.append(
+                    result
+                )
+
                 completed_races += 1
 
                 if progress_callback:
+
                     progress_callback(
                         len(records),
                         limit,
@@ -360,13 +485,16 @@ def run_backtest(
             except Exception as e:
 
                 if first_error is None:
+
                     first_error = (
                         f"{current_date} "
                         f"{data.stadium_name(stadium_no)} "
                         f"{race_no}R: {e}"
                     )
 
-        current_date -= timedelta(days=1)
+        current_date -= timedelta(
+            days=1
+        )
 
     return (
         records,
@@ -388,14 +516,18 @@ def calculate_metrics(df):
 
     total = len(df)
 
-    investment = total * 600
+    investment = (
+        total * 600
+    )
 
     payout = int(
         df["3連単配当"].sum()
     )
 
     roi = (
-        payout / investment * 100
+        payout
+        / investment
+        * 100
         if investment
         else 0
     )
@@ -405,16 +537,30 @@ def calculate_metrics(df):
         "投資金額": investment,
         "払戻金額": payout,
         "回収率": roi,
-        "本命1着率":
-            df["本命1着"].mean() * 100,
-        "本命3連対率":
-            df["本命3連対"].mean() * 100,
-        "AI上位3艇3連対":
-            df["AI上位3艇3連対"].mean() * 100,
-        "AI買い的中率":
-            df["AI买い的中"].mean() * 100,
-        "3連単完全的中率":
-            df["3連単完全的中"].mean() * 100,
+        "本命1着率": (
+            df["本命1着"].mean()
+            * 100
+        ),
+        "本命3連対率": (
+            df["本命3連対"].mean()
+            * 100
+        ),
+        "AI上位3艇3連対": (
+            df[
+                "AI上位3艇3連対"
+            ].mean()
+            * 100
+        ),
+        "AI買い的中率": (
+            df["AI買い的中"].mean()
+            * 100
+        ),
+        "3連単完全的中率": (
+            df[
+                "3連単完全的中"
+            ].mean()
+            * 100
+        ),
     }
 
 
@@ -424,24 +570,27 @@ def calculate_metrics(df):
 
 BOAT_HTML = """
 <style>
+
 .bt-wrap {
     width: 100%;
-    margin: 8px 0 16px 0;
+    margin: 8px 0 18px 0;
 }
 
 .bt-title {
     text-align: center;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 800;
     margin-bottom: 8px;
 }
 
 .bt-track {
     position: relative;
-    height: 64px;
+    width: 100%;
+    height: 66px;
     overflow: hidden;
     border-radius: 16px;
     border: 1px solid rgba(120,120,120,.25);
+
     background:
         linear-gradient(
             to bottom,
@@ -455,6 +604,7 @@ BOAT_HTML = """
     left: -70px;
     top: 8px;
     font-size: 38px;
+
     animation:
         bt-run 2.2s linear infinite;
 }
@@ -464,13 +614,16 @@ BOAT_HTML = """
     left: 0;
     right: 0;
     bottom: 5px;
+
     text-align: center;
     font-size: 18px;
     letter-spacing: 6px;
+
     opacity: .6;
 }
 
 @keyframes bt-run {
+
     0% {
         left: -70px;
         transform: translateY(0);
@@ -485,6 +638,7 @@ BOAT_HTML = """
         transform: translateY(0);
     }
 }
+
 </style>
 
 <div class="bt-wrap">
@@ -510,10 +664,105 @@ BOAT_HTML = """
 
 
 # =========================================================
+# 結果カード
+# =========================================================
+
+def show_result_cards(df):
+
+    st.markdown(
+        "### 📋 検証結果"
+    )
+
+    for _, row in df.iterrows():
+
+        hit = bool(
+            row["AI買い的中"]
+        )
+
+        payout = int(
+            row["3連単配当"]
+        )
+
+        result = str(
+            row["結果"]
+        )
+
+        if hit:
+
+            judge = "🎯 的中"
+
+        else:
+
+            judge = "—"
+
+        st.markdown(
+            f"""
+            <div style="
+                padding:14px;
+                margin-bottom:10px;
+                border-radius:14px;
+                border:1px solid rgba(120,120,120,.22);
+                background:rgba(120,120,120,.06);
+            ">
+
+                <div style="
+                    font-weight:800;
+                    font-size:16px;
+                    margin-bottom:8px;
+                ">
+                    📅 {row["日付"]}
+                   　
+                    🏟️ {row["開催場"]}
+                   　
+                    🏁 {row["レース"]}
+                </div>
+
+                <div style="
+                    font-size:14px;
+                    margin-bottom:7px;
+                ">
+                    🎯 本命
+                    <b>{row["本命"]}号艇</b>
+                   　
+                    🔥 対抗
+                    <b>{row["対抗"]}号艇</b>
+                   　
+                    💥 穴
+                    <b>{row["穴"]}号艇</b>
+                </div>
+
+                <div style="
+                    font-size:15px;
+                    margin-bottom:7px;
+                ">
+                    🏆 結果
+                    <b>{result}</b>
+                </div>
+
+                <div style="
+                    font-size:14px;
+                ">
+                    💴 3連単
+                    <b>
+                        {payout:,}円
+                    </b>
+                   　
+                    {judge}
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# =========================================================
 # バックテスト画面
 # =========================================================
 
-def render_backtest(stadium_no=None):
+def render_backtest(
+    stadium_no=None
+):
 
     st.markdown("---")
 
@@ -527,7 +776,12 @@ def render_backtest(stadium_no=None):
 
     limit = st.selectbox(
         "検証レース数",
-        [100, 300, 500, 1000],
+        [
+            100,
+            300,
+            500,
+            1000,
+        ],
         key="backtest_limit",
     )
 
@@ -539,12 +793,18 @@ def render_backtest(stadium_no=None):
         return
 
     progress = st.progress(0)
+
     status = st.empty()
+
     count_box = st.empty()
+
     animation = st.empty()
 
     with animation.container():
-        st.html(BOAT_HTML)
+
+        st.html(
+            BOAT_HTML
+        )
 
     def update_progress(
         done,
@@ -570,7 +830,8 @@ def render_backtest(stadium_no=None):
 
             status.info(
                 f"🔄 {target_date} "
-                f"{name} {race_no}Rを検証中"
+                f"{name} "
+                f"{race_no}Rを検証中"
             )
 
         elif mode == "done":
@@ -581,7 +842,9 @@ def render_backtest(stadium_no=None):
 
             status.success(
                 f"✅ {target_date} "
-                f"{name} {race_no}R 検証完了"
+                f"{name} "
+                f"{race_no}R "
+                f"検証完了"
             )
 
         progress.progress(
@@ -611,8 +874,11 @@ def render_backtest(stadium_no=None):
     except Exception as e:
 
         animation.empty()
+
         progress.empty()
+
         status.empty()
+
         count_box.empty()
 
         st.error(
@@ -620,9 +886,14 @@ def render_backtest(stadium_no=None):
         )
 
         st.exception(e)
+
         return
 
     animation.empty()
+
+    # =====================================================
+    # データなし
+    # =====================================================
 
     if not records:
 
@@ -651,6 +922,7 @@ def render_backtest(stadium_no=None):
             with st.expander(
                 "🔧 最初に発生したエラー"
             ):
+
                 st.code(
                     first_error
                 )
@@ -658,12 +930,16 @@ def render_backtest(stadium_no=None):
         return
 
     # =====================================================
-    # 成績
+    # DataFrame
     # =====================================================
 
-    df = pd.DataFrame(records)
+    df = pd.DataFrame(
+        records
+    )
 
-    metrics = calculate_metrics(df)
+    metrics = calculate_metrics(
+        df
+    )
 
     progress.progress(1.0)
 
@@ -679,118 +955,78 @@ def render_backtest(stadium_no=None):
     # 指標
     # =====================================================
 
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown(
+        "### 📈 バックテスト成績"
+    )
+
+    c1, c2 = st.columns(2)
 
     with c1:
+
         st.metric(
             "💰 回収率",
             f"{metrics['回収率']:.1f}%",
         )
 
     with c2:
+
         st.metric(
             "🎯 本命1着率",
             f"{metrics['本命1着率']:.1f}%",
         )
 
-    with c3:
+    c1, c2 = st.columns(2)
+
+    with c1:
+
         st.metric(
             "🎯 本命3連対率",
             f"{metrics['本命3連対率']:.1f}%",
         )
 
-    with c4:
+    with c2:
+
         st.metric(
             "🔥 AI買い的中率",
             f"{metrics['AI買い的中率']:.1f}%",
         )
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2 = st.columns(2)
 
     with c1:
+
         st.metric(
             "投資金額",
             f"{metrics['投資金額']:,}円",
         )
 
     with c2:
+
         st.metric(
             "払戻金額",
             f"{metrics['払戻金額']:,}円",
         )
 
-    with c3:
+    c1, c2 = st.columns(2)
+
+    with c1:
+
         st.metric(
             "AI上位3艇3連対",
             f"{metrics['AI上位3艇3連対']:.1f}%",
         )
 
-    with c4:
+    with c2:
+
         st.metric(
             "3連単完全的中率",
             f"{metrics['3連単完全的中率']:.1f}%",
         )
 
     # =====================================================
-    # 結果一覧
+    # スマホ向け結果
     # =====================================================
 
-    st.markdown(
-        "### 📋 検証結果"
-    )
-
-    display_df = df[
-        [
-            "日付",
-            "開催場",
-            "レース",
-            "本命",
-            "対抗",
-            "穴",
-            "結果",
-            "3連単配当",
-            "AI买い的中",
-        ]
-    ].copy()
-
-    display_df = display_df.rename(
-        columns={
-            "AI买い的中": "AI買い的中",
-        }
-    )
-
-    display_df["本命"] = (
-        display_df["本命"].astype(str)
-        + "号艇"
-    )
-
-    display_df["対抗"] = (
-        display_df["対抗"].astype(str)
-        + "号艇"
-    )
-
-    display_df["穴"] = (
-        display_df["穴"].astype(str)
-        + "号艇"
-    )
-
-    display_df["3連単配当"] = (
-        display_df["3連単配当"]
-        .map(lambda x: f"{int(x):,}円")
-    )
-
-    display_df["AI買い的中"] = (
-        display_df["AI買い的中"]
-        .map(
-            lambda x:
-            "🎯 的中"
-            if x
-            else "—"
+    show_result_cards(
+        df
         )
-    )
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-    )

@@ -3,18 +3,9 @@ import html
 import pandas as pd
 import streamlit as st
 
+import data
 from ai import tri_ai
 from backtest import render_backtest
-from data import (
-    STADIUM_NAMES,
-    available_races,
-    available_stadiums,
-    get_data,
-    get_race,
-    get_race_rows,
-    jst_today,
-    stadium_name,
-)
 
 
 st.set_page_config(
@@ -24,445 +15,422 @@ st.set_page_config(
 )
 
 
-# =========================
+# =========================================================
 # CSS
-# =========================
+# =========================================================
 
 st.markdown(
     """
-<style>
-.block-container {
-    max-width: 1100px;
-    padding-top: 1.2rem;
-    padding-bottom: 3rem;
-}
+    <style>
+    .main-title {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
 
-.app-title {
-    font-size: 2rem;
-    font-weight: 800;
-    margin-bottom: 0.2rem;
-}
+    .sub-title {
+        color: #888;
+        margin-bottom: 20px;
+    }
 
-.app-subtitle {
-    color: #777;
-    margin-bottom: 1.5rem;
-}
+    .race-header {
+        padding: 16px;
+        border-radius: 14px;
+        margin: 15px 0;
+        background: rgba(120, 120, 120, 0.10);
+        border: 1px solid rgba(120, 120, 120, 0.20);
+    }
 
-.race-header {
-    border-radius: 16px;
-    padding: 16px 20px;
-    margin: 12px 0 18px 0;
-    border: 1px solid rgba(128,128,128,.25);
-}
+    .pick-card {
+        padding: 14px;
+        border-radius: 12px;
+        margin-bottom: 8px;
+        text-align: center;
+        font-weight: 700;
+        border: 1px solid rgba(120, 120, 120, 0.20);
+    }
 
-.pick-card {
-    border-radius: 16px;
-    padding: 18px;
-    margin-bottom: 12px;
-    border: 1px solid rgba(128,128,128,.25);
-}
+    .boat-card {
+        padding: 12px;
+        border-radius: 12px;
+        margin-bottom: 8px;
+        border: 1px solid rgba(120, 120, 120, 0.20);
+    }
 
-.boat-card {
-    border-radius: 14px;
-    padding: 14px;
-    margin-bottom: 10px;
-    border: 1px solid rgba(128,128,128,.25);
-}
+    .boat-number {
+        font-size: 24px;
+        font-weight: 800;
+    }
 
-.boat-number {
-    font-size: 1.3rem;
-    font-weight: 800;
-}
+    .boat-name {
+        font-size: 16px;
+        font-weight: 700;
+    }
 
-.boat-name {
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin-top: 4px;
-}
-
-.boat-detail {
-    font-size: .82rem;
-    opacity: .75;
-    margin-top: 6px;
-}
-
-.rank-card {
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin: 7px 0;
-    border: 1px solid rgba(128,128,128,.25);
-}
-
-.ai-confidence {
-    font-size: 1.2rem;
-    font-weight: 800;
-    margin: 12px 0;
-}
-</style>
-""",
+    .small-text {
+        font-size: 13px;
+        color: #888;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
 
-# =========================
-# Helper
-# =========================
-
-def safe_name(value):
-    return html.escape(
-        str(value)
-    )
-
-
-def boat_name(df, boat):
-    if df.empty:
-        return f"{boat}号艇"
-
-    rows = df[
-        df["枠"].apply(
-            lambda x: int(float(x))
-        )
-        == int(boat)
-    ]
-
-    if rows.empty:
-        return f"{boat}号艇"
-
-    return str(
-        rows.iloc[0].get(
-            "選手名",
-            f"{boat}号艇",
-        )
-    )
-
-
-def confidence_stars(stars):
-    stars = max(
-        1,
-        min(5, int(stars)),
-    )
-
-    return (
-        "★" * stars
-        + "☆" * (5 - stars)
-    )
-
-
-# =========================
-# Title
-# =========================
+# =========================================================
+# タイトル
+# =========================================================
 
 st.markdown(
-    '<div class="app-title">🚤 やっちゃんの競艇AI予想PRO</div>',
+    '<div class="main-title">🚤 やっちゃんの競艇AI予想PRO</div>',
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    '<div class="app-subtitle">BOAT RACE公式公開データ × AIスコアリング</div>',
+    '<div class="sub-title">全国24場対応・展示データ＋選手データ＋過去成績AI予想</div>',
     unsafe_allow_html=True,
 )
 
 
-# =========================
-# Date data
-# =========================
+# =========================================================
+# セッション初期化
+# =========================================================
 
-today = jst_today()
+if "prediction_target" not in st.session_state:
+    st.session_state.prediction_target = None
 
-raw = get_data(today)
+if "prediction_result" not in st.session_state:
+    st.session_state.prediction_result = None
 
-if raw is None:
-    st.warning(
-        "⚠️ 本日のレースデータを取得できませんでした"
+if "prediction_race" not in st.session_state:
+    st.session_state.prediction_race = None
+
+
+# =========================================================
+# 開催日
+# =========================================================
+
+today = data.jst_today()
+
+
+# =========================================================
+# 開催データ取得
+# =========================================================
+
+raw = data.get_data(today)
+
+
+if not raw:
+    st.error(
+        "本日の競艇データを取得できませんでした。"
     )
 
     st.info(
-        "APIから本日のデータを取得できていません。"
-        "少し時間を置いて再読み込みしてください。"
+        "時間を置いて再読み込みしてください。"
     )
 
-    # バックテストは表示
     render_backtest()
-
     st.stop()
 
 
-# =========================
-# Selectors
-# =========================
+# =========================================================
+# 場選択
+# =========================================================
 
-stadiums = available_stadiums(
-    raw
-)
+stadiums = data.available_stadiums(raw)
+
 
 if not stadiums:
-    st.warning(
-        "本日の開催場データがありません。"
+    st.error(
+        "開催場データを取得できませんでした。"
     )
 
     render_backtest()
-
     st.stop()
 
 
-stadium_labels = {
-    number: (
-        f"{number} {stadium_name(number)}"
+stadium_options = [
+    (
+        stadium_number,
+        data.stadium_name(stadium_number),
     )
-    for number in stadiums
-}
+    for stadium_number in stadiums
+]
+
 
 selected_stadium = st.selectbox(
-    "📍 開催場",
-    stadiums,
-    format_func=lambda x: stadium_labels[x],
+    "🏟️ 開催場",
+    stadium_options,
+    format_func=lambda x: x[1],
     key="selected_stadium",
 )
 
 
-races = available_races(
-    raw,
-    selected_stadium,
+stadium_number = int(
+    selected_stadium[0]
 )
+
+stadium_display_name = (
+    data.stadium_name(stadium_number)
+)
+
+
+# =========================================================
+# レース選択
+# =========================================================
+
+races = data.available_races(
+    raw,
+    stadium_number,
+)
+
 
 if not races:
     st.warning(
-        "この開催場のレースデータがありません。"
+        f"{stadium_display_name}の開催レースがありません。"
     )
 
     render_backtest()
-
     st.stop()
+
+
+race_options = [
+    int(race_number)
+    for race_number in races
+]
 
 
 selected_race = st.selectbox(
     "🏁 レース",
-    races,
+    race_options,
     format_func=lambda x: f"{x}R",
     key="selected_race",
 )
 
 
-# =========================
-# Prediction button
-# =========================
+race_number = int(
+    selected_race
+)
+
+
+# =========================================================
+# AI予想開始
+# =========================================================
 
 if st.button(
     "🚀 AI予想開始",
     use_container_width=True,
-    type="primary",
-    key="prediction_start",
+    key="start_prediction",
 ):
-    st.session_state[
-        "prediction_target"
-    ] = (
-        today.isoformat(),
-        int(selected_stadium),
-        int(selected_race),
-    )
 
-    st.session_state[
-        "prediction_result"
-    ] = None
-
-    st.rerun()
-
-
-# =========================
-# Prediction state
-# =========================
-
-target = st.session_state.get(
-    "prediction_target"
-)
-
-prediction = st.session_state.get(
-    "prediction_result"
-)
-
-
-# =========================
-# Actually calculate
-# =========================
-
-if (
-    target is not None
-    and prediction is None
-):
-    target_date_text, target_stadium, target_race = target
-
-    race = get_race(
+    race = data.get_race(
         raw,
-        target_stadium,
-        target_race,
+        stadium_number,
+        race_number,
     )
 
-    if race is None:
+    if not race:
         st.error(
             "レースデータを取得できませんでした。"
         )
-    else:
-        df = get_race_rows(
-            race
-        )
 
-        if df.empty:
+    else:
+        rows = data.get_race_rows(race)
+
+        if rows.empty:
             st.error(
                 "選手データを取得できませんでした。"
             )
+
         else:
             with st.spinner(
-                "🤖 AIがデータを分析しています..."
+                "🤖 AIが過去データと展示データを分析中..."
             ):
-                # 現在レースより前の履歴
-                from data import history14
 
-                history = history14(
-                    target_stadium,
-                    target_race,
+                history = data.history14(
+                    stadium_number,
+                    race_number,
                     today,
                 )
 
                 try:
                     prediction = tri_ai(
-                        df,
+                        rows,
                         history,
-                        target_stadium,
+                        stadium_number,
                     )
 
-                    st.session_state[
-                        "prediction_result"
-                    ] = prediction
+                    st.session_state.prediction_target = (
+                        today,
+                        stadium_number,
+                        race_number,
+                    )
+
+                    st.session_state.prediction_result = (
+                        prediction
+                    )
+
+                    st.session_state.prediction_race = (
+                        race
+                    )
 
                     st.rerun()
 
                 except Exception as e:
                     st.error(
-                        "AI予想中にエラーが発生しました。"
+                        "AI予想の計算中にエラーが発生しました。"
                     )
 
                     st.exception(e)
 
 
-# =========================
-# Prediction display
-# =========================
+# =========================================================
+# 予想結果
+# =========================================================
+
+prediction_target = (
+    st.session_state.prediction_target
+)
+
+prediction = (
+    st.session_state.prediction_result
+)
+
+prediction_race = (
+    st.session_state.prediction_race
+)
+
 
 if (
-    target is not None
+    prediction_target is not None
     and prediction is not None
+    and prediction_race is not None
 ):
-    target_date_text, target_stadium, target_race = target
 
-    race = get_race(
-        raw,
-        target_stadium,
-        target_race,
+    (
+        prediction_date,
+        prediction_stadium,
+        prediction_race_number,
+    ) = prediction_target
+
+
+    prediction_rows = prediction.get(
+        "data",
+        pd.DataFrame(),
     )
 
-    if race is not None:
-        df = get_race_rows(
-            race
-        )
-    else:
-        df = prediction.get(
-            "data",
-            pd.DataFrame(),
-        )
 
-    # ---------------------
-    # Race header
-    # ---------------------
+    # -----------------------------------------------------
+    # レースヘッダー
+    # -----------------------------------------------------
+
+    safe_date = html.escape(
+        str(prediction_date)
+    )
+
+    safe_stadium = html.escape(
+        data.stadium_name(
+            prediction_stadium
+        )
+    )
+
+    header_html = (
+        '<div class="race-header">'
+        f'<div><b>{safe_date}</b></div>'
+        f'<div style="font-size:24px; font-weight:800;">'
+        f'{safe_stadium} {prediction_race_number}R'
+        f'</div>'
+        '</div>'
+    )
 
     st.markdown(
-        f'<div class="race-header">'
-        f'<div>🗓 {html.escape(str(target_date_text))}</div>'
-        f'<div style="font-size:1.45rem;font-weight:800;margin-top:5px;">'
-        f'📍 {html.escape(stadium_name(target_stadium))} '
-        f'{target_race}R'
-        f'</div>'
-        f'</div>',
+        header_html,
         unsafe_allow_html=True,
     )
 
-    # ---------------------
-    # Picks
-    # ---------------------
+
+    # -----------------------------------------------------
+    # 本命・対抗・穴
+    # -----------------------------------------------------
 
     main = int(
-        prediction["main"]
+        prediction.get("main", 1)
     )
 
     counter = int(
-        prediction["counter"]
+        prediction.get("counter", 2)
     )
 
     hole = int(
-        prediction["hole"]
+        prediction.get("hole", 3)
     )
 
-    main_name = boat_name(
-        df,
-        main,
-    )
-
-    counter_name = boat_name(
-        df,
-        counter,
-    )
-
-    hole_name = boat_name(
-        df,
-        hole,
-    )
 
     col1, col2, col3 = st.columns(3)
 
+
     with col1:
+
         st.markdown(
-            f'<div class="pick-card">'
-            f'<div style="font-size:1.1rem;font-weight:800;">🎯 本命</div>'
-            f'<div style="font-size:1.6rem;font-weight:900;">'
-            f'{main}号艇'
-            f'</div>'
-            f'<div>{safe_name(main_name)}</div>'
-            f'</div>',
+            f"""
+            <div class="pick-card">
+                🎯 本命<br>
+                <span style="font-size:28px;">
+                    {main}号艇
+                </span>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
 
     with col2:
+
         st.markdown(
-            f'<div class="pick-card">'
-            f'<div style="font-size:1.1rem;font-weight:800;">🔥 対抗</div>'
-            f'<div style="font-size:1.6rem;font-weight:900;">'
-            f'{counter}号艇'
-            f'</div>'
-            f'<div>{safe_name(counter_name)}</div>'
-            f'</div>',
+            f"""
+            <div class="pick-card">
+                🔥 対抗<br>
+                <span style="font-size:28px;">
+                    {counter}号艇
+                </span>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
 
     with col3:
+
         st.markdown(
-            f'<div class="pick-card">'
-            f'<div style="font-size:1.1rem;font-weight:800;">💥 穴</div>'
-            f'<div style="font-size:1.6rem;font-weight:900;">'
-            f'{hole}号艇'
-            f'</div>'
-            f'<div>{safe_name(hole_name)}</div>'
-            f'</div>',
+            f"""
+            <div class="pick-card">
+                💥 穴<br>
+                <span style="font-size:28px;">
+                    {hole}号艇
+                </span>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-    # ---------------------
-    # Confidence
-    # ---------------------
+
+    # -----------------------------------------------------
+    # AI自信度
+    # -----------------------------------------------------
 
     stars = int(
         prediction.get(
             "stars",
             3,
         )
+    )
+
+    stars = max(
+        1,
+        min(
+            stars,
+            5,
+        ),
     )
 
     confidence_percent = float(
@@ -472,230 +440,298 @@ if (
         )
     )
 
-    st.markdown(
-        f'<div class="ai-confidence">'
-        f'🤖 AI自信度 '
-        f'{confidence_stars(stars)} '
-        f'<span style="font-size:.9rem;font-weight:500;">'
-        f'({confidence_percent:.1f}%)'
-        f'</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ---------------------
-    # Boat cards
-    # ---------------------
 
     st.markdown(
-        "### 🚤 出走6艇"
+        f"### 🤖 AI自信度 {'★' * stars}{'☆' * (5 - stars)}"
     )
+
+    if confidence_percent > 0:
+
+        st.caption(
+            f"AI信頼度 {confidence_percent:.1f}%"
+        )
+
+
+    # =====================================================
+    # 6艇表示
+    # =====================================================
+
+    st.markdown(
+        "### 🚤 出走選手"
+    )
+
+
+    display_rows = prediction_rows.copy()
+
+
+    if not display_rows.empty:
+
+        if "枠" in display_rows.columns:
+
+            display_rows = display_rows.sort_values(
+                "枠"
+            )
+
+
+        for _, row in display_rows.iterrows():
+
+            try:
+                boat_number = int(
+                    row.get("枠", 0)
+                )
+            except Exception:
+                continue
+
+
+            if boat_number < 1 or boat_number > 6:
+                continue
+
+
+            player_name = str(
+                row.get(
+                    "選手名",
+                    "選手情報なし",
+                )
+            )
+
+
+            exhibition_time = row.get(
+                "展示タイム",
+                None,
+            )
+
+            exhibition_st = row.get(
+                "展示ST",
+                None,
+            )
+
+            exhibition_course = row.get(
+                "展示進入",
+                None,
+            )
+
+            score = prediction.get(
+                "scores",
+                {},
+            ).get(
+                boat_number,
+                0,
+            )
+
+            probability = prediction.get(
+                "boat_probs",
+                {},
+            ).get(
+                boat_number,
+                0,
+            )
+
+
+            if isinstance(
+                probability,
+                (int, float),
+            ):
+                probability_text = (
+                    f"{float(probability) * 100:.1f}%"
+                    if float(probability) <= 1
+                    else f"{float(probability):.1f}%"
+                )
+            else:
+                probability_text = "—"
+
+
+            safe_name = html.escape(
+                player_name
+            )
+
+
+            boat_html = (
+                '<div class="boat-card">'
+                f'<span class="boat-number">'
+                f'{boat_number}号艇'
+                f'</span>　'
+                f'<span class="boat-name">'
+                f'{safe_name}'
+                f'</span>'
+                '<br>'
+                f'<span class="small-text">'
+                f'展示進入: {exhibition_course}　'
+                f'展示ST: {exhibition_st}　'
+                f'展示タイム: {exhibition_time}'
+                f'</span>'
+                '<br>'
+                f'<span class="small-text">'
+                f'AIスコア: {float(score):.2f}　'
+                f'予測確率: {probability_text}'
+                f'</span>'
+                '</div>'
+            )
+
+
+            st.markdown(
+                boat_html,
+                unsafe_allow_html=True,
+            )
+
+
+    # =====================================================
+    # 確率グラフ
+    # =====================================================
+
+    st.markdown(
+        "### 📊 AI予測確率"
+    )
+
 
     boat_probs = prediction.get(
         "boat_probs",
         {},
     )
 
-    for boat in range(1, 7):
-        name = boat_name(
-            df,
-            boat,
+
+    if boat_probs:
+
+        chart_data = pd.DataFrame(
+            {
+                "艇番": [
+                    f"{int(k)}号艇"
+                    for k in boat_probs.keys()
+                ],
+                "確率": [
+                    float(v) * 100
+                    if float(v) <= 1
+                    else float(v)
+                    for v in boat_probs.values()
+                ],
+            }
         )
 
-        row = df[
-            df["枠"].apply(
-                lambda x: int(
-                    float(x)
-                )
-            )
-            == boat
-        ]
 
-        if row.empty:
-            exhibition_time = "-"
-            exhibition_st = "-"
-            win_rate = "-"
-        else:
-            item = row.iloc[0]
+        if not chart_data.empty:
 
-            exhibition_time = item.get(
-                "展示タイム",
-                "-",
+            chart_data = chart_data.set_index(
+                "艇番"
             )
 
-            exhibition_st = item.get(
-                "展示ST",
-                "-",
+            st.bar_chart(
+                chart_data,
+                use_container_width=True,
             )
 
-            win_rate = item.get(
-                "全国勝率",
-                "-",
-            )
 
-        try:
-            prob = float(
-                boat_probs.get(
-                    boat,
-                    0,
-                )
-            ) * 100
-        except Exception:
-            prob = 0.0
-
-        st.markdown(
-            f'<div class="boat-card">'
-            f'<div class="boat-number">'
-            f'{boat}号艇'
-            f'</div>'
-            f'<div class="boat-name">'
-            f'{safe_name(name)}'
-            f'</div>'
-            f'<div class="boat-detail">'
-            f'全国勝率 {html.escape(str(win_rate))}　'
-            f'展示ST {html.escape(str(exhibition_st))}　'
-            f'展示タイム {html.escape(str(exhibition_time))}'
-            f'</div>'
-            f'<div class="boat-detail">'
-            f'AI確率 {prob:.1f}%'
-            f'</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    # ---------------------
-    # Probability chart
-    # ---------------------
-
-    st.markdown(
-        "### 📈 AI勝率予測"
-    )
-
-    chart_df = pd.DataFrame(
-        {
-            "艇": [
-                f"{boat}号艇"
-                for boat in range(1, 7)
-            ],
-            "AI確率": [
-                float(
-                    boat_probs.get(
-                        boat,
-                        0,
-                    )
-                )
-                * 100
-                for boat in range(1, 7)
-            ],
-        }
-    )
-
-    chart_df = chart_df.set_index(
-        "艇"
-    )
-
-    st.bar_chart(
-        chart_df,
-        height=350,
-    )
-
-    # ---------------------
-    # Ranking
-    # ---------------------
+    # =====================================================
+    # AIランキング
+    # =====================================================
 
     st.markdown(
         "### 🏆 AIランキング"
     )
 
-    ranking_result = prediction.get(
-        "ranking_result",
+
+    ranking = prediction.get(
+        "ranking",
         [],
     )
 
-    if ranking_result:
-        for item in ranking_result:
-            rank = item["順位"]
-            boat = item["艇"]
-            name = item["選手名"]
-            score = item["スコア"]
-            prob = item["確率"]
 
-            st.markdown(
-                f'<div class="rank-card">'
-                f'<b>{rank}位　{boat}号艇 '
-                f'{safe_name(name)}</b>'
-                f'<br>'
-                f'<span style="opacity:.75;">'
-                f'AIスコア {score:.2f}　'
-                f'予測確率 {prob:.1f}%'
-                f'</span>'
-                f'</div>',
-                unsafe_allow_html=True,
+    if ranking:
+
+        for index, boat in enumerate(
+            ranking,
+            start=1,
+        ):
+
+            try:
+                boat_number = int(boat)
+            except Exception:
+                continue
+
+
+            medal = {
+                1: "🥇",
+                2: "🥈",
+                3: "🥉",
+            }.get(
+                index,
+                f"{index}位",
             )
-    else:
-        st.info(
-            "ランキングデータがありません。"
-        )
 
-    # ---------------------
-    # Prediction data
-    # ---------------------
+
+            player_name = ""
+
+
+            if not prediction_rows.empty:
+
+                matched = prediction_rows[
+                    prediction_rows["枠"]
+                    == boat_number
+                ]
+
+                if not matched.empty:
+
+                    player_name = str(
+                        matched.iloc[0].get(
+                            "選手名",
+                            "",
+                        )
+                    )
+
+
+            if player_name:
+
+                st.write(
+                    f"{medal} {boat_number}号艇 "
+                    f"{player_name}"
+                )
+
+            else:
+
+                st.write(
+                    f"{medal} {boat_number}号艇"
+                )
+
+
+    # =====================================================
+    # データ詳細
+    # =====================================================
 
     with st.expander(
-        "🔎 AI計算データを見る"
+        "📋 AI分析に使用したデータを見る"
     ):
-        display_df = prediction.get(
-            "data",
-            pd.DataFrame(),
-        )
 
-        if isinstance(
-            display_df,
-            pd.DataFrame,
-        ) and not display_df.empty:
-            columns = [
-                "枠",
-                "選手名",
-                "展示進入",
-                "全国勝率",
-                "全国2連率",
-                "全国3連率",
-                "当地勝率",
-                "当地2連率",
-                "当地3連率",
-                "モーター2連率",
-                "平均ST",
-                "展示ST",
-                "展示タイム",
-                "_AIスコア",
-                "_確率",
-            ]
-
-            columns = [
-                col
-                for col in columns
-                if col in display_df.columns
-            ]
+        if not prediction_rows.empty:
 
             st.dataframe(
-                display_df[columns],
+                prediction_rows,
                 use_container_width=True,
             )
 
+        else:
+
+            st.info(
+                "表示できるデータがありません。"
+            )
+
+
+    # =====================================================
+    # 別レースを再予想
+    # =====================================================
+
     if st.button(
-        "🔄 このレースをもう一度予想",
-        key="redo_prediction",
+        "🔄 別のレースを予想する",
         use_container_width=True,
+        key="reset_prediction",
     ):
-        st.session_state[
-            "prediction_result"
-        ] = None
+
+        st.session_state.prediction_target = None
+        st.session_state.prediction_result = None
+        st.session_state.prediction_race = None
 
         st.rerun()
 
 
-# =========================
-# Backtest
-# =========================
+# =========================================================
+# バックテスト
+# =========================================================
 
 render_backtest()

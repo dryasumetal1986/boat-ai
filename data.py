@@ -9,10 +9,16 @@ from bs4 import BeautifulSoup
 API = "https://boatraceopenapi.github.io/api/v1"
 
 
+# =========================
+# HTTP
+# =========================
+
 def make_session():
+
     session = requests.Session()
 
     session.headers.update({
+
         "User-Agent": (
             "Mozilla/5.0 "
             "(Windows NT 10.0; Win64; x64) "
@@ -20,6 +26,7 @@ def make_session():
             "(KHTML, like Gecko) "
             "Chrome/140.0 Safari/537.36"
         ),
+
         "Accept-Language": (
             "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7"
         ),
@@ -28,15 +35,23 @@ def make_session():
     return session
 
 
+# =========================
+# 日別データ
+# =========================
+
 @st.cache_data(ttl=180)
 def get_data(d):
-    url = f"{API}/{d:%Y/%Y%m%d}.json"
+
+    url = (
+        f"{API}/"
+        f"{d:%Y/%Y%m%d}.json"
+    )
 
     session = make_session()
 
     response = session.get(
         url,
-        timeout=30
+        timeout=30,
     )
 
     response.raise_for_status()
@@ -44,7 +59,12 @@ def get_data(d):
     return response.json()
 
 
+# =========================
+# 汎用 racers
+# =========================
+
 def racers(value):
+
     if isinstance(value, list):
         return value
 
@@ -54,49 +74,84 @@ def racers(value):
     return []
 
 
-def get_race(data, sno, rno):
+# =========================
+# レース取得
+# =========================
+
+def get_race(
+    data,
+    sno,
+    rno,
+):
+
     stadiums = (
-        data.get("programs", {})
+        data
+        .get("programs", {})
         .get("stadiums", {})
     )
 
-    stadium = stadiums.get(str(sno))
+    stadium = stadiums.get(
+        str(sno)
+    )
 
     if not stadium:
         return None
 
-    races = stadium.get("races", {})
+    races = stadium.get(
+        "races",
+        {}
+    )
 
-    return races.get(str(rno))
+    return races.get(
+        str(rno)
+    )
 
+
+# =========================
+# 過去14日
+# =========================
 
 @st.cache_data(ttl=1800)
 def history14(td):
+
     rows = []
 
     for i in range(1, 15):
-        d = td - timedelta(days=i)
+
+        d = td - timedelta(
+            days=i
+        )
 
         if d < date(2026, 1, 1):
             continue
 
         try:
+
             data = get_data(d)
+
         except Exception:
+
             continue
 
         stadiums = (
-            data.get("programs", {})
+            data
+            .get("programs", {})
             .get("stadiums", {})
         )
 
         for sno, stadium in stadiums.items():
 
-            races = stadium.get("races", {})
+            races = stadium.get(
+                "races",
+                {}
+            )
 
             for rno, race in races.items():
 
-                result = race.get("result", {})
+                result = race.get(
+                    "result",
+                    {}
+                )
 
                 result_racers = result.get(
                     "racers",
@@ -105,7 +160,9 @@ def history14(td):
 
                 places = {}
 
-                for x in racers(result_racers):
+                for x in racers(
+                    result_racers
+                ):
 
                     place = str(
                         x.get(
@@ -114,7 +171,11 @@ def history14(td):
                         )
                     )
 
-                    if place in ("1", "2", "3"):
+                    if place in (
+                        "1",
+                        "2",
+                        "3",
+                    ):
 
                         places[place] = str(
                             x.get(
@@ -133,8 +194,9 @@ def history14(td):
 
                 if not isinstance(
                     race_racers,
-                    dict
+                    dict,
                 ):
+
                     continue
 
                 for lane in range(1, 7):
@@ -158,26 +220,222 @@ def history14(td):
                         continue
 
                     rows.append({
+
                         "日付": d,
+
                         "場": int(sno),
+
                         "レース": int(rno),
+
                         "枠": lane,
+
                         "選手番号": number,
+
                         "1着": int(
-                            number == places.get("1")
+                            number
+                            == places.get("1")
                         ),
+
                         "2着": int(
-                            number == places.get("2")
+                            number
+                            == places.get("2")
                         ),
+
                         "3着": int(
-                            number == places.get("3")
+                            number
+                            == places.get("3")
                         ),
                     })
 
     return rows
 
 
-def odds_url(td, sno, rno):
+# =========================
+# バックテスト用
+# =========================
+
+@st.cache_data(ttl=1800)
+def backtest_races(
+    start_date,
+    days=14,
+):
+
+    result_rows = []
+
+    for i in range(days):
+
+        d = (
+            start_date
+            - timedelta(days=i)
+        )
+
+        if d < date(2026, 1, 1):
+            continue
+
+        try:
+
+            data = get_data(d)
+
+        except Exception:
+
+            continue
+
+        stadiums = (
+            data
+            .get("programs", {})
+            .get("stadiums", {})
+        )
+
+        for sno, stadium in stadiums.items():
+
+            races = stadium.get(
+                "races",
+                {}
+            )
+
+            for rno, race in races.items():
+
+                result = race.get(
+                    "result",
+                    {}
+                )
+
+                result_racers = result.get(
+                    "racers",
+                    {}
+                )
+
+                places = {}
+
+                for x in racers(
+                    result_racers
+                ):
+
+                    place = str(
+                        x.get(
+                            "place_number",
+                            ""
+                        )
+                    )
+
+                    number = str(
+                        x.get(
+                            "number",
+                            ""
+                        )
+                    )
+
+                    if (
+                        place in (
+                            "1",
+                            "2",
+                            "3",
+                        )
+                        and number
+                    ):
+
+                        places[
+                            place
+                        ] = number
+
+                if len(places) < 3:
+                    continue
+
+                trifecta = (
+                    f"{places['1']}-"
+                    f"{places['2']}-"
+                    f"{places['3']}"
+                )
+
+                payout = 0
+
+                payouts = result.get(
+                    "payouts",
+                    {}
+                )
+
+                trifecta_payouts = (
+                    payouts.get(
+                        "trifecta",
+                        []
+                    )
+                )
+
+                if isinstance(
+                    trifecta_payouts,
+                    list,
+                ):
+
+                    for item in trifecta_payouts:
+
+                        if not isinstance(
+                            item,
+                            dict,
+                        ):
+                            continue
+
+                        combination = str(
+                            item.get(
+                                "combination",
+                                ""
+                            )
+                        )
+
+                        if combination == trifecta:
+
+                            try:
+
+                                payout = int(
+                                    item.get(
+                                        "amount",
+                                        0
+                                    )
+                                    or 0
+                                )
+
+                            except Exception:
+
+                                payout = 0
+
+                            break
+
+                result_rows.append({
+
+                    "日付": d,
+
+                    "場": int(sno),
+
+                    "レース": int(rno),
+
+                    "1着選手番号":
+                        places["1"],
+
+                    "2着選手番号":
+                        places["2"],
+
+                    "3着選手番号":
+                        places["3"],
+
+                    "実際の3連単":
+                        trifecta,
+
+                    "払戻金":
+                        payout,
+                })
+
+    return result_rows
+
+
+# =========================
+# オッズURL
+# =========================
+
+def odds_url(
+    td,
+    sno,
+    rno,
+):
+
     return (
         "https://www.boatrace.jp/"
         "owpc/pc/race/odds3t"
@@ -187,34 +445,48 @@ def odds_url(td, sno, rno):
     )
 
 
+# =========================
+# オッズ解析
+# =========================
+
 def parse_odds(value):
+
     if value is None:
         return None
 
-    text = str(value).strip()
+    text = (
+        str(value)
+        .strip()
+        .replace(",", "")
+    )
 
-    text = text.replace(",", "")
-
-    if not re.search(r"\d", text):
+    if not re.search(
+        r"\d",
+        text,
+    ):
         return None
 
     match = re.search(
         r"\d+(?:\.\d+)?",
-        text
+        text,
     )
 
     if not match:
         return None
 
     try:
+
         return float(
             match.group()
         )
+
     except Exception:
+
         return None
 
 
 def _cell_classes(cell):
+
     return cell.get(
         "class",
         []
@@ -222,6 +494,7 @@ def _cell_classes(cell):
 
 
 def _is_odds_cell(cell):
+
     return (
         "oddsPoint"
         in _cell_classes(cell)
@@ -229,23 +502,13 @@ def _is_odds_cell(cell):
 
 
 def _expand_table(table):
-    """
-    HTML tableをrowspan / colspan込みで
-    正確な2次元グリッドに展開する。
 
-    ここが今回の重要部分。
-
-    BOAT RACE公式の3連単表は
-    rowspanを大量に使用しているため、
-    単純にfind_all("td")するだけでは
-    組み合わせとオッズの対応が崩れる。
-    """
-
-    rows = table.find_all("tr")
+    rows = table.find_all(
+        "tr"
+    )
 
     grid = []
 
-    # 各行の各列に、rowspanで残っているセルを保持
     occupied = {}
 
     for r, tr in enumerate(rows):
@@ -254,64 +517,83 @@ def _expand_table(table):
 
         cells = tr.find_all(
             ["th", "td"],
-            recursive=False
+            recursive=False,
         )
 
         col = 0
 
         for cell in cells:
 
-            # すでにrowspanセルがある場所を飛ばす
-            while (r, col) in occupied:
+            while (
+                r,
+                col
+            ) in occupied:
+
                 row.append(
-                    occupied[(r, col)]
+                    occupied[
+                        (r, col)
+                    ]
                 )
+
                 col += 1
 
             rowspan = cell.get(
                 "rowspan",
-                "1"
+                "1",
             )
 
             colspan = cell.get(
                 "colspan",
-                "1"
+                "1",
             )
 
             try:
-                rowspan = int(rowspan)
-            except Exception:
+                rowspan = int(
+                    rowspan
+                )
+            except:
                 rowspan = 1
 
             try:
-                colspan = int(colspan)
-            except Exception:
+                colspan = int(
+                    colspan
+                )
+            except:
                 colspan = 1
 
-            # colspan分配置
-            for c in range(colspan):
+            for c in range(
+                colspan
+            ):
 
-                row.append(cell)
+                row.append(
+                    cell
+                )
 
-                # rowspan分を予約
                 if rowspan > 1:
 
                     for rr in range(
                         1,
-                        rowspan
+                        rowspan,
                     ):
 
                         occupied[
-                            (r + rr, col + c)
+                            (
+                                r + rr,
+                                col + c,
+                            )
                         ] = cell
 
                 col += 1
 
-        # 行末にもrowspanセルがある場合
-        while (r, col) in occupied:
+        while (
+            r,
+            col
+        ) in occupied:
 
             row.append(
-                occupied[(r, col)]
+                occupied[
+                    (r, col)
+                ]
             )
 
             col += 1
@@ -322,12 +604,10 @@ def _expand_table(table):
 
 
 def _find_odds_table(soup):
-    """
-    3連単120通りのオッズ表を探す。
-    """
 
-    # まず通常のtableを探す
-    tables = soup.find_all("table")
+    tables = soup.find_all(
+        "table"
+    )
 
     for table in tables:
 
@@ -347,7 +627,6 @@ def _find_odds_table(soup):
         if "3連単" in text:
             return table
 
-    # table1構造にも対応
     div_tables = soup.find_all(
         "div",
         class_="table1"
@@ -366,38 +645,16 @@ def _find_odds_table(soup):
     return None
 
 
-def _parse_official_odds_table(table):
-    """
-    公式3連単オッズ表を解析する。
+def _parse_official_odds_table(
+    table
+):
 
-    重要なのは、オッズだけを120個抜き出さないこと。
-
-    各ブロックについて、
-
-        1着
-        2着
-        3着
-        オッズ
-
-    の関係をrowspan展開後のグリッドから取得する。
-    """
-
-    grid = _expand_table(table)
+    grid = _expand_table(
+        table
+    )
 
     if not grid:
         return {}
-
-    # 3連単のデータ行を探す。
-    #
-    # 公式表はデータ部分が
-    # 20行 × 6ブロック
-    # になっている。
-    #
-    # 1ブロックは
-    #   2着
-    #   3着
-    #   オッズ
-    # の3列。
 
     data_rows = []
 
@@ -412,25 +669,31 @@ def _parse_official_odds_table(table):
 
             base = block * 3
 
-            second_cell = row[base]
-            third_cell = row[base + 1]
-            odds_cell = row[base + 2]
+            second_cell = row[
+                base
+            ]
 
-            if second_cell is None:
-                valid = False
-                break
+            third_cell = row[
+                base + 1
+            ]
 
-            if third_cell is None:
-                valid = False
-                break
+            odds_cell = row[
+                base + 2
+            ]
 
-            if odds_cell is None:
+            if (
+                second_cell is None
+                or third_cell is None
+                or odds_cell is None
+            ):
+
                 valid = False
                 break
 
             if not _is_odds_cell(
                 odds_cell
             ):
+
                 valid = False
                 break
 
@@ -442,13 +705,15 @@ def _parse_official_odds_table(table):
             )
 
             if odd is None:
+
                 valid = False
                 break
 
         if valid:
-            data_rows.append(row)
+            data_rows.append(
+                row
+            )
 
-    # 20行でなければ公式表として扱わない
     if len(data_rows) != 20:
         return {}
 
@@ -462,11 +727,17 @@ def _parse_official_odds_table(table):
 
             base = block * 3
 
-            second_cell = row[base]
+            second_cell = row[
+                base
+            ]
 
-            third_cell = row[base + 1]
+            third_cell = row[
+                base + 1
+            ]
 
-            odds_cell = row[base + 2]
+            odds_cell = row[
+                base + 2
+            ]
 
             second_text = (
                 second_cell.get_text(
@@ -489,29 +760,26 @@ def _parse_official_odds_table(table):
                 )
             )
 
-            # 2着
             second_match = re.search(
                 r"(?<!\d)([1-6])(?!\d)",
-                second_text
+                second_text,
             )
 
-            # 3着
             third_match = re.search(
                 r"(?<!\d)([1-6])(?!\d)",
-                third_text
+                third_text,
             )
 
             odd = parse_odds(
                 odds_text
             )
 
-            if second_match is None:
-                continue
+            if (
+                second_match is None
+                or third_match is None
+                or odd is None
+            ):
 
-            if third_match is None:
-                continue
-
-            if odd is None:
                 continue
 
             second = int(
@@ -522,65 +790,51 @@ def _parse_official_odds_table(table):
                 third_match.group(1)
             )
 
-            # 3艇すべて別であること
             if len({
                 first,
                 second,
-                third
+                third,
             }) != 3:
+
                 continue
 
             combination = (
-                f"{first}-{second}-{third}"
+                f"{first}-"
+                f"{second}-"
+                f"{third}"
             )
 
-            result[combination] = odd
+            result[
+                combination
+            ] = odd
 
-    # 120通りそろわなければ
-    # 間違った解析結果なので破棄
     if len(result) != 120:
         return {}
 
-    # 重複チェック
-    if len(set(result.keys())) != 120:
+    if len(
+        set(result.keys())
+    ) != 120:
+
         return {}
-
-    # すべて1〜6かチェック
-    for combination in result:
-
-        parts = combination.split("-")
-
-        if len(parts) != 3:
-            return {}
-
-        try:
-            numbers = [
-                int(parts[0]),
-                int(parts[1]),
-                int(parts[2]),
-            ]
-        except Exception:
-            return {}
-
-        if any(
-            n < 1 or n > 6
-            for n in numbers
-        ):
-            return {}
-
-        if len(set(numbers)) != 3:
-            return {}
 
     return result
 
 
+# =========================
+# オッズ取得
+# =========================
+
 @st.cache_data(ttl=20)
-def get_odds(td, sno, rno):
+def get_odds(
+    td,
+    sno,
+    rno,
+):
 
     url = odds_url(
         td,
         sno,
-        rno
+        rno,
     )
 
     session = make_session()
@@ -589,20 +843,24 @@ def get_odds(td, sno, rno):
 
         response = session.get(
             url,
-            timeout=30
+            timeout=30,
         )
 
         response.raise_for_status()
 
     except Exception:
+
         return {}
 
     html = response.text
 
-    if "データがありません" in html:
-        return {}
+    if (
+        "データがありません"
+        in html
+        or "中止"
+        in html
+    ):
 
-    if "中止" in html:
         return {}
 
     soup = BeautifulSoup(
@@ -617,8 +875,10 @@ def get_odds(td, sno, rno):
     if table is None:
         return {}
 
-    result = _parse_official_odds_table(
-        table
+    result = (
+        _parse_official_odds_table(
+            table
+        )
     )
 
     if len(result) != 120:
@@ -627,8 +887,16 @@ def get_odds(td, sno, rno):
     return result
 
 
+# =========================
+# オッズキャッシュ削除
+# =========================
+
 def clear_odds_cache():
+
     try:
+
         get_odds.clear()
+
     except Exception:
+
         pass

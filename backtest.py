@@ -3,19 +3,8 @@ from datetime import timedelta
 import pandas as pd
 import streamlit as st
 
+import data
 from ai import tri_ai
-from data import (
-    API_START_DATE,
-    STADIUM_NAMES,
-    all_races_for_date,
-    get_data,
-    get_result_order,
-    get_race_rows,
-    history14,
-    jst_today,
-    race_has_result,
-    stadium_name,
-)
 
 
 def _money(value):
@@ -24,10 +13,7 @@ def _money(value):
 
     try:
         text = str(value)
-        digits = "".join(
-            ch for ch in text
-            if ch.isdigit()
-        )
+        digits = "".join(ch for ch in text if ch.isdigit())
 
         if not digits:
             return None
@@ -55,66 +41,44 @@ def _normalize_combo(value):
         .replace(">", "-")
     )
 
-    digits = [
-        ch for ch in text
-        if ch in "123456"
-    ]
+    digits = [ch for ch in text if ch in "123456"]
 
     if len(digits) >= 3:
-        return "-".join(
-            digits[:3]
-        )
+        return "-".join(digits[:3])
 
     return text
 
 
 def _search_payout(value, prediction):
-    """
-    payoutsの形が多少違っても
-    3連単配当を探す。
-    """
-
-    target = _normalize_combo(
-        prediction
-    )
+    target = _normalize_combo(prediction)
 
     if isinstance(value, dict):
-        combination_keys = [
+        combination = None
+
+        for key in (
             "combination",
             "combo",
             "組合せ",
             "組み合わせ",
             "組合",
             "result",
-        ]
-
-        payout_keys = [
-            "payout",
-            "amount",
-            "払戻",
-            "払戻金",
-            "金額",
-        ]
-
-        combination = None
-
-        for key in combination_keys:
+        ):
             if key in value:
                 combination = value[key]
                 break
 
         if combination is not None:
-            if (
-                _normalize_combo(
-                    combination
-                )
-                == target
-            ):
-                for key in payout_keys:
+            if _normalize_combo(combination) == target:
+                for key in (
+                    "payout",
+                    "amount",
+                    "払戻",
+                    "払戻金",
+                    "金額",
+                ):
                     if key in value:
-                        money = _money(
-                            value[key]
-                        )
+                        money = _money(value[key])
+
                         if money is not None:
                             return money
 
@@ -127,9 +91,7 @@ def _search_payout(value, prediction):
             if found is not None:
                 return found
 
-        return None
-
-    if isinstance(value, list):
+    elif isinstance(value, list):
         for item in value:
             found = _search_payout(
                 item,
@@ -142,26 +104,14 @@ def _search_payout(value, prediction):
     return None
 
 
-def trifecta_payout(
-    race,
-    prediction,
-):
-    """
-    レース結果から3連単配当を取得。
-    """
-
+def trifecta_payout(race, prediction):
     if not isinstance(race, dict):
         return None
 
-    result = race.get(
-        "result",
-        {},
-    )
+    result = race.get("result", {})
 
     if not isinstance(result, dict):
         return None
-
-    payout_sources = []
 
     for key in (
         "payouts",
@@ -170,14 +120,11 @@ def trifecta_payout(
         "払戻",
         "payouts_list",
     ):
-        if key in result:
-            payout_sources.append(
-                result[key]
-            )
+        if key not in result:
+            continue
 
-    for source in payout_sources:
         found = _search_payout(
-            source,
+            result[key],
             prediction,
         )
 
@@ -193,33 +140,23 @@ def _history_from_cache(
     race_number,
     target_date,
 ):
-    """
-    バックテスト中は同じ日付データを
-    メモリキャッシュして高速化する。
-    """
-
     records = []
 
     for days_back in range(1, 15):
-        d = (
-            target_date
-            - timedelta(days=days_back)
-        )
+        d = target_date - timedelta(days=days_back)
 
-        if d < API_START_DATE:
+        if d < data.API_START_DATE:
             break
 
         if d not in raw_cache:
-            raw_cache[d] = get_data(d)
+            raw_cache[d] = data.get_data(d)
 
         raw = raw_cache.get(d)
 
         if not raw:
             continue
 
-        from data import get_race
-
-        race = get_race(
+        race = data.get_race(
             raw,
             stadium_number,
             race_number,
@@ -228,37 +165,27 @@ def _history_from_cache(
         if not race:
             continue
 
-        actual = get_result_order(
-            race
-        )
+        actual = data.get_result_order(race)
 
         if len(actual) < 3:
             continue
 
-        rows = get_race_rows(
-            race
-        )
+        rows = data.get_race_rows(race)
 
         if rows.empty:
             continue
 
         place_map = {
             boat: place + 1
-            for place, boat
-            in enumerate(actual)
+            for place, boat in enumerate(actual)
         }
 
         rows = rows.copy()
 
-        rows["着順"] = rows["枠"].map(
-            place_map
-        )
-
+        rows["着順"] = rows["枠"].map(place_map)
         rows["日付"] = d.isoformat()
 
-        rows = rows.dropna(
-            subset=["着順"]
-        )
+        rows = rows.dropna(subset=["着順"])
 
         if not rows.empty:
             records.append(rows)
@@ -276,44 +203,32 @@ def run_backtest(
     target_count,
     progress_callback=None,
 ):
-    """
-    2026-01-01まで遡って、
-    完了済みレースをtarget_count件集める。
-    """
-
-    target_count = int(
-        target_count
-    )
+    target_count = int(target_count)
 
     current_date = (
-        jst_today()
+        data.jst_today()
         - timedelta(days=1)
     )
 
     raw_cache = {}
-
     records = []
     scanned_days = 0
 
     while (
-        current_date >= API_START_DATE
+        current_date >= data.API_START_DATE
         and len(records) < target_count
     ):
         if current_date not in raw_cache:
-            raw_cache[current_date] = (
-                get_data(current_date)
+            raw_cache[current_date] = data.get_data(
+                current_date
             )
 
-        raw = raw_cache.get(
-            current_date
-        )
+        raw = raw_cache.get(current_date)
 
         scanned_days += 1
 
         if raw:
-            races = all_races_for_date(
-                raw
-            )
+            races = data.all_races_for_date(raw)
 
             for (
                 stadium_number,
@@ -324,34 +239,24 @@ def run_backtest(
                 if len(records) >= target_count:
                     break
 
-                # 結果がない開催中レースは除外
-                if not race_has_result(
-                    race
-                ):
+                if not data.race_has_result(race):
                     continue
 
-                rows = get_race_rows(
-                    race
-                )
+                rows = data.get_race_rows(race)
 
                 if rows.empty:
                     continue
 
-                actual = get_result_order(
-                    race
-                )
+                actual = data.get_result_order(race)
 
                 if len(actual) < 3:
                     continue
 
-                # 現在レースより前の履歴だけを使う
-                history = (
-                    _history_from_cache(
-                        raw_cache,
-                        stadium_number,
-                        race_number,
-                        current_date,
-                    )
+                history = _history_from_cache(
+                    raw_cache,
+                    stadium_number,
+                    race_number,
+                    current_date,
                 )
 
                 try:
@@ -363,23 +268,13 @@ def run_backtest(
                 except Exception:
                     continue
 
-                main = int(
-                    prediction["main"]
-                )
-
-                counter = int(
-                    prediction["counter"]
-                )
-
-                hole = int(
-                    prediction["hole"]
-                )
+                main = int(prediction["main"])
+                counter = int(prediction["counter"])
+                hole = int(prediction["hole"])
 
                 ranking = [
                     int(x)
-                    for x in prediction[
-                        "ranking"
-                    ][:3]
+                    for x in prediction["ranking"][:3]
                 ]
 
                 actual_top3 = [
@@ -387,17 +282,12 @@ def run_backtest(
                     for x in actual[:3]
                 ]
 
-                main_win = (
-                    main == actual[0]
-                )
+                main_win = main == actual[0]
 
-                main_top3 = (
-                    main in actual_top3
-                )
+                main_top3 = main in actual_top3
 
                 ai_top3_coverage = (
-                    set(ranking)
-                    == set(actual_top3)
+                    set(ranking) == set(actual_top3)
                 )
 
                 predicted_trifecta = (
@@ -416,17 +306,15 @@ def run_backtest(
                 payout = None
 
                 if trifecta_hit:
-                    payout = (
-                        trifecta_payout(
-                            race,
-                            predicted_trifecta,
-                        )
+                    payout = trifecta_payout(
+                        race,
+                        predicted_trifecta,
                     )
 
                 records.append(
                     {
                         "日付": current_date.isoformat(),
-                        "場": stadium_name(
+                        "場": data.stadium_name(
                             stadium_number
                         ),
                         "場番号": stadium_number,
@@ -435,31 +323,19 @@ def run_backtest(
                         "対抗": counter,
                         "穴": hole,
                         "AI上位3艇": "-".join(
-                            map(
-                                str,
-                                ranking,
-                            )
+                            map(str, ranking)
                         ),
                         "実着順": "-".join(
-                            map(
-                                str,
-                                actual,
-                            )
+                            map(str, actual)
                         ),
                         "本命1着": main_win,
                         "本命3連対": main_top3,
                         "上位3艇完全一致": (
                             ai_top3_coverage
                         ),
-                        "3連単的中": (
-                            trifecta_hit
-                        ),
-                        "予想3連単": (
-                            predicted_trifecta
-                        ),
-                        "実際3連単": (
-                            actual_trifecta
-                        ),
+                        "3連単的中": trifecta_hit,
+                        "予想3連単": predicted_trifecta,
+                        "実際3連単": actual_trifecta,
                         "3連単配当": payout,
                     }
                 )
@@ -475,17 +351,13 @@ def run_backtest(
 
         current_date -= timedelta(days=1)
 
-    result_df = pd.DataFrame(
-        records
-    )
+    result_df = pd.DataFrame(records)
 
     return {
         "data": result_df,
         "count": len(records),
         "scanned_days": scanned_days,
-        "completed": (
-            len(records) >= target_count
-        ),
+        "completed": len(records) >= target_count,
     }
 
 
@@ -493,10 +365,7 @@ def _rate(series):
     if len(series) == 0:
         return 0.0
 
-    return (
-        float(series.mean())
-        * 100
-    )
+    return float(series.mean()) * 100
 
 
 def calculate_metrics(result_df):
@@ -532,17 +401,12 @@ def calculate_metrics(result_df):
 
     if len(valid_payouts) > 0:
         total_return = (
-            valid_payouts[
-                "3連単配当"
-            ]
+            valid_payouts["3連単配当"]
             .astype(float)
             .sum()
         )
 
-        # 1レース100円投資として計算
-        total_bet = (
-            len(result_df) * 100
-        )
+        total_bet = len(result_df) * 100
 
         roi = (
             total_return
@@ -587,9 +451,7 @@ def calculate_metrics(result_df):
 def render_backtest():
     st.markdown("---")
 
-    st.markdown(
-        "## 📊 AIバックテスト"
-    )
+    st.markdown("## 📊 AIバックテスト")
 
     st.caption(
         "2026-01-01まで自動で遡り、完了済みレースを検証します。"
@@ -598,9 +460,7 @@ def render_backtest():
     target_count = st.selectbox(
         "検証するレース数",
         [100, 300, 500, 1000],
-        format_func=lambda x: (
-            f"{x}レース"
-        ),
+        format_func=lambda x: f"{x}レース",
         key="backtest_count",
     )
 
@@ -631,13 +491,11 @@ def render_backtest():
             1.0,
         )
 
-        progress.progress(
-            ratio
-        )
+        progress.progress(ratio)
 
         status.markdown(
             f"🔄 {d.isoformat()} "
-            f"{stadium_name(stadium_number)} "
+            f"{data.stadium_name(stadium_number)} "
             f"{race_number}Rを検証中"
         )
 
@@ -645,9 +503,7 @@ def render_backtest():
             f"**{done} / {total} レース**"
         )
 
-        blocks = int(
-            ratio * 20
-        )
+        blocks = int(ratio * 20)
 
         boat_text.markdown(
             "🚤"
@@ -677,9 +533,7 @@ def render_backtest():
 
         return
 
-    metrics = calculate_metrics(
-        result_df
-    )
+    metrics = calculate_metrics(result_df)
 
     status.success(
         f"✅ {result['count']}レースの検証が完了しました。"
@@ -755,9 +609,7 @@ def render_backtest():
     ]
 
     st.dataframe(
-        result_df[
-            display_columns
-        ],
+        result_df[display_columns],
         use_container_width=True,
         height=450,
-        )
+                )

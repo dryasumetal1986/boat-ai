@@ -216,9 +216,16 @@ def backtest_races(start_date, days=14):
                     {},
                 )
 
-                places = {}
+                result_list = racers(
+                    result_racers
+                )
 
-                for x in racers(result_racers):
+                if len(result_list) < 3:
+                    continue
+
+                finishers = {}
+
+                for x in result_list:
 
                     place = str(
                         x.get(
@@ -227,6 +234,9 @@ def backtest_races(start_date, days=14):
                         )
                     )
 
+                    if place not in ("1", "2", "3"):
+                        continue
+
                     course = str(
                         x.get(
                             "course_number",
@@ -234,26 +244,46 @@ def backtest_races(start_date, days=14):
                         )
                     )
 
-                    if (
-                        place in ("1", "2", "3")
-                        and course in (
-                            "1",
-                            "2",
-                            "3",
-                            "4",
-                            "5",
-                            "6",
+                    number = str(
+                        x.get(
+                            "number",
+                            "",
                         )
-                    ):
-                        places[place] = course
+                    )
 
-                if len(places) < 3:
+                    name = str(
+                        x.get(
+                            "name",
+                            "",
+                        )
+                    )
+
+                    if course not in (
+                        "1",
+                        "2",
+                        "3",
+                        "4",
+                        "5",
+                        "6",
+                    ):
+                        continue
+
+                    finishers[place] = {
+                        "course": course,
+                        "number": number,
+                        "name": name,
+                    }
+
+                if not all(
+                    p in finishers
+                    for p in ("1", "2", "3")
+                ):
                     continue
 
                 actual = (
-                    f"{places['1']}-"
-                    f"{places['2']}-"
-                    f"{places['3']}"
+                    f"{finishers['1']['course']}-"
+                    f"{finishers['2']['course']}-"
+                    f"{finishers['3']['course']}"
                 )
 
                 payout = 0
@@ -263,7 +293,10 @@ def backtest_races(start_date, days=14):
                     {},
                 )
 
-                if isinstance(payouts, dict):
+                if isinstance(
+                    payouts,
+                    dict,
+                ):
 
                     trifecta = payouts.get(
                         "trifecta",
@@ -290,7 +323,14 @@ def backtest_races(start_date, days=14):
                                 )
                             )
 
-                            if combination == actual:
+                            normalized = (
+                                combination
+                                .replace("→", "-")
+                                .replace("－", "-")
+                                .replace(" ", "")
+                            )
+
+                            if normalized == actual:
 
                                 try:
                                     payout = int(
@@ -309,8 +349,39 @@ def backtest_races(start_date, days=14):
                     "日付": d,
                     "場": int(sno),
                     "レース": int(rno),
-                    "実際の3連単": actual,
-                    "払戻金": payout,
+
+                    "1着コース":
+                        finishers["1"]["course"],
+
+                    "1着選手":
+                        finishers["1"]["name"],
+
+                    "1着選手番号":
+                        finishers["1"]["number"],
+
+                    "2着コース":
+                        finishers["2"]["course"],
+
+                    "2着選手":
+                        finishers["2"]["name"],
+
+                    "2着選手番号":
+                        finishers["2"]["number"],
+
+                    "3着コース":
+                        finishers["3"]["course"],
+
+                    "3着選手":
+                        finishers["3"]["name"],
+
+                    "3着選手番号":
+                        finishers["3"]["number"],
+
+                    "実際の3連単":
+                        actual,
+
+                    "払戻金":
+                        payout,
                 })
 
     return rows
@@ -338,7 +409,10 @@ def parse_odds(value):
         .replace(",", "")
     )
 
-    if not re.search(r"\d", text):
+    if not re.search(
+        r"\d",
+        text,
+    ):
         return None
 
     match = re.search(
@@ -350,17 +424,25 @@ def parse_odds(value):
         return None
 
     try:
-        return float(match.group())
+        return float(
+            match.group()
+        )
     except Exception:
         return None
 
 
 def _cell_classes(cell):
-    return cell.get("class", [])
+    return cell.get(
+        "class",
+        [],
+    )
 
 
 def _is_odds_cell(cell):
-    return "oddsPoint" in _cell_classes(cell)
+    return (
+        "oddsPoint"
+        in _cell_classes(cell)
+    )
 
 
 def _expand_table(table):
@@ -368,6 +450,7 @@ def _expand_table(table):
     rows = table.find_all("tr")
 
     grid = []
+
     occupied = {}
 
     for r, tr in enumerate(rows):
@@ -383,46 +466,70 @@ def _expand_table(table):
 
         for cell in cells:
 
-            while (r, col) in occupied:
+            while (
+                r,
+                col,
+            ) in occupied:
 
                 row.append(
-                    occupied[(r, col)]
+                    occupied[
+                        (r, col)
+                    ]
                 )
 
                 col += 1
 
             try:
                 rowspan = int(
-                    cell.get("rowspan", "1")
+                    cell.get(
+                        "rowspan",
+                        "1",
+                    )
                 )
             except Exception:
                 rowspan = 1
 
             try:
                 colspan = int(
-                    cell.get("colspan", "1")
+                    cell.get(
+                        "colspan",
+                        "1",
+                    )
                 )
             except Exception:
                 colspan = 1
 
-            for c in range(colspan):
+            for c in range(
+                colspan
+            ):
 
                 row.append(cell)
 
                 if rowspan > 1:
 
-                    for rr in range(1, rowspan):
+                    for rr in range(
+                        1,
+                        rowspan,
+                    ):
 
                         occupied[
-                            (r + rr, col + c)
+                            (
+                                r + rr,
+                                col + c,
+                            )
                         ] = cell
 
                 col += 1
 
-        while (r, col) in occupied:
+        while (
+            r,
+            col,
+        ) in occupied:
 
             row.append(
-                occupied[(r, col)]
+                occupied[
+                    (r, col)
+                ]
             )
 
             col += 1
@@ -434,7 +541,9 @@ def _expand_table(table):
 
 def _find_odds_table(soup):
 
-    tables = soup.find_all("table")
+    tables = soup.find_all(
+        "table"
+    )
 
     for table in tables:
 
@@ -443,7 +552,9 @@ def _find_odds_table(soup):
             class_="oddsPoint",
         )
 
-        if len(odds_cells) != 120:
+        if len(
+            odds_cells
+        ) != 120:
             continue
 
         text = table.get_text(
@@ -466,7 +577,10 @@ def _find_odds_table(soup):
             class_="oddsPoint",
         )
 
-        if len(odds_cells) == 120:
+        if len(
+            odds_cells
+        ) == 120:
+
             return table
 
     return None
@@ -501,10 +615,14 @@ def _parse_official_odds_table(table):
                 or third_cell is None
                 or odds_cell is None
             ):
+
                 valid = False
                 break
 
-            if not _is_odds_cell(odds_cell):
+            if not _is_odds_cell(
+                odds_cell
+            ):
+
                 valid = False
                 break
 
@@ -516,13 +634,17 @@ def _parse_official_odds_table(table):
             )
 
             if odd is None:
+
                 valid = False
                 break
 
         if valid:
             data_rows.append(row)
 
-    if len(data_rows) != 20:
+    if len(
+        data_rows
+    ) != 20:
+
         return {}
 
     result = {}
@@ -532,25 +654,32 @@ def _parse_official_odds_table(table):
         for block in range(6):
 
             first = block + 1
+
             base = block * 3
 
             second_cell = row[base]
             third_cell = row[base + 1]
             odds_cell = row[base + 2]
 
-            second_text = second_cell.get_text(
-                " ",
-                strip=True,
+            second_text = (
+                second_cell.get_text(
+                    " ",
+                    strip=True,
+                )
             )
 
-            third_text = third_cell.get_text(
-                " ",
-                strip=True,
+            third_text = (
+                third_cell.get_text(
+                    " ",
+                    strip=True,
+                )
             )
 
-            odds_text = odds_cell.get_text(
-                " ",
-                strip=True,
+            odds_text = (
+                odds_cell.get_text(
+                    " ",
+                    strip=True,
+                )
             )
 
             second_match = re.search(
@@ -563,7 +692,9 @@ def _parse_official_odds_table(table):
                 third_text,
             )
 
-            odd = parse_odds(odds_text)
+            odd = parse_odds(
+                odds_text
+            )
 
             if (
                 second_match is None
@@ -585,6 +716,7 @@ def _parse_official_odds_table(table):
                 second,
                 third,
             }) != 3:
+
                 continue
 
             combination = (
@@ -593,7 +725,9 @@ def _parse_official_odds_table(table):
                 f"{third}"
             )
 
-            result[combination] = odd
+            result[
+                combination
+            ] = odd
 
     if len(result) != 120:
         return {}
@@ -604,7 +738,11 @@ def _parse_official_odds_table(table):
 @st.cache_data(ttl=20)
 def get_odds(td, sno, rno):
 
-    url = odds_url(td, sno, rno)
+    url = odds_url(
+        td,
+        sno,
+        rno,
+    )
 
     session = make_session()
 
@@ -624,9 +762,12 @@ def get_odds(td, sno, rno):
     html = response.text
 
     if (
-        "データがありません" in html
-        or "中止" in html
+        "データがありません"
+        in html
+        or "中止"
+        in html
     ):
+
         return {}
 
     soup = BeautifulSoup(
@@ -634,13 +775,17 @@ def get_odds(td, sno, rno):
         "html.parser",
     )
 
-    table = _find_odds_table(soup)
+    table = _find_odds_table(
+        soup
+    )
 
     if table is None:
         return {}
 
-    result = _parse_official_odds_table(
-        table
+    result = (
+        _parse_official_odds_table(
+            table
+        )
     )
 
     if len(result) != 120:

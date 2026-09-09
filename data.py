@@ -180,6 +180,163 @@ def history14(td):
     return rows
 
 
+def normalize_combination(value):
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+
+    text = (
+        text
+        .replace("→", "-")
+        .replace("－", "-")
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("=", "-")
+        .replace("＝", "-")
+        .replace(" ", "")
+        .replace("　", "")
+    )
+
+    match = re.search(
+        r"([1-6])[^1-6]*([1-6])[^1-6]*([1-6])",
+        text,
+    )
+
+    if match:
+
+        return (
+            f"{match.group(1)}-"
+            f"{match.group(2)}-"
+            f"{match.group(3)}"
+        )
+
+    digits = re.sub(
+        r"[^1-6]",
+        "",
+        text,
+    )
+
+    if len(digits) == 3:
+
+        return (
+            f"{digits[0]}-"
+            f"{digits[1]}-"
+            f"{digits[2]}"
+        )
+
+    return ""
+
+
+def parse_payout_amount(value):
+    if value is None:
+        return 0
+
+    if isinstance(value, bool):
+        return 0
+
+    try:
+
+        if isinstance(value, (int, float)):
+
+            return int(value)
+
+        text = (
+            str(value)
+            .strip()
+            .replace(",", "")
+            .replace("円", "")
+            .replace("¥", "")
+            .replace("￥", "")
+            .replace("　", "")
+            .replace(" ", "")
+        )
+
+        match = re.search(
+            r"\d+",
+            text,
+        )
+
+        if not match:
+            return 0
+
+        return int(
+            match.group()
+        )
+
+    except Exception:
+
+        return 0
+
+
+def find_trifecta_payout(result, actual):
+    actual = normalize_combination(actual)
+
+    if not actual:
+        return 0
+
+    payouts = result.get(
+        "payouts",
+        {},
+    )
+
+    if not isinstance(
+        payouts,
+        dict,
+    ):
+        return 0
+
+    trifecta = payouts.get(
+        "trifecta",
+        [],
+    )
+
+    if isinstance(
+        trifecta,
+        dict,
+    ):
+
+        trifecta = list(
+            trifecta.values()
+        )
+
+    if not isinstance(
+        trifecta,
+        list,
+    ):
+        trifecta = [trifecta]
+
+    for item in trifecta:
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        combination = normalize_combination(
+            item.get(
+                "combination",
+                "",
+            )
+        )
+
+        if combination != actual:
+            continue
+
+        amount = parse_payout_amount(
+            item.get(
+                "amount",
+                0,
+            )
+        )
+
+        if amount > 0:
+            return amount
+
+    return 0
+
+
 @st.cache_data(ttl=1800)
 def backtest_races(start_date, days=14):
 
@@ -205,11 +362,17 @@ def backtest_races(start_date, days=14):
 
         for sno, stadium in stadiums.items():
 
-            races = stadium.get("races", {})
+            races = stadium.get(
+                "races",
+                {},
+            )
 
             for rno, race in races.items():
 
-                result = race.get("result", {})
+                result = race.get(
+                    "result",
+                    {},
+                )
 
                 result_racers = result.get(
                     "racers",
@@ -234,7 +397,11 @@ def backtest_races(start_date, days=14):
                         )
                     )
 
-                    if place not in ("1", "2", "3"):
+                    if place not in (
+                        "1",
+                        "2",
+                        "3",
+                    ):
                         continue
 
                     course = str(
@@ -276,7 +443,11 @@ def backtest_races(start_date, days=14):
 
                 if not all(
                     p in finishers
-                    for p in ("1", "2", "3")
+                    for p in (
+                        "1",
+                        "2",
+                        "3",
+                    )
                 ):
                     continue
 
@@ -286,68 +457,16 @@ def backtest_races(start_date, days=14):
                     f"{finishers['3']['course']}"
                 )
 
-                payout = 0
-
-                payouts = result.get(
-                    "payouts",
-                    {},
+                payout = find_trifecta_payout(
+                    result,
+                    actual,
                 )
-
-                if isinstance(
-                    payouts,
-                    dict,
-                ):
-
-                    trifecta = payouts.get(
-                        "trifecta",
-                        [],
-                    )
-
-                    if isinstance(
-                        trifecta,
-                        list,
-                    ):
-
-                        for item in trifecta:
-
-                            if not isinstance(
-                                item,
-                                dict,
-                            ):
-                                continue
-
-                            combination = str(
-                                item.get(
-                                    "combination",
-                                    "",
-                                )
-                            )
-
-                            normalized = (
-                                combination
-                                .replace("→", "-")
-                                .replace("－", "-")
-                                .replace(" ", "")
-                            )
-
-                            if normalized == actual:
-
-                                try:
-                                    payout = int(
-                                        item.get(
-                                            "amount",
-                                            0,
-                                        )
-                                        or 0
-                                    )
-                                except Exception:
-                                    payout = 0
-
-                                break
 
                 rows.append({
                     "日付": d,
+
                     "場": int(sno),
+
                     "レース": int(rno),
 
                     "1着コース":

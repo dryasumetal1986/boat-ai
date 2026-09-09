@@ -42,10 +42,8 @@ st.markdown(
         background: rgba(244,247,251,0.96);
     }
 
-    /* ---------- title ---------- */
-
     .pro-title {
-        color: #0f172a;
+        color: #0f172a !important;
         font-size: 30px;
         font-weight: 950;
         line-height: 1.25;
@@ -53,7 +51,7 @@ st.markdown(
     }
 
     .pro-subtitle {
-        color: #64748b;
+        color: #64748b !important;
         font-size: 13px;
         font-weight: 700;
         margin-bottom: 14px;
@@ -62,7 +60,7 @@ st.markdown(
     .today-badge {
         display: inline-block;
         background: #eaf2ff;
-        color: #1458c5;
+        color: #1458c5 !important;
         border: 1px solid #c8dcff;
         border-radius: 999px;
         padding: 7px 13px;
@@ -71,17 +69,13 @@ st.markdown(
         margin-bottom: 20px;
     }
 
-    /* ---------- labels ---------- */
-
     .section-title {
-        color: #0f172a;
+        color: #0f172a !important;
         font-size: 14px;
         font-weight: 900;
         margin-top: 8px;
         margin-bottom: 6px;
     }
-
-    /* ---------- selectbox ---------- */
 
     div[data-testid="stSelectbox"] label {
         color: #0f172a !important;
@@ -101,8 +95,6 @@ st.markdown(
         color: #111827 !important;
     }
 
-    /* ---------- buttons ---------- */
-
     div[data-testid="stButton"] button {
         width: 100%;
         min-height: 52px;
@@ -111,11 +103,9 @@ st.markdown(
         font-weight: 950;
     }
 
-    /* ---------- race header ---------- */
-
     .race-header {
         background: #0f172a;
-        color: #ffffff;
+        color: #ffffff !important;
         border-radius: 14px;
         padding: 14px 16px;
         margin-top: 20px;
@@ -123,8 +113,6 @@ st.markdown(
         font-size: 20px;
         font-weight: 950;
     }
-
-    /* ---------- boats ---------- */
 
     .boat-list {
         background: #ffffff;
@@ -140,7 +128,7 @@ st.markdown(
         min-height: 44px;
         padding: 0 14px;
         border-bottom: 1px solid #edf1f5;
-        color: #1e293b;
+        color: #1e293b !important;
         font-size: 14px;
         font-weight: 750;
     }
@@ -151,11 +139,9 @@ st.markdown(
 
     .boat-number {
         width: 42px;
-        color: #2563eb;
+        color: #2563eb !important;
         font-weight: 950;
     }
-
-    /* ---------- predictions ---------- */
 
     .prediction-box {
         background: #ffffff;
@@ -178,24 +164,22 @@ st.markdown(
     }
 
     .prediction-label {
-        color: #64748b;
+        color: #64748b !important;
         font-size: 13px;
         font-weight: 900;
         margin-bottom: 4px;
     }
 
     .prediction-value {
-        color: #0f172a;
+        color: #0f172a !important;
         font-size: 25px;
         font-weight: 950;
         letter-spacing: 1px;
     }
 
-    /* ---------- confidence ---------- */
-
     .confidence-box {
         background: #0f172a;
-        color: #ffffff;
+        color: #ffffff !important;
         border-radius: 14px;
         padding: 16px;
         text-align: center;
@@ -203,17 +187,16 @@ st.markdown(
     }
 
     .confidence-title {
-        color: #cbd5e1;
+        color: #cbd5e1 !important;
         font-size: 12px;
         font-weight: 750;
     }
 
     .confidence-stars {
+        color: #ffffff !important;
         font-size: 24px;
         letter-spacing: 3px;
     }
-
-    /* ---------- expander ---------- */
 
     div[data-testid="stExpander"] {
         background: #ffffff !important;
@@ -223,13 +206,10 @@ st.markdown(
         overflow: hidden;
     }
 
-    div[data-testid="stExpander"] summary {
-        color: #0f172a !important;
-        font-weight: 900 !important;
-    }
-
+    div[data-testid="stExpander"] summary,
     div[data-testid="stExpander"] summary span {
         color: #0f172a !important;
+        font-weight: 900 !important;
     }
 
     @media (max-width: 640px) {
@@ -249,6 +229,7 @@ st.markdown(
         .prediction-value {
             font-size: 22px;
         }
+
     }
 
     </style>
@@ -351,7 +332,7 @@ selected_race = st.selectbox(
 
 
 # =========================================================
-# 選択されたレースを取得
+# 選択レース取得
 # =========================================================
 
 race = None
@@ -369,69 +350,7 @@ if raw_today:
 
 
 # =========================================================
-# レース情報を選択時点で表示
-# =========================================================
-
-if race:
-
-    try:
-        race_rows_preview = data.get_race_rows(
-            race,
-            selected_stadium_no,
-            selected_race,
-        )
-    except TypeError:
-        try:
-            race_rows_preview = data.get_race_rows(race)
-        except Exception:
-            race_rows_preview = None
-    except Exception:
-        race_rows_preview = None
-
-    if (
-        race_rows_preview is not None
-        and len(race_rows_preview) == 6
-    ):
-
-        st.markdown(
-            f"""
-            <div class="race-header">
-                {selected_stadium_name} {selected_race}R
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        boat_html = '<div class="boat-list">'
-
-        for _, row in race_rows_preview.iterrows():
-
-            lane = row.get("枠", "")
-
-            name = (
-                row.get("選手名")
-                or row.get("選手")
-                or row.get("名前")
-                or "選手"
-            )
-
-            boat_html += (
-                '<div class="boat-row">'
-                f'<div class="boat-number">{lane}号艇</div>'
-                f'<div>{name}</div>'
-                '</div>'
-            )
-
-        boat_html += "</div>"
-
-        st.markdown(
-            boat_html,
-            unsafe_allow_html=True,
-        )
-
-
-# =========================================================
-# AI予想
+# AI予想ボタン
 # =========================================================
 
 predict_clicked = st.button(
@@ -440,6 +359,10 @@ predict_clicked = st.button(
     use_container_width=True,
 )
 
+
+# =========================================================
+# AI予想
+# =========================================================
 
 if predict_clicked:
 
@@ -456,26 +379,16 @@ if predict_clicked:
         )
         st.stop()
 
-    try:
-        valid = data.validate_race(
-            race,
-            selected_stadium_no,
-            selected_race,
-            target_date,
-        )
-    except TypeError:
+    # -----------------------------------------------------
+    # レース検証
+    # -----------------------------------------------------
 
-        try:
-            valid = data.validate_race(
-                race,
-                selected_stadium_no,
-                selected_race,
-            )
-        except Exception:
-            valid = True
-
-    except Exception:
-        valid = False
+    valid = data.validate_race(
+        race,
+        target_date=target_date,
+        stadium_no=selected_stadium_no,
+        race_no=selected_race,
+    )
 
     if not valid:
         st.warning(
@@ -483,14 +396,27 @@ if predict_clicked:
         )
         st.stop()
 
+    # -----------------------------------------------------
+    # 6艇データ
+    # -----------------------------------------------------
+
     try:
+
         race_rows = data.get_race_rows(
             race,
             selected_stadium_no,
             selected_race,
         )
+
     except TypeError:
-        race_rows = data.get_race_rows(race)
+
+        race_rows = data.get_race_rows(
+            race
+        )
+
+    except Exception:
+
+        race_rows = None
 
     if race_rows is None or len(race_rows) != 6:
         st.warning(
@@ -498,32 +424,90 @@ if predict_clicked:
         )
         st.stop()
 
+    # -----------------------------------------------------
+    # ここから初めて選手を表示
+    # -----------------------------------------------------
+
+    st.markdown(
+        f"""
+        <div class="race-header">
+            {selected_stadium_name} {selected_race}R
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    boat_html = '<div class="boat-list">'
+
+    for _, row in race_rows.iterrows():
+
+        lane = row.get("枠", "")
+
+        name = (
+            row.get("選手名")
+            or row.get("選手")
+            or row.get("名前")
+            or f"{lane}号艇"
+        )
+
+        boat_html += (
+            '<div class="boat-row">'
+            f'<div class="boat-number">{lane}号艇</div>'
+            f'<div>{name}</div>'
+            '</div>'
+        )
+
+    boat_html += "</div>"
+
+    st.markdown(
+        boat_html,
+        unsafe_allow_html=True,
+    )
+
+    # -----------------------------------------------------
+    # 過去14日
+    # -----------------------------------------------------
+
     try:
         history = data.history14(target_date)
     except Exception:
         history = None
 
+    # -----------------------------------------------------
+    # AI
+    # -----------------------------------------------------
+
     try:
+
         prediction = tri_ai(
             race_rows,
             history,
         )
+
     except Exception as e:
+
         st.error(
             "AI予想の計算中にエラーが発生しました。"
         )
+
         st.exception(e)
+
         st.stop()
 
-    # 新形式
+    # -----------------------------------------------------
+    # 予想形式
+    # -----------------------------------------------------
+
     if isinstance(prediction, dict):
 
         main = prediction.get("main", [])
         counter = prediction.get("counter", [])
         hole = prediction.get("hole", [])
-        boat_probs = prediction.get("boat_probs", {})
+        boat_probs = prediction.get(
+            "boat_probs",
+            {},
+        )
 
-    # 旧形式
     elif isinstance(prediction, tuple):
 
         combinations = (
@@ -563,6 +547,10 @@ if predict_clicked:
         hole = []
         boat_probs = {}
 
+    # -----------------------------------------------------
+    # 組み合わせ表示
+    # -----------------------------------------------------
+
     def combo_text(combo):
 
         if not combo:
@@ -576,7 +564,10 @@ if predict_clicked:
     st.markdown(
         f"""
         <div class="prediction-box main-box">
-            <div class="prediction-label">🎯 本命</div>
+            <div class="prediction-label">
+                🎯 本命
+            </div>
+
             <div class="prediction-value">
                 {combo_text(main)}
             </div>
@@ -588,7 +579,10 @@ if predict_clicked:
     st.markdown(
         f"""
         <div class="prediction-box counter-box">
-            <div class="prediction-label">🔥 対抗</div>
+            <div class="prediction-label">
+                🔥 対抗
+            </div>
+
             <div class="prediction-value">
                 {combo_text(counter)}
             </div>
@@ -600,7 +594,10 @@ if predict_clicked:
     st.markdown(
         f"""
         <div class="prediction-box hole-box">
-            <div class="prediction-label">💥 穴</div>
+            <div class="prediction-label">
+                💥 穴
+            </div>
+
             <div class="prediction-value">
                 {combo_text(hole)}
             </div>
@@ -609,39 +606,55 @@ if predict_clicked:
         unsafe_allow_html=True,
     )
 
+    # -----------------------------------------------------
     # 自信度
+    # -----------------------------------------------------
+
     confidence = 0.0
 
-    if isinstance(boat_probs, dict) and boat_probs:
+    if (
+        isinstance(boat_probs, dict)
+        and boat_probs
+    ):
 
         try:
+
             confidence = max(
                 float(v)
                 for v in boat_probs.values()
             )
+
         except Exception:
+
             confidence = 0.0
 
     if confidence >= 0.35:
         stars = "★★★★★"
+
     elif confidence >= 0.28:
         stars = "★★★★☆"
+
     elif confidence >= 0.22:
         stars = "★★★☆☆"
+
     elif confidence >= 0.16:
         stars = "★★☆☆☆"
+
     else:
         stars = "★☆☆☆☆"
 
     st.markdown(
         f"""
         <div class="confidence-box">
+
             <div class="confidence-title">
                 AI自信度
             </div>
+
             <div class="confidence-stars">
                 {stars}
             </div>
+
         </div>
         """,
         unsafe_allow_html=True,

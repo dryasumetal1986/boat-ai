@@ -8,12 +8,14 @@ import data
 from ai import tri_ai
 
 
-RACE_OPTIONS = [100, 300, 500, 1000]
 JST = ZoneInfo("Asia/Tokyo")
+RACE_OPTIONS = [100, 300, 500, 1000]
 
 
-def combo_text(x):
-    return "—" if not x else "-".join(map(str, x))
+def combo(x):
+    if not x:
+        return "—"
+    return "-".join(map(str, x))
 
 
 def stars(x):
@@ -29,11 +31,14 @@ def stars(x):
 
 
 def normalize(p):
+
     if isinstance(p, dict):
         return p
 
     if isinstance(p, tuple):
+
         c = p[0] if len(p) else []
+
         return {
             "main": c[0] if len(c) > 0 else [],
             "counter": c[1] if len(c) > 1 else [],
@@ -49,118 +54,295 @@ def normalize(p):
     }
 
 
-def completed(raw):
-    out = []
+def get_completed(raw):
+
+    result = []
 
     if not isinstance(raw, dict):
-        return out
+        return result
 
-    stadiums = raw.get("programs", {}).get("stadiums", {})
+    stadiums = (
+        raw.get("programs", {})
+        .get("stadiums", {})
+    )
 
     for sk, stadium in stadiums.items():
+
         try:
             sn = int(sk)
         except Exception:
             continue
 
-        for rk, race in stadium.get("races", {}).items():
-            try:
-                rn = int(rk)
-                result = data.get_result_order(raw, sn, rn)
-                rows = data.get_race_rows(race, sn, rn)
+        for rk, race in stadium.get(
+            "races", {}
+        ).items():
 
-                if result and len(result) >= 3 and len(rows) == 6:
-                    out.append((sn, rn, race))
+            try:
+
+                rn = int(rk)
+
+                actual = data.get_result_order(
+                    raw,
+                    sn,
+                    rn,
+                )
+
+                rows = data.get_race_rows(
+                    race,
+                    sn,
+                    rn,
+                )
+
+                if (
+                    actual
+                    and len(actual) >= 3
+                    and len(rows) == 6
+                ):
+                    result.append(
+                        (sn, rn, race)
+                    )
 
             except Exception:
                 continue
 
-    return sorted(out, key=lambda x: (x[1], x[0]))
+    return sorted(
+        result,
+        key=lambda x: (x[1], x[0]),
+    )
 
 
-def evaluate(raw, sn, rn, race, history):
+def evaluate(
+    raw,
+    sn,
+    rn,
+    race,
+    history,
+):
+
     try:
-        actual = data.get_result_order(raw, sn, rn)
-        rows = data.get_race_rows(race, sn, rn)
+
+        actual = data.get_result_order(
+            raw,
+            sn,
+            rn,
+        )
+
+        rows = data.get_race_rows(
+            race,
+            sn,
+            rn,
+        )
 
         if not actual or len(rows) != 6:
             return None
 
-        p = normalize(tri_ai(rows, history))
-
-        main = p.get("main", [])
-        counter = p.get("counter", [])
-        hole = p.get("hole", [])
-        probs = p.get("boat_probs", {})
-
-        try:
-            confidence = max(float(v) for v in probs.values())
-        except Exception:
-            confidence = 0.0
-
-        actual = tuple(actual[:3])
-
-        return {
-            "日付": "",
-            "場": data.stadium_name(sn),
-            "場番号": sn,
-            "R": rn,
-            "本命": combo_text(main),
-            "対抗": combo_text(counter),
-            "穴": combo_text(hole),
-            "実結果": combo_text(actual),
-            "本命的中": tuple(main[:3]) == actual,
-            "対抗的中": tuple(counter[:3]) == actual,
-            "穴的中": tuple(hole[:3]) == actual,
-            "AI自信度": confidence,
-            "評価": stars(confidence),
-        }
+        prediction = normalize(
+            tri_ai(
+                rows,
+                history,
+            )
+        )
 
     except Exception:
         return None
 
+    main = prediction.get("main", [])
+    counter = prediction.get("counter", [])
+    hole = prediction.get("hole", [])
+    probs = prediction.get("boat_probs", {})
 
-def run_backtest(race_count, update=None):
+    try:
+        confidence = max(
+            float(v)
+            for v in probs.values()
+        )
+    except Exception:
+        confidence = 0.0
+
+    actual = tuple(actual[:3])
+
+    return {
+        "日付": "",
+        "場": data.stadium_name(sn),
+        "R": rn,
+        "本命": combo(main),
+        "対抗": combo(counter),
+        "穴": combo(hole),
+        "実結果": combo(actual),
+        "本命的中": tuple(main[:3]) == actual,
+        "対抗的中": tuple(counter[:3]) == actual,
+        "穴的中": tuple(hole[:3]) == actual,
+        "AI自信度": confidence,
+        "評価": stars(confidence),
+    }
+
+
+def progress_view(
+    current,
+    total,
+    status,
+):
+
+    percent = (
+        0
+        if total <= 0
+        else min(current / total * 100, 100)
+    )
+
+    # 進捗バー
+    st.progress(
+        percent / 100,
+        text=f"{current:,} / {total:,} レース",
+    )
+
+    # ステータス
+    st.markdown(
+        f"""
+        <div style="
+            background:#082f49;
+            color:#ffffff;
+            border-radius:12px;
+            padding:12px;
+            text-align:center;
+            margin:10px 0;
+        ">
+            <div style="
+                color:#ffffff;
+                font-size:14px;
+                font-weight:900;
+            ">
+                🔄 {status}
+            </div>
+
+            <div style="
+                color:#ffffff;
+                font-size:20px;
+                font-weight:950;
+                margin-top:3px;
+            ">
+                {current:,} / {total:,} レース
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ボート
+    st.markdown(
+        f"""
+        <div style="
+            background:#075985;
+            border-radius:14px;
+            height:105px;
+            overflow:hidden;
+            position:relative;
+            margin-bottom:15px;
+        ">
+
+            <div style="
+                position:absolute;
+                left:{(current * 7) % 120 - 20}%;
+                top:8px;
+                font-size:25px;
+            ">🚤</div>
+
+            <div style="
+                position:absolute;
+                left:{(current * 7 + 22) % 120 - 20}%;
+                top:27px;
+                font-size:25px;
+            ">🚤</div>
+
+            <div style="
+                position:absolute;
+                left:{(current * 7 + 44) % 120 - 20}%;
+                top:46px;
+                font-size:25px;
+            ">🚤</div>
+
+            <div style="
+                position:absolute;
+                left:{(current * 7 + 66) % 120 - 20}%;
+                top:65px;
+                font-size:25px;
+            ">🚤</div>
+
+            <div style="
+                position:absolute;
+                left:{(current * 7 + 88) % 120 - 20}%;
+                top:84px;
+                font-size:25px;
+            ">🚤</div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def run_backtest(
+    count,
+    update,
+):
+
     results = []
 
-    start = datetime.now(JST).date() - timedelta(days=1)
+    start = (
+        datetime.now(JST).date()
+        - timedelta(days=1)
+    )
 
-    for i in range(180):
-        if len(results) >= race_count:
+    for day_index in range(180):
+
+        if len(results) >= count:
             break
 
-        day = start - timedelta(days=i)
+        day = start - timedelta(
+            days=day_index
+        )
+
         date_text = day.isoformat()
 
-        if update:
-            update(
-                len(results),
-                race_count,
-                f"{date_text} を確認中",
-            )
+        update(
+            len(results),
+            count,
+            f"{date_text} を確認中",
+        )
 
         try:
-            raw = data.get_data(date_text)
+            raw = data.get_data(
+                date_text
+            )
         except Exception:
             continue
 
         if not raw:
             continue
 
-        races = completed(raw)
+        races = get_completed(raw)
 
         if not races:
             continue
 
         try:
-            history = data.history14(date_text)
+            history = data.history14(
+                date_text
+            )
         except Exception:
             history = None
 
         for sn, rn, race in races:
 
-            if len(results) >= race_count:
+            if len(results) >= count:
                 break
+
+            update(
+                len(results),
+                count,
+                f"{date_text} "
+                f"{data.stadium_name(sn)} "
+                f"{rn}Rを検証中",
+            )
 
             result = evaluate(
                 raw,
@@ -174,149 +356,28 @@ def run_backtest(race_count, update=None):
                 continue
 
             result["日付"] = date_text
+
             results.append(result)
 
-            if update:
-                update(
-                    len(results),
-                    race_count,
-                    f"{date_text} {data.stadium_name(sn)} {rn}Rを検証中",
-                )
+            update(
+                len(results),
+                count,
+                f"{date_text} "
+                f"{data.stadium_name(sn)} "
+                f"{rn}Rを検証完了",
+            )
 
-    if update:
-        update(
-            len(results),
-            race_count,
-            "検証完了",
-        )
+    update(
+        len(results),
+        count,
+        "検証完了",
+    )
 
     return pd.DataFrame(results)
 
 
-def render_progress(current, total, status):
-    pct = 0 if total == 0 else min(current / total * 100, 100)
-
-    st.markdown(
-        f"""
-        <div style="
-            background:#075985;
-            border-radius:18px;
-            padding:14px;
-            margin:15px 0;
-            border:2px solid #0ea5e9;
-            color:white;
-        ">
-
-            <div style="
-                background:#082f49;
-                border-radius:12px;
-                padding:12px;
-                text-align:center;
-                color:white !important;
-            ">
-
-                <div style="
-                    color:#ffffff !important;
-                    font-size:14px;
-                    font-weight:900;
-                    margin-bottom:4px;
-                ">
-                    🔄 {status}
-                </div>
-
-                <div style="
-                    color:#ffffff !important;
-                    font-size:20px;
-                    font-weight:950;
-                ">
-                    {current:,} / {total:,} レース
-                </div>
-
-                <div style="
-                    width:100%;
-                    height:8px;
-                    background:#164e63;
-                    border-radius:99px;
-                    margin-top:9px;
-                    overflow:hidden;
-                ">
-                    <div style="
-                        width:{pct:.1f}%;
-                        height:100%;
-                        background:#ffffff;
-                        border-radius:99px;
-                    "></div>
-                </div>
-
-            </div>
-
-            <div style="
-                position:relative;
-                height:125px;
-                overflow:hidden;
-                margin-top:8px;
-            ">
-
-                <div style="
-                    position:absolute;
-                    left:-70px;
-                    top:5px;
-                    font-size:25px;
-                    animation:boatmove 3s linear infinite;
-                ">🚤</div>
-
-                <div style="
-                    position:absolute;
-                    left:-70px;
-                    top:27px;
-                    font-size:25px;
-                    animation:boatmove 3s linear infinite .35s;
-                ">🚤</div>
-
-                <div style="
-                    position:absolute;
-                    left:-70px;
-                    top:49px;
-                    font-size:25px;
-                    animation:boatmove 3s linear infinite .7s;
-                ">🚤</div>
-
-                <div style="
-                    position:absolute;
-                    left:-70px;
-                    top:71px;
-                    font-size:25px;
-                    animation:boatmove 3s linear infinite 1.05s;
-                ">🚤</div>
-
-                <div style="
-                    position:absolute;
-                    left:-70px;
-                    top:93px;
-                    font-size:25px;
-                    animation:boatmove 3s linear infinite 1.4s;
-                ">🚤</div>
-
-            </div>
-
-        </div>
-
-        <style>
-        @keyframes boatmove {{
-            0% {{
-                left:-70px;
-            }}
-            100% {{
-                left:110%;
-            }}
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def summary(df):
+
     if df.empty:
         return 0, 0, 0, 0
 
@@ -330,6 +391,10 @@ def summary(df):
 
 def render_backtest():
 
+    # =========================
+    # 説明
+    # =========================
+
     st.markdown(
         """
         <div style="
@@ -337,11 +402,10 @@ def render_backtest():
             border:1px solid #dbe3ee;
             border-radius:14px;
             padding:16px;
-            margin-top:20px;
         ">
 
             <div style="
-                color:#0f172a !important;
+                color:#0f172a;
                 font-size:19px;
                 font-weight:950;
             ">
@@ -349,21 +413,24 @@ def render_backtest():
             </div>
 
             <div style="
-                color:#334155 !important;
+                color:#334155;
                 font-size:13px;
                 font-weight:700;
                 margin-top:5px;
             ">
-                過去の完了レースを使ってAI予想の精度を検証します
+                過去の完了レースを使って
+                AI予想の精度を検証します
             </div>
 
             <div style="
-                color:#475569 !important;
+                color:#475569;
                 font-size:12px;
-                margin-top:8px;
+                margin-top:9px;
+                line-height:1.7;
             ">
                 📌 日付ではなく完了レース数で指定します。<br>
-                指定した件数に達するまで、過去へ自動的に遡ります。
+                指定した件数に達するまで、
+                過去へ自動的に遡ります。
             </div>
 
         </div>
@@ -371,73 +438,140 @@ def render_backtest():
         unsafe_allow_html=True,
     )
 
+
+    # =========================
+    # 件数
+    # =========================
+
     count = st.selectbox(
         "検証するレース数",
         RACE_OPTIONS,
-        format_func=lambda x: f"直近{x:,}レース",
-        key="backtest_race_count",
+        format_func=lambda x:
+            f"直近{x:,}レース",
+        key="backtest_count",
     )
+
+
+    # =========================
+    # 開始
+    # =========================
 
     if not st.button(
         "🚀 バックテスト開始",
         type="primary",
         use_container_width=True,
-        key="start_backtest",
+        key="backtest_start",
     ):
         return
 
+
+    # =========================
+    # 表示場所
+    # =========================
+
     area = st.empty()
 
-    def update(current, total, status):
+
+    def update(
+        current,
+        total,
+        status,
+    ):
+
         with area.container():
-            render_progress(
+
+            progress_view(
                 current,
                 total,
                 status,
             )
 
+
+    # =========================
+    # 実行
+    # =========================
+
     try:
+
         df = run_backtest(
             count,
             update,
         )
 
     except Exception as e:
+
         area.empty()
-        st.error("バックテスト中にエラーが発生しました。")
+
+        st.error(
+            "バックテスト中にエラーが発生しました。"
+        )
+
         st.exception(e)
+
         return
+
 
     area.empty()
 
+
+    # =========================
+    # 結果なし
+    # =========================
+
     if df.empty:
+
         st.error(
             "過去180日まで探しましたが、"
             "検証可能なレースを取得できませんでした。"
         )
+
         return
+
+
+    # =========================
+    # 集計
+    # =========================
 
     total, main, counter, hole = summary(df)
 
+
     st.success(
-        f"バックテスト完了：{total:,}レースを検証しました。"
+        f"バックテスト完了："
+        f"{total:,}レースを検証しました。"
     )
+
 
     c1, c2, c3 = st.columns(3)
 
-    c1.metric("🎯 本命的中", f"{main:,}")
-    c2.metric("🔥 対抗的中", f"{counter:,}")
-    c3.metric("💥 穴的中", f"{hole:,}")
+    c1.metric(
+        "🎯 本命的中",
+        f"{main:,}",
+    )
+
+    c2.metric(
+        "🔥 対抗的中",
+        f"{counter:,}",
+    )
+
+    c3.metric(
+        "💥 穴的中",
+        f"{hole:,}",
+    )
+
+
+    # =========================
+    # 的中率
+    # =========================
 
     st.markdown(
         f"""
         <div style="
             background:#ffffff;
-            color:#0f172a !important;
             border:1px solid #dbe3ee;
             border-radius:12px;
             padding:12px;
             margin:12px 0;
+            color:#0f172a;
             font-weight:800;
         ">
             的中率：
@@ -449,7 +583,12 @@ def render_backtest():
         unsafe_allow_html=True,
     )
 
-    cols = [
+
+    # =========================
+    # 詳細
+    # =========================
+
+    columns = [
         "日付",
         "場",
         "R",
@@ -465,7 +604,7 @@ def render_backtest():
     ]
 
     st.dataframe(
-        df[cols],
+        df[columns],
         use_container_width=True,
         hide_index=True,
-                )
+        )

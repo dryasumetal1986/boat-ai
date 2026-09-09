@@ -10,57 +10,47 @@ from bs4 import BeautifulSoup
 API = "https://boatraceopenapi.github.io/api/v1"
 
 
-def session():
-    s = requests.Session()
-    s.headers["User-Agent"] = "Mozilla/5.0"
-    return s
-
-
-# ---------------------------------------------------------
-# 値取得
-# ---------------------------------------------------------
-
-def val(d, keys, default=0):
+def _val(d, keys, default=0):
     if not isinstance(d, dict):
         return default
 
     for k in keys:
-        if k in d and d[k] not in (None, ""):
-            return d[k]
+        v = d.get(k)
+        if v not in (None, ""):
+            return v
 
-    # 入れ子の中も探す
     for v in d.values():
         if isinstance(v, dict):
-            x = val(v, keys, None)
+            x = _val(v, keys, None)
             if x is not None:
                 return x
 
     return default
 
 
-def num(x, default=0):
+def _num(x, default=0.0):
     try:
-        s = str(x).strip()
-        s = s.replace(",", "").replace("%", "")
-        s = s.replace("秒", "")
-        return float(s)
+        return float(
+            str(x)
+            .replace(",", "")
+            .replace("%", "")
+            .replace("秒", "")
+            .strip()
+        )
     except:
         return default
 
 
-def racers(x):
+def _list(x):
     if isinstance(x, list):
         return x
 
     if isinstance(x, dict):
         for k in [
-            "racers",
-            "racer",
-            "entries",
-            "entry",
-            "players",
-            "player",
-            "data",
+            "racers", "racer",
+            "entries", "entry",
+            "players", "player",
+            "data"
         ]:
             if isinstance(x.get(k), list):
                 return x[k]
@@ -70,9 +60,17 @@ def racers(x):
     return []
 
 
-# ---------------------------------------------------------
-# レースデータ
-# ---------------------------------------------------------
+def _session():
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0"
+    })
+    return s
+
+
+# =========================================================
+# API
+# =========================================================
 
 @st.cache_data(ttl=180)
 def get_data(d):
@@ -82,15 +80,15 @@ def get_data(d):
 
     url = f"{API}/{d.year}/{d:%Y%m%d}.json"
 
-    r = session().get(url, timeout=20)
+    r = _session().get(url, timeout=20)
     r.raise_for_status()
 
     return r.json()
 
 
-def get_race(data, sno, rno):
+def get_race(raw, sno, rno):
 
-    programs = data.get("programs", {})
+    programs = raw.get("programs", {})
 
     stadiums = (
         list(programs.values())
@@ -100,17 +98,18 @@ def get_race(data, sno, rno):
 
     for stadium in stadiums:
 
-        if str(
-            val(
-                stadium,
-                [
-                    "stadiumNumber",
-                    "stadium_number",
-                    "stadium",
-                    "number",
-                ],
-            )
-        ) != str(sno):
+        stadium_no = _val(
+            stadium,
+            [
+                "stadiumNumber",
+                "stadium_number",
+                "stadium",
+                "number"
+            ],
+            None
+        )
+
+        if str(stadium_no) != str(sno):
             continue
 
         races = stadium.get("races", [])
@@ -120,37 +119,33 @@ def get_race(data, sno, rno):
 
         for race in races:
 
-            if str(
-                val(
-                    race,
-                    [
-                        "raceNumber",
-                        "race_number",
-                        "race_no",
-                        "number",
-                    ],
-                )
-            ) == str(rno):
+            race_no = _val(
+                race,
+                [
+                    "raceNumber",
+                    "race_number",
+                    "race_no",
+                    "number"
+                ],
+                None
+            )
 
+            if str(race_no) == str(rno):
                 return race
 
     return None
 
 
-# ---------------------------------------------------------
+# =========================================================
 # 選手データ
-# ---------------------------------------------------------
-
-def racer_value(r, keys, default=0):
-    return val(r, keys, default)
-
+# =========================================================
 
 def make_racer(r, lane):
 
     return {
         "枠": lane,
 
-        "選手名": racer_value(
+        "選手名": _val(
             r,
             [
                 "racerName",
@@ -158,12 +153,12 @@ def make_racer(r, lane):
                 "playerName",
                 "player_name",
                 "name",
-                "選手名",
+                "選手名"
             ],
-            "-",
+            "-"
         ),
 
-        "選手番号": racer_value(
+        "選手番号": _val(
             r,
             [
                 "racerNumber",
@@ -173,25 +168,25 @@ def make_racer(r, lane):
                 "registrationNumber",
                 "registration_number",
                 "number",
-                "選手番号",
+                "選手番号"
             ],
-            0,
+            0
         ),
 
-        "級別": racer_value(
+        "級別": _val(
             r,
             [
                 "grade",
                 "racerClass",
                 "racer_class",
                 "class",
-                "級別",
+                "級別"
             ],
-            "-",
+            "-"
         ),
 
-        "全国勝率": num(
-            racer_value(
+        "全国勝率": _num(
+            _val(
                 r,
                 [
                     "nationwideWinRate",
@@ -200,14 +195,14 @@ def make_racer(r, lane):
                     "national_win_rate",
                     "winRate",
                     "win_rate",
-                    "全国勝率",
+                    "全国勝率"
                 ],
-                0,
+                0
             )
         ),
 
-        "全国2連率": num(
-            racer_value(
+        "全国2連率": _num(
+            _val(
                 r,
                 [
                     "nationwide2Rate",
@@ -218,14 +213,14 @@ def make_racer(r, lane):
                     "national_top_2_percent",
                     "nationalSecondRate",
                     "national_second_rate",
-                    "全国2連率",
+                    "全国2連率"
                 ],
-                0,
+                0
             )
         ),
 
-        "当地勝率": num(
-            racer_value(
+        "当地勝率": _num(
+            _val(
                 r,
                 [
                     "localWinRate",
@@ -234,14 +229,14 @@ def make_racer(r, lane):
                     "place_win_rate",
                     "localRate",
                     "local_rate",
-                    "当地勝率",
+                    "当地勝率"
                 ],
-                0,
+                0
             )
         ),
 
-        "モーター2連率": num(
-            racer_value(
+        "モーター2連率": _num(
+            _val(
                 r,
                 [
                     "motor2Rate",
@@ -252,14 +247,14 @@ def make_racer(r, lane):
                     "motor_top_2_percent",
                     "motorSecondPercent",
                     "motor_second_percent",
-                    "モーター2連率",
+                    "モーター2連率"
                 ],
-                0,
+                0
             )
         ),
 
-        "平均ST": num(
-            racer_value(
+        "平均ST": _num(
+            _val(
                 r,
                 [
                     "averageST",
@@ -268,38 +263,33 @@ def make_racer(r, lane):
                     "avg_st",
                     "averageStartTiming",
                     "average_start_timing",
-                    "平均ST",
+                    "平均ST"
                 ],
-                0,
+                0
             )
-        ),
+        )
     }
 
 
-# ---------------------------------------------------------
-# 直前情報
-# ---------------------------------------------------------
-
-def preview_value(p, keys, default=0):
-    return val(p, keys, default)
-
+# =========================================================
+# 公式展示情報
+# =========================================================
 
 @st.cache_data(ttl=120)
 def official_preview(sno, rno, td):
 
-    try:
-        url = (
-            "https://www.boatrace.jp/owpc/pc/race/beforeinfo"
-            f"?rno={rno}"
-            f"&jcd={int(sno):02d}"
-            f"&hd={td:%Y%m%d}"
-        )
+    url = (
+        "https://www.boatrace.jp/owpc/pc/race/beforeinfo"
+        f"?rno={rno}"
+        f"&jcd={int(sno):02d}"
+        f"&hd={td:%Y%m%d}"
+    )
 
-        r = session().get(url, timeout=15)
+    try:
+        r = _session().get(url, timeout=15)
         r.raise_for_status()
 
         soup = BeautifulSoup(r.text, "html.parser")
-
         result = {}
 
         for tr in soup.find_all("tr"):
@@ -324,32 +314,32 @@ def official_preview(sno, rno, td):
 
             text = " ".join(cells)
 
-            times = re.findall(
-                r"\d\.\d{2}",
+            # 7.03 や .03 の両方に対応
+            nums = re.findall(
+                r"(?:\d+\.\d+|\.\d+)",
                 text
             )
 
             exhibition = 0
+            exhibition_st = 0
 
-            for x in times:
+            for x in nums:
+
                 f = float(x)
-                if 6.0 <= f <= 8.0:
+
+                if exhibition == 0 and 6.0 <= f <= 8.0:
                     exhibition = f
-                    break
 
-            st_value = 0
+                if exhibition_st == 0 and 0 < f <= 0.60:
+                    exhibition_st = f
 
-            for x in times:
-                f = float(x)
-                if 0 < f <= 0.60:
-                    st_value = f
-                    break
+            if exhibition or exhibition_st:
 
-            result[lane] = {
-                "展示タイム": exhibition,
-                "展示ST": st_value,
-                "展示進入": lane,
-            }
+                result[lane] = {
+                    "展示進入": lane,
+                    "展示ST": exhibition_st,
+                    "展示タイム": exhibition
+                }
 
         return result
 
@@ -357,13 +347,13 @@ def official_preview(sno, rno, td):
         return {}
 
 
-# ---------------------------------------------------------
-# 現在のレース用データ
-# ---------------------------------------------------------
+# =========================================================
+# 現在レース
+# =========================================================
 
 def get_race_rows(race, sno, rno, td):
 
-    entries = racers(
+    entries = _list(
         race.get("racers")
         or race.get("entries")
         or race.get("entry")
@@ -379,22 +369,22 @@ def get_race_rows(race, sno, rno, td):
         or []
     )
 
-    preview_list = racers(preview)
+    preview_list = _list(preview)
 
     pmap = {}
 
     for p in preview_list:
 
-        no = val(
+        no = _val(
             p,
             [
                 "racerNumber",
                 "racer_number",
                 "playerNumber",
                 "player_number",
-                "number",
+                "number"
             ],
-            None,
+            None
         )
 
         try:
@@ -410,10 +400,10 @@ def get_race_rows(race, sno, rno, td):
 
     rows = []
 
-    for i, r in enumerate(entries):
+    for i, racer in enumerate(entries):
 
-        lane = val(
-            r,
+        lane = _val(
+            racer,
             [
                 "entryNumber",
                 "entry_number",
@@ -422,9 +412,9 @@ def get_race_rows(race, sno, rno, td):
                 "courseNumber",
                 "course_number",
                 "lane",
-                "枠",
+                "枠"
             ],
-            i + 1,
+            i + 1
         )
 
         try:
@@ -432,7 +422,10 @@ def get_race_rows(race, sno, rno, td):
         except:
             lane = i + 1
 
-        row = make_racer(r, lane)
+        row = make_racer(
+            racer,
+            lane
+        )
 
         try:
             no = int(float(row["選手番号"]))
@@ -442,8 +435,8 @@ def get_race_rows(race, sno, rno, td):
         p = pmap.get(no, {})
         op = official.get(lane, {})
 
-        row["展示進入"] = num(
-            preview_value(
+        row["展示進入"] = _num(
+            _val(
                 p,
                 [
                     "courseNumber",
@@ -451,15 +444,15 @@ def get_race_rows(race, sno, rno, td):
                     "entryNumber",
                     "entry_number",
                     "course",
-                    "展示進入",
+                    "展示進入"
                 ],
-                op.get("展示進入", lane),
+                op.get("展示進入", lane)
             ),
-            lane,
+            lane
         )
 
-        row["展示ST"] = num(
-            preview_value(
+        row["展示ST"] = _num(
+            _val(
                 p,
                 [
                     "startTiming",
@@ -467,14 +460,14 @@ def get_race_rows(race, sno, rno, td):
                     "exhibitionST",
                     "exhibition_st",
                     "st",
-                    "展示ST",
+                    "展示ST"
                 ],
-                op.get("展示ST", 0),
+                op.get("展示ST", 0)
             )
         )
 
-        row["展示タイム"] = num(
-            preview_value(
+        row["展示タイム"] = _num(
+            _val(
                 p,
                 [
                     "exhibitionTime",
@@ -482,22 +475,22 @@ def get_race_rows(race, sno, rno, td):
                     "exTime",
                     "ex_time",
                     "time",
-                    "展示タイム",
+                    "展示タイム"
                 ],
-                op.get("展示タイム", 0),
+                op.get("展示タイム", 0)
             )
         )
 
-        row["場"] = sno
+        row["場"] = int(sno)
 
         rows.append(row)
 
     return rows
 
 
-# ---------------------------------------------------------
-# 学習用過去データ
-# ---------------------------------------------------------
+# =========================================================
+# 過去14日
+# =========================================================
 
 @st.cache_data(ttl=1800)
 def history14(td):
@@ -529,15 +522,16 @@ def history14(td):
 
         for stadium in stadiums:
 
-            sno = num(
-                val(
+            sno = _num(
+                _val(
                     stadium,
                     [
                         "stadiumNumber",
                         "stadium_number",
                         "stadium",
-                        "number",
+                        "number"
                     ],
+                    0
                 )
             )
 
@@ -548,19 +542,20 @@ def history14(td):
 
             for race in races:
 
-                rno = num(
-                    val(
+                rno = _num(
+                    _val(
                         race,
                         [
                             "raceNumber",
                             "race_number",
                             "race_no",
-                            "number",
+                            "number"
                         ],
+                        0
                     )
                 )
 
-                entries = racers(
+                entries = _list(
                     race.get("racers")
                     or race.get("entries")
                     or race.get("entry")
@@ -569,7 +564,7 @@ def history14(td):
 
                 result = race.get("result") or {}
 
-                result_entries = racers(
+                result_entries = _list(
                     result.get("racers")
                     or result.get("entries")
                     or []
@@ -579,41 +574,38 @@ def history14(td):
 
                 for x in result_entries:
 
-                    no = val(
+                    no = _val(
                         x,
                         [
                             "racerNumber",
                             "racer_number",
                             "playerNumber",
                             "player_number",
-                            "number",
-                            "選手番号",
+                            "number"
                         ],
-                        None,
+                        None
                     )
 
-                    place = val(
+                    place = _val(
                         x,
                         [
                             "place",
                             "rank",
                             "arrival",
-                            "着順",
+                            "着順"
                         ],
-                        None,
+                        None
                     )
 
                     try:
-                        finish[int(float(no))] = int(
-                            float(place)
-                        )
+                        finish[int(float(no))] = int(float(place))
                     except:
                         pass
 
-                for i, r in enumerate(entries):
+                for i, racer in enumerate(entries):
 
-                    lane = val(
-                        r,
+                    lane = _val(
+                        racer,
                         [
                             "entryNumber",
                             "entry_number",
@@ -622,9 +614,9 @@ def history14(td):
                             "courseNumber",
                             "course_number",
                             "lane",
-                            "枠",
+                            "枠"
                         ],
-                        i + 1,
+                        i + 1
                     )
 
                     try:
@@ -632,201 +624,45 @@ def history14(td):
                     except:
                         lane = i + 1
 
-                    no = val(
-                        r,
+                    no = _val(
+                        racer,
                         [
                             "racerNumber",
                             "racer_number",
                             "playerNumber",
                             "player_number",
-                            "number",
-                            "選手番号",
+                            "number"
                         ],
-                        None,
+                        None
                     )
-
-                    if no is None:
-                        continue
 
                     try:
                         no = int(float(no))
                     except:
                         continue
 
-                    row = make_racer(r, lane)
-
-                    p = r.get("preview") or {}
-
-                    if isinstance(p, list):
-                        p = next(
-                            (
-                                x for x in p
-                                if int(
-                                    num(
-                                        val(
-                                            x,
-                                            [
-                                                "racerNumber",
-                                                "racer_number",
-                                                "playerNumber",
-                                                "player_number",
-                                                "number",
-                                            ],
-                                            -1,
-                                        )
-                                    )
-                                ) == no
-                            ),
-                            {},
-                        )
+                    row = make_racer(
+                        racer,
+                        lane
+                    )
 
                     row["日付"] = d
                     row["レース"] = rno
-                    row["選手番号"] = no
-                    row["展示進入"] = num(
-                        val(
-                            p,
-                            [
-                                "courseNumber",
-                                "course_number",
-                                "entryNumber",
-                                "entry_number",
-                                "course",
-                            ],
-                            lane,
-                        ),
-                        lane,
-                    )
 
-                    row["展示ST"] = num(
-                        val(
-                            p,
-                            [
-                                "startTiming",
-                                "start_timing",
-                                "exhibitionST",
-                                "exhibition_st",
-                                "st",
-                            ],
-                            0,
-                        )
+                    place = finish.get(
+                        no,
+                        99
                     )
-
-                    row["展示タイム"] = num(
-                        val(
-                            p,
-                            [
-                                "exhibitionTime",
-                                "exhibition_time",
-                                "exTime",
-                                "ex_time",
-                                "time",
-                            ],
-                            0,
-                        )
-                    )
-
-                    place = finish.get(no, 99)
 
                     row["1着"] = int(place == 1)
                     row["2着"] = int(place == 2)
                     row["3着"] = int(place == 3)
 
+                    row["展示進入"] = lane
+                    row["展示ST"] = 0
+                    row["展示タイム"] = 0
+                    row["場"] = int(sno)
+
                     rows.append(row)
 
     return rows
-
-
-# ---------------------------------------------------------
-# 過去レース確認
-# ---------------------------------------------------------
-
-@st.cache_data(ttl=1800)
-def backtest_races(start_date, days=14):
-
-    if isinstance(start_date, str):
-        start_date = date.fromisoformat(start_date)
-
-    rows = []
-
-    for n in range(1, days + 1):
-
-        d = start_date - timedelta(days=n)
-
-        if d < date(2026, 1, 1):
-            continue
-
-        try:
-            raw = get_data(d)
-        except:
-            continue
-
-        programs = raw.get("programs", {})
-
-        stadiums = (
-            list(programs.values())
-            if isinstance(programs, dict)
-            else programs
-        )
-
-        for stadium in stadiums:
-
-            sno = val(
-                stadium,
-                [
-                    "stadiumNumber",
-                    "stadium_number",
-                    "stadium",
-                    "number",
-                ],
-                0,
-            )
-
-            races = stadium.get("races", [])
-
-            if isinstance(races, dict):
-                races = list(races.values())
-
-            for race in races:
-
-                rno = val(
-                    race,
-                    [
-                        "raceNumber",
-                        "race_number",
-                        "race_no",
-                        "number",
-                    ],
-                    0,
-                )
-
-                result = race.get("result") or {}
-
-                rr = racers(
-                    result.get("racers", [])
-                )
-
-                finish = {}
-
-                for x in rr:
-
-                    place = val(
-                        x,
-                        [
-                            "place",
-                            "rank",
-                            "arrival",
-                            "着順",
-                        ],
-                        None,
-                    )
-
-                    lane = val(
-                        x,
-                        [
-                            "entryNumber",
-                            "entry_number",
-                            "boatNumber",
-                            "boat_number",
-                            "courseNumber",
-                            "cours

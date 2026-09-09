@@ -64,7 +64,7 @@ with col2:
     stadium_no = st.selectbox(
         "競艇場",
         options=list(STADIUMS.keys()),
-        format_func=lambda x: f"{x} - {STADIUMS[x]}",
+        format_func=lambda x: STADIUMS[x],
     )
 
 with col3:
@@ -78,7 +78,11 @@ with col3:
 # =========================
 # AI予想
 # =========================
-if st.button("🤖 AI予想を実行", type="primary", use_container_width=True):
+if st.button(
+    "🤖 AI予想を実行",
+    type="primary",
+    use_container_width=True,
+):
 
     with st.spinner("レースデータを取得しています..."):
 
@@ -87,8 +91,11 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
         # ---------------------------------
         try:
             all_data = data.get_data(td)
+
         except Exception as e:
-            st.error(f"データ取得に失敗しました。\n\n{e}")
+            st.error(
+                f"データ取得に失敗しました。\n\n{e}"
+            )
             st.stop()
 
         race = data.get_race(
@@ -98,7 +105,9 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
         )
 
         if race is None:
-            st.error("指定したレースのデータが見つかりません。")
+            st.error(
+                "指定したレースのデータが見つかりません。"
+            )
             st.stop()
 
         # ---------------------------------
@@ -112,7 +121,9 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
         )
 
         if not racers:
-            st.error("選手データが取得できませんでした。")
+            st.error(
+                "選手データが取得できませんでした。"
+            )
             st.stop()
 
         # ---------------------------------
@@ -124,7 +135,9 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
             or []
         )
 
-        preview_list = data.racers(preview)
+        preview_list = data.racers(
+            preview
+        )
 
         preview_map = {}
 
@@ -145,7 +158,9 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
                 if player_no is None:
                     continue
 
-                player_no = int(float(player_no))
+                player_no = int(
+                    float(player_no)
+                )
 
                 preview_map[player_no] = p
 
@@ -167,14 +182,19 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
                         "courseNumber",
                         r.get(
                             "枠",
-                            r.get("lane", i + 1)
+                            r.get(
+                                "lane",
+                                i + 1
+                            )
                         )
                     )
                 ),
             )
 
             try:
-                lane = int(float(lane))
+                lane = int(
+                    float(lane)
+                )
             except Exception:
                 lane = i + 1
 
@@ -190,11 +210,16 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
             )
 
             try:
-                player_no = int(float(player_no))
+                player_no = int(
+                    float(player_no)
+                )
             except Exception:
                 player_no = 0
 
-            p = preview_map.get(player_no, {})
+            p = preview_map.get(
+                player_no,
+                {}
+            )
 
             # -----------------------------
             # 選手名
@@ -354,6 +379,7 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
             def to_float(value):
 
                 try:
+
                     if value is None:
                         return 0.0
 
@@ -370,17 +396,33 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
             rows.append(
                 {
                     "枠": lane,
-                    "展示進入": to_float(exhibition_course),
+                    "展示進入": to_float(
+                        exhibition_course
+                    ),
                     "選手名": name,
                     "選手番号": player_no,
                     "級別": grade,
-                    "全国勝率": to_float(nationwide_win),
-                    "全国2連率": to_float(nationwide_2),
-                    "当地勝率": to_float(local_win),
-                    "モーター2連率": to_float(motor_2),
-                    "平均ST": to_float(avg_st),
-                    "展示ST": to_float(exhibition_st),
-                    "展示タイム": to_float(exhibition_time),
+                    "全国勝率": to_float(
+                        nationwide_win
+                    ),
+                    "全国2連率": to_float(
+                        nationwide_2
+                    ),
+                    "当地勝率": to_float(
+                        local_win
+                    ),
+                    "モーター2連率": to_float(
+                        motor_2
+                    ),
+                    "平均ST": to_float(
+                        avg_st
+                    ),
+                    "展示ST": to_float(
+                        exhibition_st
+                    ),
+                    "展示タイム": to_float(
+                        exhibition_time
+                    ),
                     "場": stadium_no,
                 }
             )
@@ -388,44 +430,62 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
         df = pd.DataFrame(rows)
 
         if df.empty:
-            st.error("AI計算用のデータが作成できませんでした。")
+            st.error(
+                "AI計算用のデータが作成できませんでした。"
+            )
             st.stop()
 
         # ---------------------------------
         # 従来スコア
         # ---------------------------------
-        df["学習AI"] = df.apply(score, axis=1)
+        df["学習AI"] = df.apply(
+            score,
+            axis=1
+        )
 
         # ---------------------------------
         # 過去データ取得
         # ---------------------------------
-        with st.spinner("過去レースデータを読み込んでAIを学習しています..."):
+        with st.spinner(
+            "過去レースデータを読み込んでAIを学習しています..."
+        ):
 
             try:
+
                 history = pd.DataFrame(
                     data.history14(td)
                 )
+
             except Exception as e:
+
                 st.warning(
-                    f"過去データの取得に失敗したため、現在のデータのみで予想します。\n\n{e}"
+                    "過去データの取得に失敗したため、"
+                    "現在のデータのみで予想します。\n\n"
+                    f"{e}"
                 )
+
                 history = pd.DataFrame()
 
         # ---------------------------------
         # AI予想
         # ---------------------------------
-        with st.spinner("AIが3連単を計算しています..."):
+        with st.spinner(
+            "AIが3連単を計算しています..."
+        ):
 
             try:
+
                 result = tri_ai(
                     df,
                     history
                 )
 
             except Exception as e:
+
                 st.error(
                     f"AI予想の計算中にエラーが発生しました。\n\n{e}"
                 )
+
                 st.stop()
 
     # =========================================================
@@ -468,13 +528,14 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
 
     if result is None or result.empty:
 
-        st.warning("AI予想結果がありません。")
+        st.warning(
+            "AI予想結果がありません。"
+        )
 
     else:
 
         result_display = result.copy()
 
-        # 表示用に小数点を整理
         for col in [
             "AI確率",
             "信頼度",
@@ -516,7 +577,7 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
             )
 
         # =====================================================
-        # 2番手・3番手
+        # 2番手
         # =====================================================
         if len(result) >= 2:
 
@@ -527,6 +588,9 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
                 f"（AI確率 {float(second['AI確率']):.2f}%）"
             )
 
+        # =====================================================
+        # 3番手
+        # =====================================================
         if len(result) >= 3:
 
             third = result.iloc[2]
@@ -543,36 +607,35 @@ if st.button("🤖 AI予想を実行", type="primary", use_container_width=True)
 
     place_rows = []
 
-    for lane in sorted(df["枠"].unique()):
+    for lane in sorted(
+        df["枠"].unique()
+    ):
 
         lane = int(lane)
 
-        # ---------------------------------------------
-        # 1着になる組み合わせ
-        # 例：1-2-3、1-3-2、1-4-2 ...
-        # ---------------------------------------------
+        # 1着AI
         first = result[
-            result["3連単"].astype(str).str.startswith(
+            result["3連単"]
+            .astype(str)
+            .str.startswith(
                 f"{lane}-"
             )
         ]["1着AI"]
 
-        # ---------------------------------------------
-        # 2着になる組み合わせ
-        # 例：2-1-3、3-1-2、4-1-3 ...
-        # ---------------------------------------------
+        # 2着AI
         second = result[
-            result["3連単"].astype(str).str.contains(
+            result["3連単"]
+            .astype(str)
+            .str.contains(
                 f"-{lane}-"
             )
         ]["2着AI"]
 
-        # ---------------------------------------------
-        # 3着になる組み合わせ
-        # 例：2-3-1、4-5-1 ...
-        # ---------------------------------------------
+        # 3着AI
         third = result[
-            result["3連単"].astype(str).str.endswith(
+            result["3連単"]
+            .astype(str)
+            .str.endswith(
                 f"-{lane}"
             )
         ]["3着AI"]

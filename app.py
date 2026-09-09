@@ -18,178 +18,65 @@ st.set_page_config(
 # CSS
 # =========================
 
-st.markdown("""
-<style>
+st.markdown(
+    """
+    <style>
 
-.stApp {
-    background: #f4f7fb;
-}
+    .stApp {
+        background: #f4f7fb;
+    }
 
-.block-container {
-    max-width: 760px;
-    padding-top: 5rem !important;
-    padding-bottom: 3rem !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-}
+    .block-container {
+        max-width: 760px;
+        padding-top: 5rem !important;
+        padding-bottom: 3rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
 
-/* タイトル */
-
-.title {
-    font-size: 28px;
-    font-weight: 900;
-    color: #0f172a !important;
-    margin-bottom: 3px;
-}
-
-.subtitle {
-    font-size: 13px;
-    font-weight: 700;
-    color: #64748b !important;
-    margin-bottom: 12px;
-}
-
-.date-badge {
-    display: inline-block;
-    background: #eaf2ff;
-    border: 1px solid #c8dcff;
-    border-radius: 20px;
-    padding: 7px 13px;
-    color: #1458c5 !important;
-    font-size: 12px;
-    font-weight: 900;
-    margin-bottom: 20px;
-}
-
-/* ラベル */
-
-.label {
-    color: #0f172a !important;
-    font-size: 14px;
-    font-weight: 900;
-    margin: 8px 0 6px;
-}
-
-/* レース */
-
-.race-title {
-    background: #0f172a;
-    color: #ffffff !important;
-    border-radius: 13px;
-    padding: 13px 16px;
-    font-size: 20px;
-    font-weight: 900;
-    margin-top: 18px;
-    margin-bottom: 10px;
-}
-
-/* 選手 */
-
-.player-box {
-    background: #ffffff;
-    border: 1px solid #dbe3ee;
-    border-radius: 13px;
-    overflow: hidden;
-    margin-bottom: 15px;
-}
-
-.player-row {
-    display: flex;
-    align-items: center;
-    min-height: 44px;
-    border-bottom: 1px solid #edf1f5;
-    padding: 0 14px;
-    color: #0f172a !important;
-    font-size: 14px;
-    font-weight: 750;
-}
-
-.player-row:last-child {
-    border-bottom: none;
-}
-
-.boat-no {
-    width: 55px;
-    color: #2563eb !important;
-    font-weight: 900;
-}
-
-/* 予想 */
-
-.predict-card {
-    background: #ffffff;
-    border: 1px solid #dbe3ee;
-    border-radius: 13px;
-    padding: 14px;
-    margin-bottom: 10px;
-}
-
-.predict-label {
-    color: #64748b !important;
-    font-size: 13px;
-    font-weight: 900;
-    margin-bottom: 5px;
-}
-
-.predict-number {
-    color: #0f172a !important;
-    font-size: 27px;
-    font-weight: 950;
-    letter-spacing: 2px;
-}
-
-.main-card {
-    border-left: 5px solid #2563eb;
-}
-
-.counter-card {
-    border-left: 5px solid #64748b;
-}
-
-.hole-card {
-    border-left: 5px solid #0f172a;
-}
-
-/* 自信度 */
-
-.confidence {
-    background: #0f172a;
-    border-radius: 13px;
-    padding: 15px;
-    text-align: center;
-    margin-top: 14px;
-}
-
-.conf-title {
-    color: #cbd5e1 !important;
-    font-size: 12px;
-    font-weight: 800;
-}
-
-.conf-stars {
-    color: #ffffff !important;
-    font-size: 24px;
-    letter-spacing: 3px;
-}
-
-/* スマホ */
-
-@media(max-width:640px) {
     .title {
-        font-size: 24px;
+        font-size: 28px;
+        font-weight: 900;
+        color: #0f172a !important;
+        margin-bottom: 3px;
     }
 
-    .predict-number {
-        font-size: 23px;
+    .subtitle {
+        font-size: 13px;
+        font-weight: 700;
+        color: #64748b !important;
+        margin-bottom: 12px;
     }
 
-    .race-title {
-        font-size: 18px;
+    .date-badge {
+        display: inline-block;
+        background: #eaf2ff;
+        border: 1px solid #c8dcff;
+        border-radius: 20px;
+        padding: 7px 13px;
+        color: #1458c5 !important;
+        font-size: 12px;
+        font-weight: 900;
+        margin-bottom: 20px;
     }
-}
 
-</style>
-""", unsafe_allow_html=True)
+    .label {
+        color: #0f172a !important;
+        font-size: 14px;
+        font-weight: 900;
+        margin: 8px 0 6px;
+    }
+
+    @media(max-width:640px) {
+        .title {
+            font-size: 24px;
+        }
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =========================
@@ -197,6 +84,7 @@ st.markdown("""
 # =========================
 
 JST = ZoneInfo("Asia/Tokyo")
+
 today = datetime.now(JST).date()
 target_date = today.isoformat()
 
@@ -205,24 +93,45 @@ target_date = today.isoformat()
 # タイトル
 # =========================
 
-st.markdown(
-    '<div class="title">🚤 やっちゃんの競艇AI予想PRO</div>',
-    unsafe_allow_html=True,
-)
+st.html(
+    f"""
+    <div style="
+        font-size:28px;
+        font-weight:900;
+        color:#0f172a;
+        margin-bottom:3px;
+    ">
+        🚤 やっちゃんの競艇AI予想PRO
+    </div>
 
-st.markdown(
-    '<div class="subtitle">データ分析 × AIによる3連単予想</div>',
-    unsafe_allow_html=True,
-)
+    <div style="
+        font-size:13px;
+        font-weight:700;
+        color:#64748b;
+        margin-bottom:12px;
+    ">
+        データ分析 × AIによる3連単予想
+    </div>
 
-st.markdown(
-    f'<div class="date-badge">📅 {today.strftime("%Y年%m月%d日")}　本日開催</div>',
-    unsafe_allow_html=True,
+    <div style="
+        display:inline-block;
+        background:#eaf2ff;
+        border:1px solid #c8dcff;
+        border-radius:20px;
+        padding:7px 13px;
+        color:#1458c5;
+        font-size:12px;
+        font-weight:900;
+        margin-bottom:20px;
+    ">
+        📅 {today.strftime("%Y年%m月%d日")}　本日開催
+    </div>
+    """
 )
 
 
 # =========================
-# データ
+# 本日のデータ
 # =========================
 
 try:
@@ -297,7 +206,7 @@ if raw_today:
 
 
 # =========================
-# AI予想
+# AI予想ボタン
 # =========================
 
 if st.button(
@@ -307,7 +216,9 @@ if st.button(
 ):
 
     if not raw_today:
-        st.error("本日のレースデータが取得できません。")
+        st.error(
+            "本日のレースデータが取得できません。"
+        )
         st.stop()
 
     if not race:
@@ -317,6 +228,10 @@ if st.button(
         )
         st.stop()
 
+    # =========================
+    # レースデータ確認
+    # =========================
+
     try:
         valid = data.validate_race(
             race,
@@ -324,63 +239,152 @@ if st.button(
             stadium_no=stadium_no,
             race_no=race_no,
         )
+
     except Exception as e:
-        st.error("レースデータの確認に失敗しました。")
+
+        st.error(
+            "レースデータの確認に失敗しました。"
+        )
+
         st.exception(e)
         st.stop()
 
     if not valid:
-        st.warning("6艇分の出走データが揃っていません。")
+
+        st.warning(
+            "6艇分の出走データが揃っていません。"
+        )
+
         st.stop()
 
+
+    # =========================
+    # 6艇データ
+    # =========================
+
     try:
+
         rows = data.get_race_rows(
             race,
             stadium_no,
             race_no,
         )
+
     except TypeError:
-        rows = data.get_race_rows(race)
+
+        rows = data.get_race_rows(
+            race
+        )
+
     except Exception as e:
-        st.error("出走データの取得に失敗しました。")
+
+        st.error(
+            "出走データの取得に失敗しました。"
+        )
+
         st.exception(e)
         st.stop()
 
+
     if rows is None or len(rows) != 6:
-        st.warning("6艇分のデータを取得できませんでした。")
+
+        st.warning(
+            "6艇分のデータを取得できませんでした。"
+        )
+
         st.stop()
 
+
+    # =========================
+    # 過去データ
+    # =========================
+
     try:
-        history = data.history14(target_date)
+        history = data.history14(
+            target_date
+        )
     except Exception:
         history = None
 
+
+    # =========================
+    # AI計算
+    # =========================
+
     try:
-        result = tri_ai(rows, history)
+
+        result = tri_ai(
+            rows,
+            history,
+        )
+
     except Exception as e:
-        st.error("AI予想の計算に失敗しました。")
+
+        st.error(
+            "AI予想の計算に失敗しました。"
+        )
+
         st.exception(e)
         st.stop()
 
-    # -------------------------
+
+    # =========================
     # 結果を統一
-    # -------------------------
+    # =========================
 
     if isinstance(result, dict):
 
-        main = result.get("main", [])
-        counter = result.get("counter", [])
-        hole = result.get("hole", [])
-        probs = result.get("boat_probs", {})
+        main = result.get(
+            "main",
+            [],
+        )
+
+        counter = result.get(
+            "counter",
+            [],
+        )
+
+        hole = result.get(
+            "hole",
+            [],
+        )
+
+        probs = result.get(
+            "boat_probs",
+            {},
+        )
 
     elif isinstance(result, tuple):
 
-        combos = result[0] if len(result) else []
-        probs = result[1] if len(result) > 1 else {}
+        combos = (
+            result[0]
+            if len(result)
+            else []
+        )
 
-        main = combos[0] if len(combos) > 0 else []
-        counter = combos[1] if len(combos) > 1 else []
-        hole = combos[2] if len(combos) > 2 else []
+        probs = (
+            result[1]
+            if len(result) > 1
+            else {}
+        )
+
+        main = (
+            combos[0]
+            if len(combos) > 0
+            else []
+        )
+
+        counter = (
+            combos[1]
+            if len(combos) > 1
+            else []
+        )
+
+        hole = (
+            combos[2]
+            if len(combos) > 2
+            else []
+        )
 
     else:
 
@@ -389,41 +393,85 @@ if st.button(
         hole = []
         probs = {}
 
-    def combo(x):
-        if not x:
+
+    # =========================
+    # 3連単表示
+    # =========================
+
+    def combo(value):
+
+        if not value:
             return "—"
-        return "-".join(str(v) for v in x)
+
+        return "-".join(
+            str(v)
+            for v in value
+        )
+
+
+    # =========================
+    # AI自信度
+    # =========================
 
     try:
+
         confidence = max(
-            float(v) for v in probs.values()
+            float(v)
+            for v in probs.values()
         )
+
     except Exception:
+
         confidence = 0.0
 
+
     if confidence >= 0.35:
+
         stars = "★★★★★"
+
     elif confidence >= 0.28:
+
         stars = "★★★★☆"
+
     elif confidence >= 0.22:
+
         stars = "★★★☆☆"
+
     elif confidence >= 0.16:
+
         stars = "★★☆☆☆"
+
     else:
+
         stars = "★☆☆☆☆"
 
 
     # =========================
-    # 予想結果
+    # レースタイトル
     # =========================
 
-    st.markdown(
-        f'<div class="race-title">{selected_stadium} {race_no}R</div>',
-        unsafe_allow_html=True,
+    st.html(
+        f"""
+        <div style="
+            background:#0f172a;
+            color:#ffffff;
+            border-radius:13px;
+            padding:13px 16px;
+            font-size:20px;
+            font-weight:900;
+            margin-top:18px;
+            margin-bottom:10px;
+        ">
+            {selected_stadium} {race_no}R
+        </div>
+        """
     )
 
 
+    # =========================
     # 6艇表示
+    # =========================
+
     player_html = ""
 
     for _, row in rows.iterrows():
@@ -434,67 +482,197 @@ if st.button(
             no = "?"
 
         name = str(
-            row.get("選手名", "選手")
+            row.get(
+                "選手名",
+                "選手",
+            )
         )
 
-        player_html += f"""
-        <div class="player-row">
-            <div class="boat-no">{no}号艇</div>
-            <div>{name}</div>
+        player_html += (
+            '<div style="'
+            'display:flex;'
+            'align-items:center;'
+            'min-height:44px;'
+            'border-bottom:1px solid #edf1f5;'
+            'padding:0 14px;'
+            'color:#0f172a;'
+            'font-size:14px;'
+            'font-weight:750;'
+            '">'
+            f'<div style="'
+            'width:55px;'
+            'color:#2563eb;'
+            'font-weight:900;'
+            '">'
+            f'{no}号艇'
+            '</div>'
+            f'<div>{name}</div>'
+            '</div>'
+        )
+
+
+    st.html(
+        f"""
+        <div style="
+            background:#ffffff;
+            border:1px solid #dbe3ee;
+            border-radius:13px;
+            overflow:hidden;
+            margin-bottom:15px;
+        ">
+            {player_html}
         </div>
         """
-
-    st.markdown(
-        f'<div class="player-box">{player_html}</div>',
-        unsafe_allow_html=True,
     )
 
 
+    # =========================
     # 本命
-    st.markdown(
+    # =========================
+
+    st.html(
         f"""
-        <div class="predict-card main-card">
-            <div class="predict-label">🎯 本命</div>
-            <div class="predict-number">{combo(main)}</div>
+        <div style="
+            background:#ffffff;
+            border:1px solid #dbe3ee;
+            border-left:5px solid #2563eb;
+            border-radius:13px;
+            padding:14px;
+            margin-bottom:10px;
+        ">
+
+            <div style="
+                color:#64748b;
+                font-size:13px;
+                font-weight:900;
+                margin-bottom:5px;
+            ">
+                🎯 本命
+            </div>
+
+            <div style="
+                color:#0f172a;
+                font-size:27px;
+                font-weight:950;
+                letter-spacing:2px;
+            ">
+                {combo(main)}
+            </div>
+
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
+    # =========================
     # 対抗
-    st.markdown(
+    # =========================
+
+    st.html(
         f"""
-        <div class="predict-card counter-card">
-            <div class="predict-label">🔥 対抗</div>
-            <div class="predict-number">{combo(counter)}</div>
+        <div style="
+            background:#ffffff;
+            border:1px solid #dbe3ee;
+            border-left:5px solid #64748b;
+            border-radius:13px;
+            padding:14px;
+            margin-bottom:10px;
+        ">
+
+            <div style="
+                color:#64748b;
+                font-size:13px;
+                font-weight:900;
+                margin-bottom:5px;
+            ">
+                🔥 対抗
+            </div>
+
+            <div style="
+                color:#0f172a;
+                font-size:27px;
+                font-weight:950;
+                letter-spacing:2px;
+            ">
+                {combo(counter)}
+            </div>
+
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
+    # =========================
     # 穴
-    st.markdown(
+    # =========================
+
+    st.html(
         f"""
-        <div class="predict-card hole-card">
-            <div class="predict-label">💥 穴</div>
-            <div class="predict-number">{combo(hole)}</div>
+        <div style="
+            background:#ffffff;
+            border:1px solid #dbe3ee;
+            border-left:5px solid #0f172a;
+            border-radius:13px;
+            padding:14px;
+            margin-bottom:10px;
+        ">
+
+            <div style="
+                color:#64748b;
+                font-size:13px;
+                font-weight:900;
+                margin-bottom:5px;
+            ">
+                💥 穴
+            </div>
+
+            <div style="
+                color:#0f172a;
+                font-size:27px;
+                font-weight:950;
+                letter-spacing:2px;
+            ">
+                {combo(hole)}
+            </div>
+
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
+    # =========================
     # 自信度
-    st.markdown(
+    # =========================
+
+    st.html(
         f"""
-        <div class="confidence">
-            <div class="conf-title">AI自信度</div>
-            <div class="conf-stars">{stars}</div>
+        <div style="
+            background:#0f172a;
+            border-radius:13px;
+            padding:15px;
+            text-align:center;
+            margin-top:14px;
+        ">
+
+            <div style="
+                color:#cbd5e1;
+                font-size:12px;
+                font-weight:800;
+            ">
+                AI自信度
+            </div>
+
+            <div style="
+                color:#ffffff;
+                font-size:24px;
+                letter-spacing:3px;
+                margin-top:2px;
+            ">
+                {stars}
+            </div>
+
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 

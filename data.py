@@ -1,19 +1,14 @@
 import re
 from datetime import date, timedelta
 
+import pandas as pd
 import requests
 import streamlit as st
 
 
-# =========================
-# API
-# =========================
 API = "https://boatraceopenapi.github.io/api/v1"
 
 
-# =========================
-# 競艇場
-# =========================
 STADIUMS = {
     1: "桐生",
     2: "戸田",
@@ -42,25 +37,16 @@ STADIUMS = {
 }
 
 
-# =========================
-# 共通処理
-# =========================
 def _date_string(target_date):
-    """
-    date / datetime.date / str のどれが来ても
-    YYYY-MM-DD に統一する。
-    """
 
     if isinstance(target_date, date):
         return target_date.isoformat()
 
     value = str(target_date).strip()
 
-    # YYYY-MM-DD
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         return value
 
-    # YYYYMMDD
     if re.fullmatch(r"\d{8}", value):
         return (
             f"{value[:4]}-{value[4:6]}-{value[6:8]}"
@@ -72,24 +58,30 @@ def _date_string(target_date):
 
 
 def _date_object(target_date):
-    value = _date_string(target_date)
-    return date.fromisoformat(value)
+    return date.fromisoformat(
+        _date_string(target_date)
+    )
 
 
 def _num(value, default=0.0):
-    """
-    数字文字列をfloatへ変換。
-    """
-    if value is None:
-        return default
-
-    if isinstance(value, bool):
-        return default
 
     try:
+
+        if value is None:
+            return default
+
+        if isinstance(value, bool):
+            return default
+
         text = str(value).strip()
 
-        if text in ("", "-", "--", "null", "None"):
+        if text in (
+            "",
+            "-",
+            "--",
+            "null",
+            "None",
+        ):
             return default
 
         text = text.replace("%", "")
@@ -102,6 +94,7 @@ def _num(value, default=0.0):
 
 
 def _int(value, default=0):
+
     try:
         return int(float(value))
     except Exception:
@@ -109,38 +102,31 @@ def _int(value, default=0):
 
 
 def _val(obj, *keys, default=None):
-    """
-    複数候補キーから値を取得。
-    """
+
     if not isinstance(obj, dict):
         return default
 
     for key in keys:
-        if key in obj and obj[key] not in (None, ""):
+
+        if (
+            key in obj
+            and obj[key] not in (None, "")
+        ):
             return obj[key]
 
     return default
 
 
-# =========================
-# 場名
-# =========================
 def stadium_name(stadium_no):
+
     return STADIUMS.get(
         _int(stadium_no),
         str(stadium_no),
     )
 
 
-# =========================
-# APIデータ取得
-# =========================
 @st.cache_data(ttl=180)
 def get_data(target_date):
-    """
-    指定日のBoatrace Open APIデータを取得。
-    日付型でも文字列でもOK。
-    """
 
     date_text = _date_string(target_date)
 
@@ -161,81 +147,57 @@ def get_data(target_date):
     return response.json()
 
 
-# =========================
-# 指定場・指定R取得
-# =========================
-def get_race(raw, stadium_no, race_no):
-    """
-    指定した場・Rを正確に取得する。
-
-    以前のように全体を再帰検索せず、
-    stadiums -> races を直接指定する。
-    """
+def get_race(
+    raw,
+    stadium_no,
+    race_no,
+):
 
     stadium_no = _int(stadium_no)
     race_no = _int(race_no)
 
-    programs = raw.get("programs", {})
-    stadiums = programs.get("stadiums", {})
+    programs = raw.get(
+        "programs",
+        {},
+    )
 
-    stadium = stadiums.get(str(stadium_no))
+    stadiums = programs.get(
+        "stadiums",
+        {},
+    )
+
+    stadium = stadiums.get(
+        str(stadium_no)
+    )
 
     if not isinstance(stadium, dict):
         raise ValueError(
             f"場番号 {stadium_no} のデータがありません。"
         )
 
-    races = stadium.get("races", {})
+    races = stadium.get(
+        "races",
+        {},
+    )
 
-    race = races.get(str(race_no))
+    race = races.get(
+        str(race_no)
+    )
 
     if not isinstance(race, dict):
         raise ValueError(
-            f"{stadium_name(stadium_no)} {race_no}R のデータがありません。"
-        )
-
-    actual_stadium = _int(
-        _val(
-            race,
-            "stadium_number",
-            "stadiumNumber",
-            default=stadium_no,
-        )
-    )
-
-    actual_race = _int(
-        _val(
-            race,
-            "race_number",
-            "raceNumber",
-            default=race_no,
-        )
-    )
-
-    if actual_stadium != stadium_no:
-        raise ValueError(
-            "場番号が一致しません。"
-        )
-
-    if actual_race != race_no:
-        raise ValueError(
-            "レース番号が一致しません。"
+            f"{stadium_name(stadium_no)} "
+            f"{race_no}R のデータがありません。"
         )
 
     return race
 
 
-# =========================
-# 選手データ作成
-# =========================
 def make_racer(
     program_racer,
     preview_racer=None,
     lane=0,
 ):
-    """
-    1艇分の特徴量を作成。
-    """
 
     program_racer = (
         program_racer
@@ -264,7 +226,6 @@ def make_racer(
         "name",
         "racer_name",
         "racerName",
-        default=None,
     )
 
     if not name:
@@ -281,7 +242,6 @@ def make_racer(
         "registration_number",
         "registrationNumber",
         "reg_no",
-        default=None,
     )
 
     if register_number is None:
@@ -298,7 +258,6 @@ def make_racer(
         "grade",
         "class",
         "racer_grade",
-        default=None,
     )
 
     if grade is None:
@@ -480,27 +439,30 @@ def make_racer(
         ),
 
         "平均ST": _num(avg_st),
-
         "展示ST": _num(exhibition_st),
-
         "展示タイム": _num(exhibition_time),
 
         "場": 0,
     }
 
 
-# =========================
-# 公式展示データ互換
-# =========================
 def official_preview(race):
-    preview = race.get("preview", {})
+
+    preview = race.get(
+        "preview",
+        {},
+    )
 
     if not isinstance(preview, dict):
         return {}
 
-    racers = preview.get("racers", {})
+    racers = preview.get(
+        "racers",
+        {},
+    )
 
     if isinstance(racers, list):
+
         return {
             str(i + 1): item
             for i, item in enumerate(racers)
@@ -512,27 +474,30 @@ def official_preview(race):
     return {}
 
 
-# =========================
-# 6艇データ作成
-# =========================
 def get_race_rows(
     race,
     stadium_no,
     race_no,
 ):
-    stadium_no = _int(stadium_no)
-    race_no = _int(race_no)
 
-    racers = race.get("racers", {})
+    racers = race.get(
+        "racers",
+        {},
+    )
 
     if isinstance(racers, list):
+
         program_racers = {
             str(i + 1): item
             for i, item in enumerate(racers)
         }
+
     elif isinstance(racers, dict):
+
         program_racers = racers
+
     else:
+
         program_racers = {}
 
     preview_racers = official_preview(race)
@@ -541,23 +506,19 @@ def get_race_rows(
 
     for lane in range(1, 7):
 
-        program_racer = program_racers.get(
-            str(lane),
-            {},
-        )
-
-        preview_racer = preview_racers.get(
-            str(lane),
-            {},
-        )
-
         row = make_racer(
-            program_racer,
-            preview_racer,
+            program_racers.get(
+                str(lane),
+                {},
+            ),
+            preview_racers.get(
+                str(lane),
+                {},
+            ),
             lane,
         )
 
-        row["場"] = stadium_no
+        row["場"] = _int(stadium_no)
 
         rows.append(row)
 
@@ -576,33 +537,33 @@ def get_race_rows(
             "選手名を取得できない艇があります。"
         )
 
-    import pandas as pd
-
     return pd.DataFrame(rows)
 
 
-# =========================
-# 過去データ作成
-# =========================
 def _build_history_rows(raw):
-    """
-    APIデータから過去成績用の学習データを作る。
-    """
-
-    import pandas as pd
 
     rows = []
 
-    programs = raw.get("programs", {})
-    stadiums = programs.get("stadiums", {})
+    programs = raw.get(
+        "programs",
+        {},
+    )
 
-    if not isinstance(stadiums, dict):
-        return pd.DataFrame()
+    stadiums = programs.get(
+        "stadiums",
+        {},
+    )
 
-    results = raw.get("results", {})
+    results = raw.get(
+        "results",
+        {},
+    )
 
     if not isinstance(results, dict):
         results = {}
+
+    if not isinstance(stadiums, dict):
+        return pd.DataFrame()
 
     for stadium_key, stadium_data in stadiums.items():
 
@@ -611,7 +572,10 @@ def _build_history_rows(raw):
         if not isinstance(stadium_data, dict):
             continue
 
-        races = stadium_data.get("races", {})
+        races = stadium_data.get(
+            "races",
+            {},
+        )
 
         if not isinstance(races, dict):
             continue
@@ -623,9 +587,35 @@ def _build_history_rows(raw):
 
             race_no = _int(race_key)
 
-            racers = race.get("racers", {})
+            result_stadium = results.get(
+                str(stadium_no),
+                {},
+            )
+
+            if not isinstance(
+                result_stadium,
+                dict,
+            ):
+                result_stadium = {}
+
+            result_race = result_stadium.get(
+                str(race_no),
+                {},
+            )
+
+            if not isinstance(
+                result_race,
+                dict,
+            ):
+                result_race = {}
+
+            racers = race.get(
+                "racers",
+                {},
+            )
 
             if isinstance(racers, list):
+
                 racers = {
                     str(i + 1): item
                     for i, item in enumerate(racers)
@@ -634,35 +624,25 @@ def _build_history_rows(raw):
             if not isinstance(racers, dict):
                 continue
 
-            # 結果データ
-            race_result = results.get(
-                str(stadium_no),
-                {},
-            )
-
-            if not isinstance(race_result, dict):
-                race_result = {}
-
-            result_race = race_result.get(
-                str(race_no),
-                {},
-            )
-
-            if not isinstance(result_race, dict):
-                result_race = {}
-
             result_racers = result_race.get(
                 "racers",
-                result_race.get("results", {}),
+                result_race.get(
+                    "results",
+                    {},
+                ),
             )
 
             if isinstance(result_racers, list):
+
                 result_racers = {
                     str(i + 1): item
                     for i, item in enumerate(result_racers)
                 }
 
-            if not isinstance(result_racers, dict):
+            if not isinstance(
+                result_racers,
+                dict,
+            ):
                 result_racers = {}
 
             for lane in range(1, 7):
@@ -677,17 +657,21 @@ def _build_history_rows(raw):
                     {},
                 )
 
-                if not isinstance(racer, dict):
+                if not isinstance(
+                    racer,
+                    dict,
+                ):
                     racer = {}
 
-                if not isinstance(result_racer, dict):
+                if not isinstance(
+                    result_racer,
+                    dict,
+                ):
                     result_racer = {}
-
-                preview = {}
 
                 row = make_racer(
                     racer,
-                    preview,
+                    {},
                     lane,
                 )
 
@@ -699,6 +683,7 @@ def _build_history_rows(raw):
                     "finishPosition",
                     "rank",
                     "着順",
+                    "finish",
                     default=0,
                 )
 
@@ -710,25 +695,25 @@ def _build_history_rows(raw):
 
                 rows.append(row)
 
+    if not rows:
+        return pd.DataFrame()
+
     return pd.DataFrame(rows)
 
 
-# =========================
-# 過去14日
-# =========================
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=900)
 def history14(target_date):
 
     target = _date_object(target_date)
 
     all_rows = []
 
-    # 今日を含めて過去14日
     for i in range(1, 15):
 
         d = target - timedelta(days=i)
 
         try:
+
             raw = get_data(d)
 
             df = _build_history_rows(raw)
@@ -737,14 +722,10 @@ def history14(target_date):
                 all_rows.append(df)
 
         except Exception:
-            # 過去データが存在しない日は無視
             continue
 
     if not all_rows:
-        import pandas as pd
         return pd.DataFrame()
-
-    import pandas as pd
 
     return pd.concat(
         all_rows,
@@ -752,15 +733,18 @@ def history14(target_date):
     )
 
 
-# =========================
-# データ検証
-# =========================
 def validate_race(
     race,
     target_date,
     stadium_no,
     race_no,
 ):
+
+    if not isinstance(race, dict):
+        raise ValueError(
+            "レースデータが不正です。"
+        )
+
     stadium_no = _int(stadium_no)
     race_no = _int(race_no)
 
@@ -796,23 +780,21 @@ def validate_race(
 
     if actual_stadium != stadium_no:
         raise ValueError(
-            f"場が一致しません: "
-            f"{actual_stadium} / {stadium_no}"
+            "場番号が一致しません。"
         )
 
     if actual_race != race_no:
         raise ValueError(
-            f"Rが一致しません: "
-            f"{actual_race} / {race_no}"
+            "レース番号が一致しません。"
         )
 
     if actual_date:
+
         actual_date = str(actual_date)[:10]
 
         if actual_date != expected_date:
             raise ValueError(
-                f"日付が一致しません: "
-                f"{actual_date} / {expected_date}"
+                "日付が一致しません。"
             )
 
     return True

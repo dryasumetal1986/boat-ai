@@ -1,7 +1,6 @@
 # backtest.py
 
 from datetime import date, timedelta
-import itertools
 
 import pandas as pd
 import streamlit as st
@@ -11,8 +10,7 @@ from ai import tri_ai
 
 
 # =========================================================
-# 実際の着順を取り出す
-# APIの多少の形式違いにも対応
+# 実際の3連単結果を取得
 # =========================================================
 
 def _extract_actual_order(race):
@@ -23,47 +21,70 @@ def _extract_actual_order(race):
 
     rows = []
 
+    # results がリストの場合
     if isinstance(results, list):
         rows = results
 
+    # results が辞書の場合
     elif isinstance(results, dict):
-        # よくある形式
-        for key in ["racer", "racers", "results", "result"]:
+
+        # よくあるキー
+        for key in [
+            "racer",
+            "racers",
+            "results",
+            "result",
+        ]:
             value = results.get(key)
+
             if isinstance(value, list):
                 rows = value
                 break
 
-        # {"1": {...}, "2": {...}} のような形式
+        # {"1": {...}, "2": {...}} 形式
         if not rows:
+
             numeric_items = []
-            for k, v in results.items():
+
+            for key, value in results.items():
+
                 try:
-                    rank = int(k)
-                    numeric_items.append((rank, v))
+                    rank = int(key)
+                    numeric_items.append(
+                        (rank, value)
+                    )
                 except Exception:
-                    pass
+                    continue
 
             if numeric_items:
-                numeric_items.sort(key=lambda x: x[0])
-                rows = [v for _, v in numeric_items]
+
+                numeric_items.sort(
+                    key=lambda x: x[0]
+                )
+
+                rows = [
+                    value
+                    for _, value in numeric_items
+                ]
 
     if not rows:
         return None
 
     order = []
 
-    for i, row in enumerate(rows):
+    for index, row in enumerate(rows):
+
         if not isinstance(row, dict):
             continue
 
+        # 着順
         rank = (
             row.get("着順")
             or row.get("rank")
             or row.get("finish")
             or row.get("finish_position")
             or row.get("順位")
-            or (i + 1)
+            or index + 1
         )
 
         try:
@@ -71,6 +92,7 @@ def _extract_actual_order(race):
         except Exception:
             continue
 
+        # 艇番
         lane = (
             row.get("艇番")
             or row.get("boat")
@@ -87,14 +109,22 @@ def _extract_actual_order(race):
         except Exception:
             continue
 
-        order.append((rank, lane))
+        if 1 <= lane <= 6:
+            order.append(
+                (rank, lane)
+            )
 
     if len(order) < 3:
         return None
 
-    order.sort(key=lambda x: x[0])
+    order.sort(
+        key=lambda x: x[0]
+    )
 
-    result = [lane for _, lane in order[:3]]
+    result = [
+        lane
+        for _, lane in order[:3]
+    ]
 
     if len(result) != 3:
         return None
@@ -106,11 +136,15 @@ def _extract_actual_order(race):
 
 
 # =========================================================
-# 3連単的中判定
+# 的中判定
 # =========================================================
 
 def _is_hit(prediction, actual):
-    if prediction is None or actual is None:
+
+    if prediction is None:
+        return False
+
+    if actual is None:
         return False
 
     return tuple(prediction) == tuple(actual)
@@ -121,12 +155,17 @@ def _is_hit(prediction, actual):
 # =========================================================
 
 def _confidence_from_probs(boat_probs):
+
     if not boat_probs:
         return "★☆☆☆☆"
 
     try:
+
         values = sorted(
-            [float(v) for v in boat_probs],
+            [
+                float(value)
+                for value in boat_probs
+            ],
             reverse=True
         )
 
@@ -134,26 +173,40 @@ def _confidence_from_probs(boat_probs):
 
         if top >= 0.45:
             return "★★★★★"
-        elif top >= 0.38:
+
+        if top >= 0.38:
             return "★★★★☆"
-        elif top >= 0.32:
+
+        if top >= 0.32:
             return "★★★☆☆"
-        elif top >= 0.26:
+
+        if top >= 0.26:
             return "★★☆☆☆"
-        else:
-            return "★☆☆☆☆"
+
+        return "★☆☆☆☆"
 
     except Exception:
         return "★★★☆☆"
 
 
 # =========================================================
-# 1レース検証
+# 1レースを検証
 # =========================================================
 
-def evaluate_race(target_date, stadium_no, race_no):
+def evaluate_race(
+    target_date,
+    stadium_no,
+    race_no,
+    history=None,
+    raw=None,
+):
+
     try:
-        raw = data.get_data(target_date)
+
+        if raw is None:
+            raw = data.get_data(
+                target_date
+            )
 
         race = data.get_race(
             raw,
@@ -164,50 +217,126 @@ def evaluate_race(target_date, stadium_no, race_no):
         if not race:
             return None
 
-        rows = data.get_race_rows(race)
-
-        if not rows or len(rows) != 6:
+        if not data.validate_race(
+            race,
+            stadium_no,
+            race_no
+        ):
             return None
 
-        # 過去14日間のデータ
-        history = data.history14(target_date)
-
-        result = tri_ai(
-            rows,
-            history
+        # 6艇
+        rows = data.get_race_rows(
+            race
         )
 
-        if not result:
+        if not rows:
             return None
 
-        actual = _extract_actual_order(race)
+        if len(rows) != 6:
+            return None
+
+        # 実際の着順
+        actual = _extract_actual_order(
+            race
+        )
 
         if actual is None:
             return None
 
-        main = result.get("main")
-        counter = result.get("counter")
-        hole = result.get("hole")
+        # 学習用過去データ
+        if history is None:
+            history = data.history14(
+                target_date
+            )
 
-        boat_probs = result.get("boat_probs", [])
+        # AI予想
+        prediction = tri_ai(
+            rows,
+            history
+        )
+
+        if not prediction:
+            return None
+
+        main = prediction.get(
+            "main"
+        )
+
+        counter = prediction.get(
+            "counter"
+        )
+
+        hole = prediction.get(
+            "hole"
+        )
+
+        boat_probs = prediction.get(
+            "boat_probs",
+            []
+        )
 
         return {
             "date": target_date,
             "stadium_no": stadium_no,
-            "stadium": data.stadium_name(stadium_no),
+            "stadium": data.stadium_name(
+                stadium_no
+            ),
             "race": race_no,
-            "main": tuple(main) if main else None,
-            "counter": tuple(counter) if counter else None,
-            "hole": tuple(hole) if hole else None,
-            "actual": actual,
-            "main_hit": _is_hit(main, actual),
-            "counter_hit": _is_hit(counter, actual),
-            "hole_hit": _is_hit(hole, actual),
+
+            "main": (
+                "-".join(
+                    map(str, main)
+                )
+                if main
+                else ""
+            ),
+
+            "counter": (
+                "-".join(
+                    map(str, counter)
+                )
+                if counter
+                else ""
+            ),
+
+            "hole": (
+                "-".join(
+                    map(str, hole)
+                )
+                if hole
+                else ""
+            ),
+
+            "actual": "-".join(
+                map(str, actual)
+            ),
+
+            "main_hit": _is_hit(
+                main,
+                actual
+            ),
+
+            "counter_hit": _is_hit(
+                counter,
+                actual
+            ),
+
+            "hole_hit": _is_hit(
+                hole,
+                actual
+            ),
+
             "main_or_counter_hit": (
                 _is_hit(main, actual)
-                or _is_hit(counter, actual)
+                or
+                _is_hit(counter, actual)
             ),
-            "confidence": _confidence_from_probs(boat_probs),
+
+            "confidence": (
+                _confidence_from_probs(
+                    boat_probs
+                )
+            ),
         }
 
     except Exception:
@@ -215,102 +344,87 @@ def evaluate_race(target_date, stadium_no, race_no):
 
 
 # =========================================================
-# 指定期間をバックテスト
+# 直近○レースを取得してバックテスト
 # =========================================================
 
-def run_backtest(start_date, end_date, max_races=None):
+def run_backtest(
+    race_count=300
+):
+
     records = []
 
-    current = start_date
+    # 今日から過去へ
+    current = date.today()
 
-    while current <= end_date:
+    # 最大60日まで遡る
+    max_days = 60
+
+    days_checked = 0
+
+    while (
+        len(records) < race_count
+        and days_checked < max_days
+    ):
 
         target_date = current.isoformat()
 
         try:
-            raw = data.get_data(target_date)
+
+            # その日のデータ
+            raw = data.get_data(
+                target_date
+            )
+
+            # その日の過去14日データ
+            # 同じ日付では1回だけ取得
+            history = data.history14(
+                target_date
+            )
+
         except Exception:
-            current += timedelta(days=1)
+
+            current -= timedelta(
+                days=1
+            )
+
+            days_checked += 1
             continue
 
+        # 24場
         for stadium_no in range(1, 25):
 
+            if len(records) >= race_count:
+                break
+
+            # 1R～12R
             for race_no in range(1, 13):
 
-                if max_races is not None and len(records) >= max_races:
-                    return pd.DataFrame(records)
+                if len(records) >= race_count:
+                    break
 
-                try:
-                    race = data.get_race(
-                        raw,
-                        stadium_no,
-                        race_no
-                    )
+                result = evaluate_race(
+                    target_date=target_date,
+                    stadium_no=stadium_no,
+                    race_no=race_no,
+                    history=history,
+                    raw=raw,
+                )
 
-                    if not race:
-                        continue
-
-                    rows = data.get_race_rows(race)
-
-                    if not rows or len(rows) != 6:
-                        continue
-
-                    actual = _extract_actual_order(race)
-
-                    if actual is None:
-                        continue
-
-                    history = data.history14(target_date)
-
-                    result = tri_ai(
-                        rows,
-                        history
-                    )
-
-                    if not result:
-                        continue
-
-                    main = result.get("main")
-                    counter = result.get("counter")
-                    hole = result.get("hole")
-
-                    boat_probs = result.get("boat_probs", [])
-
-                    records.append({
-                        "date": target_date,
-                        "stadium_no": stadium_no,
-                        "stadium": data.stadium_name(stadium_no),
-                        "race": race_no,
-                        "main": "-".join(map(str, main))
-                        if main else "",
-                        "counter": "-".join(map(str, counter))
-                        if counter else "",
-                        "hole": "-".join(map(str, hole))
-                        if hole else "",
-                        "actual": "-".join(map(str, actual)),
-                        "main_hit": _is_hit(main, actual),
-                        "counter_hit": _is_hit(counter, actual),
-                        "hole_hit": _is_hit(hole, actual),
-                        "main_or_counter_hit": (
-                            _is_hit(main, actual)
-                            or _is_hit(counter, actual)
-                        ),
-                        "confidence": _confidence_from_probs(
-                            boat_probs
-                        ),
-                    })
-
-                    if len(records) % 10 == 0:
-                        print(
-                            f"バックテスト: {len(records)}レース"
-                        )
-
-                except Exception:
+                if result is None:
                     continue
 
-        current += timedelta(days=1)
+                records.append(result)
 
-    return pd.DataFrame(records)
+        # 前日へ
+        current -= timedelta(
+            days=1
+        )
+
+        days_checked += 1
+
+    return pd.DataFrame(
+        records
+    )
 
 
 # =========================================================
@@ -320,29 +434,40 @@ def run_backtest(start_date, end_date, max_races=None):
 def summarize_backtest(df):
 
     if df is None or df.empty:
+
         return {
             "races": 0,
-            "main_hit_rate": 0,
-            "counter_hit_rate": 0,
-            "hole_hit_rate": 0,
-            "main_or_counter_rate": 0,
+            "main_hit_rate": 0.0,
+            "counter_hit_rate": 0.0,
+            "hole_hit_rate": 0.0,
+            "main_or_counter_rate": 0.0,
         }
 
     total = len(df)
 
     return {
         "races": total,
+
         "main_hit_rate": (
-            df["main_hit"].mean() * 100
+            df["main_hit"].mean()
+            * 100
         ),
+
         "counter_hit_rate": (
-            df["counter_hit"].mean() * 100
+            df["counter_hit"].mean()
+            * 100
         ),
+
         "hole_hit_rate": (
-            df["hole_hit"].mean() * 100
+            df["hole_hit"].mean()
+            * 100
         ),
+
         "main_or_counter_rate": (
-            df["main_or_counter_hit"].mean() * 100
+            df[
+                "main_or_counter_hit"
+            ].mean()
+            * 100
         ),
     }
 
@@ -357,21 +482,40 @@ def confidence_summary(df):
         return pd.DataFrame()
 
     result = (
-        df.groupby("confidence")
+        df.groupby(
+            "confidence"
+        )
         .agg(
-            レース数=("main_hit", "count"),
-            本命的中率=("main_hit", "mean"),
-            本命対抗的中率=("main_or_counter_hit", "mean"),
+            レース数=(
+                "main_hit",
+                "count"
+            ),
+
+            本命的中率=(
+                "main_hit",
+                "mean"
+            ),
+
+            本命対抗的中率=(
+                "main_or_counter_hit",
+                "mean"
+            ),
         )
         .reset_index()
     )
 
-    result["本命的中率"] = (
-        result["本命的中率"] * 100
+    result[
+        "本命的中率"
+    ] = (
+        result["本命的中率"]
+        * 100
     ).round(1)
 
-    result["本命対抗的中率"] = (
-        result["本命対抗的中率"] * 100
+    result[
+        "本命対抗的中率"
+    ] = (
+        result["本命対抗的中率"]
+        * 100
     ).round(1)
 
     return result
@@ -383,123 +527,189 @@ def confidence_summary(df):
 
 def render_backtest():
 
-    st.markdown("## 📊 AIバックテスト")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        start_date = st.date_input(
-            "開始日",
-            value=date.today() - timedelta(days=14)
-        )
-
-    with col2:
-        end_date = st.date_input(
-            "終了日",
-            value=date.today() - timedelta(days=1)
-        )
-
-    max_races = st.number_input(
-        "検証レース数",
-        min_value=1,
-        max_value=5000,
-        value=300,
-        step=100,
-        help="最初は300レース程度がおすすめです。"
+    st.markdown(
+        "### 📊 AI実力テスト"
     )
 
-    if start_date >= end_date:
-        st.warning("開始日は終了日より前にしてください。")
-        return
+    st.caption(
+        "日付を指定せず、直近のレース数だけ選んでAIを検証できます。"
+    )
+
+    # ---------------------------------------------
+    # レース数選択
+    # ---------------------------------------------
+
+    race_count = st.radio(
+        "検証するレース数",
+        options=[
+            100,
+            300,
+            500,
+            1000,
+        ],
+        format_func=lambda x:
+            f"直近{x:,}レース",
+        horizontal=True,
+    )
+
+    st.info(
+        f"📌 直近 {race_count:,} レースを自動で探して検証します。"
+    )
+
+    # ---------------------------------------------
+    # 開始
+    # ---------------------------------------------
 
     if st.button(
-        "🚀 バックテスト開始",
-        use_container_width=True
+        "🚀 検証開始",
+        use_container_width=True,
+        key="start_backtest",
     ):
 
-        progress = st.progress(0)
+        progress = st.progress(
+            0
+        )
+
+        status = st.empty()
+
+        status.write(
+            f"🔎 直近{race_count:,}レースを探しています..."
+        )
 
         with st.spinner(
-            "過去レースを検証しています..."
+            "AIが過去レースを検証しています..."
         ):
+
             df = run_backtest(
-                start_date,
-                end_date,
-                max_races=max_races
+                race_count=race_count
             )
 
-        progress.progress(100)
+        progress.progress(
+            100
+        )
 
-        if df.empty:
+        status.empty()
+
+        # -----------------------------------------
+        # データなし
+        # -----------------------------------------
+
+        if df is None or df.empty:
+
             st.error(
                 "検証できるレースがありませんでした。"
             )
+
             return
 
-        summary = summarize_backtest(df)
+        # -----------------------------------------
+        # 集計
+        # -----------------------------------------
 
-        st.success(
-            f"{summary['races']}レースの検証が完了しました。"
+        summary = summarize_backtest(
+            df
         )
 
-        st.markdown("### 🎯 検証結果")
+        st.success(
+            f"✅ {summary['races']:,}レースの検証が完了しました。"
+        )
 
-        c1, c2 = st.columns(2)
+        # -----------------------------------------
+        # 結果
+        # -----------------------------------------
 
-        with c1:
+        st.markdown(
+            "#### 🎯 検証結果"
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
             st.metric(
                 "検証レース",
-                f"{summary['races']}R"
+                f"{summary['races']:,}R"
             )
 
-        with c2:
+        with col2:
+
             st.metric(
-                "本命3連単的中率",
+                "本命的中率",
                 f"{summary['main_hit_rate']:.1f}%"
             )
 
-        c3, c4 = st.columns(2)
+        col3, col4 = st.columns(2)
 
-        with c3:
+        with col3:
+
             st.metric(
-                "対抗3連単的中率",
+                "対抗的中率",
                 f"{summary['counter_hit_rate']:.1f}%"
             )
 
-        with c4:
+        with col4:
+
             st.metric(
                 "本命＋対抗",
                 f"{summary['main_or_counter_rate']:.1f}%"
             )
 
-        st.markdown("### ⭐ 自信度別")
+        # -----------------------------------------
+        # 穴
+        # -----------------------------------------
 
-        confidence_df = confidence_summary(df)
+        st.metric(
+            "穴的中率",
+            f"{summary['hole_hit_rate']:.1f}%"
+        )
+
+        # -----------------------------------------
+        # 自信度
+        # -----------------------------------------
+
+        st.markdown(
+            "#### ⭐ 自信度別成績"
+        )
+
+        confidence_df = (
+            confidence_summary(df)
+        )
 
         if not confidence_df.empty:
+
             st.dataframe(
                 confidence_df,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
 
-        st.markdown("### 📋 レース別結果")
+        # -----------------------------------------
+        # レース別
+        # -----------------------------------------
+
+        st.markdown(
+            "#### 📋 レース別結果"
+        )
 
         display_df = df.copy()
 
-        display_df["結果"] = display_df.apply(
-            lambda x:
-                "🎯 本命"
-                if x["main_hit"]
-                else (
-                    "🔥 対抗"
-                    if x["counter_hit"]
-                    else (
-                        "💥 穴"
-                        if x["hole_hit"]
-                        else "－"
-                    )
-                ),
+        def result_label(row):
+
+            if row["main_hit"]:
+                return "🎯 本命"
+
+            if row["counter_hit"]:
+                return "🔥 対抗"
+
+            if row["hole_hit"]:
+                return "💥 穴"
+
+            return "－"
+
+        display_df[
+            "結果"
+        ] = display_df.apply(
+            result_label,
             axis=1
         )
 
@@ -532,17 +742,26 @@ def render_backtest():
         st.dataframe(
             display_df,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
+
+        # -----------------------------------------
+        # CSV
+        # -----------------------------------------
 
         csv = df.to_csv(
             index=False
-        ).encode("utf-8-sig")
+        ).encode(
+            "utf-8-sig"
+        )
 
         st.download_button(
             "📥 検証結果CSVを保存",
             data=csv,
-            file_name="boat_ai_backtest.csv",
+            file_name=(
+                f"boat_ai_backtest_"
+                f"{race_count}.csv"
+            ),
             mime="text/csv",
-            use_container_width=True
-          )
+            use_container_width=True,
+        )

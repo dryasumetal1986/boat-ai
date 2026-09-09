@@ -1,9 +1,18 @@
-import itertools
+# ai.py
+# 🚤 やっちゃんの競艇AI予想PRO
+# AI予想エンジン
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 
+
+# =========================================================
+# AI予想で使用する特徴量
+# =========================================================
 
 FEATURES = [
     "枠",
@@ -21,200 +30,40 @@ FEATURES = [
 ]
 
 
-# =========================
-# 数値化
-# =========================
+# =========================================================
+# 数値変換
+# =========================================================
 
-def _num(value):
+def _num(
+    value: Any,
+    default: float = 0.0,
+) -> float:
 
     try:
-
         if value is None:
-            return 0.0
+            return default
 
-        if pd.isna(value):
-            return 0.0
+        if value == "":
+            return default
 
-        return float(value)
+        value = float(value)
+
+        if not np.isfinite(value):
+            return default
+
+        return value
 
     except Exception:
+        return default
 
-        return 0.0
 
+# =========================================================
+# 0〜1へ正規化
+# =========================================================
 
-# =========================
-# 特徴量
-# =========================
-
-def _prepare_features(df):
-
-    work = df.copy()
-
-
-    for col in FEATURES:
-
-        if col not in work.columns:
-            work[col] = 0
-
-
-    for col in FEATURES:
-
-        work[col] = pd.to_numeric(
-            work[col],
-            errors="coerce",
-        ).fillna(0)
-
-
-    return work[FEATURES].astype(float)
-
-
-# =========================
-# 選手能力
-# =========================
-
-def _ability_score(row):
-
-    return (
-
-        _num(row.get("全国勝率")) * 1.8
-
-        + _num(row.get("全国2連率")) * 0.35
-
-        + _num(row.get("全国3連率")) * 0.18
-
-        + _num(row.get("当地勝率")) * 0.8
-
-        + _num(row.get("当地2連率")) * 0.15
-
-        + _num(row.get("モーター2連率")) * 0.08
-
-    )
-
-
-# =========================
-# 展示
-# =========================
-
-def _exhibition_score(
-    row,
-    mean_time,
-):
-
-    score = 0.0
-
-
-    exhibition_time = _num(
-        row.get("展示タイム")
-    )
-
-
-    if exhibition_time > 0:
-
-        score += (
-            mean_time
-            - exhibition_time
-        ) * 8.0
-
-
-    exhibition_st = _num(
-        row.get("展示ST")
-    )
-
-
-    if exhibition_st > 0:
-
-        score += (
-            0.12
-            - exhibition_st
-        ) * 8.0
-
-
-    return score
-
-
-# =========================
-# コース
-# =========================
-
-def _course_score(row):
-
-    lane = int(
-        _num(
-            row.get(
-                "展示進入",
-                row.get("枠", 0),
-            )
-        )
-    )
-
-
-    if lane == 1:
-        return 3.0
-
-    if lane == 2:
-        return 1.8
-
-    if lane == 3:
-        return 1.4
-
-    if lane == 4:
-        return 1.0
-
-    if lane == 5:
-        return 0.4
-
-    if lane == 6:
-        return 0.1
-
-    return 0.0
-
-
-# =========================
-# 基礎スコア
-# =========================
-
-def _base_score(
-    row,
-    mean_time,
-):
-
-    return (
-
-        _ability_score(row)
-
-        + _exhibition_score(
-            row,
-            mean_time,
-        )
-
-        + _course_score(row)
-
-    )
-
-
-# =========================
-# モーター
-# =========================
-
-def _machine_prob(row):
-
-    motor = _num(
-        row.get(
-            "モーター2連率"
-        )
-    )
-
-    return max(
-        0.0,
-        motor / 100.0,
-    )
-
-
-# =========================
-# 正規化
-# =========================
-
-def _normalize(values):
+def _normalize(
+    values: List[float],
+) -> np.ndarray:
 
     arr = np.asarray(
         values,
@@ -224,402 +73,650 @@ def _normalize(values):
     if len(arr) == 0:
         return arr
 
+    minimum = np.min(arr)
+    maximum = np.max(arr)
 
-    arr = arr - arr.max()
+    if maximum - minimum < 1e-9:
+        return np.ones(len(arr)) * 0.5
 
-    exp = np.exp(arr)
-
-    total = exp.sum()
-
-
-    if total <= 0:
-
-        return np.ones(
-            len(arr)
-        ) / len(arr)
-
-
-    return exp / total
-
-
-# =========================
-# 順位
-# =========================
-
-def _rank_scores(
-    df,
-    scores,
-):
-
-    order = np.argsort(
-        -np.asarray(scores)
+    return (
+        (arr - minimum)
+        / (maximum - minimum)
     )
 
-    return order
+
+# =========================================================
+# 枠評価
+# =========================================================
+
+def _lane_score(
+    lane: float,
+) -> float:
+
+    lane = _num(lane, 0)
+
+    scores = {
+        1: 1.00,
+        2: 0.82,
+        3: 0.70,
+        4: 0.62,
+        5: 0.48,
+        6: 0.38,
+    }
+
+    return scores.get(
+        int(lane),
+        0.5,
+    )
 
 
-# =========================
-# 組み合わせ評価
-# =========================
+# =========================================================
+# 全国成績
+# =========================================================
 
-def _combination_score(
-    combo,
-    work,
-):
+def _national_score(
+    row: pd.Series,
+) -> float:
 
-    score = 0.0
+    win = _num(
+        row.get("全国勝率"),
+    )
 
+    top2 = _num(
+        row.get("全国2連率"),
+    )
 
-    for pos, idx in enumerate(combo):
+    top3 = _num(
+        row.get("全国3連率"),
+    )
 
-        row = work.iloc[idx]
-
-        base = _num(
-            row["_score"]
-        )
-
-
-        if pos == 0:
-            score += base * 1.20
-
-        elif pos == 1:
-            score += base * 0.85
-
-        else:
-            score += base * 0.55
-
+    # 勝率を中心に評価
+    score = (
+        win * 0.50
+        + top2 * 0.30
+        + top3 * 0.20
+    )
 
     return score
 
 
-# =========================
-# 実際の艇番
-# =========================
+# =========================================================
+# 当地成績
+# =========================================================
 
-def _combo_lanes(
-    combo,
-    work,
-):
+def _local_score(
+    row: pd.Series,
+) -> float:
 
-    result = []
-
-    for idx in combo:
-
-        lane = _num(
-            work.iloc[idx].get(
-                "艇番",
-                work.iloc[idx].get(
-                    "枠",
-                    idx + 1,
-                ),
-            )
-        )
-
-        result.append(
-            int(lane)
-        )
-
-    return result
-
-
-# =========================
-# 穴候補
-# =========================
-
-def _find_hole(
-    work,
-    ranked,
-):
-
-    # 人気上位を避けて
-    # 中位〜下位から穴を探す
-
-    candidates = ranked[2:]
-
-    if len(candidates) == 0:
-        candidates = ranked
-
-
-    # モーター・展示を考慮
-    best_idx = None
-    best_score = -999999
-
-
-    for idx in candidates:
-
-        row = work.iloc[idx]
-
-        score = (
-
-            _num(
-                row.get(
-                    "モーター2連率"
-                )
-            ) * 0.5
-
-            + _num(
-                row.get(
-                    "展示ST"
-                )
-            ) * -8.0
-
-            + _num(
-                row.get(
-                    "展示タイム"
-                )
-            ) * -2.0
-
-        )
-
-
-        if score > best_score:
-
-            best_score = score
-            best_idx = idx
-
-
-    return best_idx
-
-
-# =========================
-# AI予想
-# =========================
-
-def tri_ai(
-    df,
-    history=None,
-):
-
-    if df is None:
-        return {
-            "main": [],
-            "counter": [],
-            "hole": [],
-            "boat_probs": {},
-        }
-
-
-    if len(df) != 6:
-
-        return {
-            "main": [],
-            "counter": [],
-            "hole": [],
-            "boat_probs": {},
-        }
-
-
-    work = df.copy()
-
-
-    # =========================
-    # 平均展示タイム
-    # =========================
-
-    times = pd.to_numeric(
-        work.get(
-            "展示タイム",
-            pd.Series(dtype=float),
-        ),
-        errors="coerce",
+    win = _num(
+        row.get("当地勝率"),
     )
 
-    valid_times = times[
-        times > 0
+    top2 = _num(
+        row.get("当地2連率"),
+    )
+
+    top3 = _num(
+        row.get("当地3連率"),
+    )
+
+    return (
+        win * 0.50
+        + top2 * 0.30
+        + top3 * 0.20
+    )
+
+
+# =========================================================
+# モーター評価
+# =========================================================
+
+def _motor_score(
+    row: pd.Series,
+) -> float:
+
+    return _num(
+        row.get("モーター2連率"),
+    )
+
+
+# =========================================================
+# ST評価
+# =========================================================
+
+def _st_score(
+    row: pd.Series,
+) -> float:
+
+    avg_st = _num(
+        row.get("平均ST"),
+        0.20,
+    )
+
+    exhibition_st = _num(
+        row.get("展示ST"),
+        0.20,
+    )
+
+    # STは小さいほど高評価
+    avg_score = max(
+        0.0,
+        1.0 - avg_st * 3.0,
+    )
+
+    exhibition_score = max(
+        0.0,
+        1.0 - exhibition_st * 3.0,
+    )
+
+    return (
+        avg_score * 0.45
+        + exhibition_score * 0.55
+    )
+
+
+# =========================================================
+# 展示タイム評価
+# =========================================================
+
+def _exhibition_score(
+    row: pd.Series,
+    all_rows: pd.DataFrame,
+) -> float:
+
+    time = _num(
+        row.get("展示タイム"),
+        0.0,
+    )
+
+    if time <= 0:
+        return 0.5
+
+    times = [
+        _num(x)
+        for x in all_rows["展示タイム"].tolist()
+        if _num(x) > 0
     ]
 
+    if not times:
+        return 0.5
 
-    if len(valid_times):
+    mean_time = float(
+        np.mean(times)
+    )
 
-        mean_time = float(
-            valid_times.mean()
+    # 展示タイムは小さいほど高評価
+    diff = mean_time - time
+
+    score = 0.5 + diff * 8.0
+
+    return float(
+        np.clip(
+            score,
+            0.0,
+            1.0,
         )
-
-    else:
-
-        mean_time = 0.0
-
-
-    # =========================
-    # スコア
-    # =========================
-
-    scores = []
-
-
-    for _, row in work.iterrows():
-
-        scores.append(
-            _base_score(
-                row,
-                mean_time,
-            )
-            + _machine_prob(row) * 5
-        )
-
-
-    work["_score"] = scores
-
-
-    # =========================
-    # 確率
-    # =========================
-
-    probs = _normalize(
-        scores
     )
 
 
-    boat_probs = {}
+# =========================================================
+# コース評価
+# =========================================================
+
+def _course_score(
+    row: pd.Series,
+) -> float:
+
+    course = _num(
+        row.get("展示進入"),
+        row.get("枠", 1),
+    )
+
+    return _lane_score(course)
 
 
-    for idx, (_, row) in enumerate(
-        work.iterrows()
-    ):
+# =========================================================
+# 個別選手スコア
+# =========================================================
 
-        lane = int(
+def _player_score(
+    row: pd.Series,
+    all_rows: pd.DataFrame,
+) -> float:
+
+    lane = _lane_score(
+        row.get("枠")
+    )
+
+    course = _course_score(
+        row
+    )
+
+    national = _national_score(
+        row
+    )
+
+    local = _local_score(
+        row
+    )
+
+    motor = _motor_score(
+        row
+    )
+
+    st = _st_score(
+        row
+    )
+
+    exhibition = _exhibition_score(
+        row,
+        all_rows,
+    )
+
+    # -----------------------------------------------------
+    # 総合AIスコア
+    # -----------------------------------------------------
+
+    score = (
+        lane * 25.0
+        + course * 8.0
+        + national * 2.5
+        + local * 1.5
+        + motor * 0.20
+        + st * 10.0
+        + exhibition * 12.0
+    )
+
+    return float(score)
+
+
+# =========================================================
+# 過去14日データによる補正
+# =========================================================
+
+def _history_bonus(
+    boat_number: int,
+    history: Any,
+) -> float:
+
+    if not history:
+        return 0.0
+
+    bonus = 0.0
+    total = 0
+
+    try:
+
+        for item in history:
+
+            if not isinstance(item, dict):
+                continue
+
+            result = item.get(
+                "result",
+                [],
+            )
+
+            if not isinstance(result, list):
+                continue
+
+            total += 1
+
+            if boat_number in result[:3]:
+
+                if len(result) > 0:
+                    if boat_number == result[0]:
+                        bonus += 2.5
+
+                    elif boat_number == result[1]:
+                        bonus += 1.5
+
+                    elif boat_number == result[2]:
+                        bonus += 0.8
+
+    except Exception:
+        return 0.0
+
+    if total == 0:
+        return 0.0
+
+    return bonus / total * 10.0
+
+
+# =========================================================
+# 穴候補
+# =========================================================
+
+def _find_hole(
+    df: pd.DataFrame,
+    scores: Dict[int, float],
+    main: int,
+    counter: int,
+) -> int:
+
+    candidates = []
+
+    for _, row in df.iterrows():
+
+        boat = int(
             _num(
-                row.get(
-                    "艇番",
-                    row.get(
-                        "枠",
-                        idx + 1,
-                    ),
-                )
+                row.get("枠"),
+                0,
             )
         )
 
-        boat_probs[lane] = float(
-            probs[idx]
+        if boat <= 0:
+            continue
+
+        if boat in (
+            main,
+            counter,
+        ):
+            continue
+
+        score = scores.get(
+            boat,
+            0.0,
         )
 
+        # 外枠を少し穴向きに評価
+        if boat >= 4:
+            score += 2.0
 
-    # =========================
-    # 順位
-    # =========================
-
-    ranked = _rank_scores(
-        work,
-        scores,
-    )
-
-
-    # =========================
-    # 3連単候補
-    # =========================
-
-    combinations = list(
-        itertools.permutations(
-            ranked[:5],
-            3,
-        )
-    )
-
-
-    scored_combos = []
-
-
-    for combo in combinations:
-
-        score = _combination_score(
-            combo,
-            work,
+        # モーターが強い艇
+        motor = _num(
+            row.get("モーター2連率")
         )
 
-        scored_combos.append(
+        score += motor * 0.05
+
+        # 展示ST
+        exhibition_st = _num(
+            row.get("展示ST")
+        )
+
+        if exhibition_st > 0:
+            score += max(
+                0.0,
+                0.25 - exhibition_st,
+            ) * 10
+
+        candidates.append(
             (
                 score,
-                combo,
+                boat,
             )
         )
 
+    if not candidates:
 
-    scored_combos.sort(
-        reverse=True,
-        key=lambda x: x[0],
+        return counter
+
+    candidates.sort(
+        reverse=True
+    )
+
+    return candidates[0][1]
+
+
+# =========================================================
+# 自信度
+# =========================================================
+
+def _confidence(
+    sorted_scores: List[float],
+) -> float:
+
+    if len(sorted_scores) < 2:
+        return 0.5
+
+    first = sorted_scores[0]
+    second = sorted_scores[1]
+
+    if first <= 0:
+        return 0.5
+
+    gap = (
+        first - second
+    ) / first
+
+    confidence = (
+        0.55
+        + gap * 2.5
+    )
+
+    return float(
+        np.clip(
+            confidence,
+            0.50,
+            0.98,
+        )
     )
 
 
-    if scored_combos:
+# =========================================================
+# メインAI
+# =========================================================
 
-        main_combo = (
-            scored_combos[0][1]
+def tri_ai(
+    df: pd.DataFrame,
+    history: Any = None,
+    stadium_number: int = 0,
+) -> Dict[str, Any]:
+    """
+    競艇AI予想。
+
+    必ず以下を返す:
+
+        main
+        counter
+        hole
+        confidence
+        boat_probs
+    """
+
+    # -----------------------------------------------------
+    # 入力チェック
+    # -----------------------------------------------------
+
+    if df is None:
+        raise ValueError(
+            "AIに渡されたデータがNoneです。"
         )
 
-    else:
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
+        df = pd.DataFrame(df)
 
-        main_combo = ranked[:3]
+    if df.empty:
+        raise ValueError(
+            "AIに渡された選手データが空です。"
+        )
 
+    # -----------------------------------------------------
+    # 必要列を補完
+    # -----------------------------------------------------
 
-    # =========================
-    # 対抗
-    # =========================
+    required_columns = [
+        "枠",
+        "展示進入",
+        "全国勝率",
+        "全国2連率",
+        "全国3連率",
+        "当地勝率",
+        "当地2連率",
+        "当地3連率",
+        "モーター2連率",
+        "平均ST",
+        "展示ST",
+        "展示タイム",
+        "場",
+    ]
 
-    counter_combo = None
+    for column in required_columns:
 
+        if column not in df.columns:
 
-    for _, combo in scored_combos:
+            if column == "枠":
 
-        if combo != main_combo:
+                df[column] = range(
+                    1,
+                    len(df) + 1,
+                )
 
-            counter_combo = combo
-            break
+            elif column == "展示進入":
 
+                df[column] = df["枠"]
 
-    if counter_combo is None:
+            else:
 
-        counter_combo = ranked[:3]
+                df[column] = 0.0
 
+    # -----------------------------------------------------
+    # 数値化
+    # -----------------------------------------------------
 
-    # =========================
-    # 穴
-    # =========================
+    for column in required_columns:
 
-    hole_idx = _find_hole(
-        work,
-        ranked,
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        ).fillna(0.0)
+
+    # -----------------------------------------------------
+    # 場番号
+    # -----------------------------------------------------
+
+    if stadium_number:
+
+        df["場"] = stadium_number
+
+    # -----------------------------------------------------
+    # 1艇ずつスコア計算
+    # -----------------------------------------------------
+
+    scores: Dict[int, float] = {}
+
+    for _, row in df.iterrows():
+
+        boat = int(
+            row["枠"]
+        )
+
+        score = _player_score(
+            row,
+            df,
+        )
+
+        # 過去成績補正
+        score += _history_bonus(
+            boat,
+            history,
+        )
+
+        scores[boat] = float(
+            score
+        )
+
+    # -----------------------------------------------------
+    # スコア順
+    # -----------------------------------------------------
+
+    ranking = sorted(
+        scores.items(),
+        key=lambda x: x[1],
+        reverse=True,
     )
 
+    if not ranking:
+        raise ValueError(
+            "AIスコアを計算できませんでした。"
+        )
 
-    if hole_idx is None:
+    main = ranking[0][0]
 
-        hole_combo = ranked[-3:]
-
+    if len(ranking) >= 2:
+        counter = ranking[1][0]
     else:
+        counter = main
 
-        others = [
-            x
-            for x in ranked
-            if x != hole_idx
+    hole = _find_hole(
+        df,
+        scores,
+        main,
+        counter,
+    )
+
+    # -----------------------------------------------------
+    # 確率化
+    # -----------------------------------------------------
+
+    raw_scores = np.array(
+        [
+            max(
+                0.01,
+                score,
+            )
+            for _, score in ranking
+        ],
+        dtype=float,
+    )
+
+    # Softmax
+    shifted = (
+        raw_scores
+        - np.max(raw_scores)
+    )
+
+    exp_scores = np.exp(
+        shifted / 8.0
+    )
+
+    probabilities = (
+        exp_scores
+        / np.sum(exp_scores)
+    )
+
+    boat_probs: Dict[int, float] = {}
+
+    for (
+        (boat, _),
+        probability,
+    ) in zip(
+        ranking,
+        probabilities,
+    ):
+
+        boat_probs[int(boat)] = float(
+            probability
+        )
+
+    # -----------------------------------------------------
+    # 自信度
+    # -----------------------------------------------------
+
+    confidence = _confidence(
+        [
+            score
+            for _, score in ranking
         ]
+    )
 
-        others = others[:2]
-
-        hole_combo = [
-            hole_idx,
-            *others,
-        ]
-
+    # -----------------------------------------------------
+    # 結果
+    # -----------------------------------------------------
 
     return {
-        "main":
-            _combo_lanes(
-                main_combo,
-                work,
-            ),
-
-        "counter":
-            _combo_lanes(
-                counter_combo,
-                work,
-            ),
-
-        "hole":
-            _combo_lanes(
-                hole_combo,
-                work,
-            ),
-
-        "boat_probs":
-            boat_probs,
+        "main": int(main),
+        "counter": int(counter),
+        "hole": int(hole),
+        "confidence": float(confidence),
+        "boat_probs": boat_probs,
+        "scores": scores,
+        "ranking": [
+            boat
+            for boat, _ in ranking
+        ],
     }

@@ -1,5 +1,4 @@
 import re
-import time
 from datetime import date, timedelta
 
 import requests
@@ -7,70 +6,102 @@ import streamlit as st
 from bs4 import BeautifulSoup
 
 
-# =========================================================
-# BOATRACE OPEN API
-# =========================================================
+# =========================
+# Boatrace Open API
+# =========================
 
-API = "https://boatraceopenapi.github.io/api/v1"
-
-
-# =========================================================
-# HTTP Session
-# =========================================================
-
-SESSION = requests.Session()
-
-SESSION.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36"
-    ),
-    "Accept-Language": "ja-JP,ja;q=0.9",
-})
+API = (
+    "https://boatraceopenapi.github.io/api/v1"
+)
 
 
-# =========================================================
-# 基本データ取得
-# =========================================================
+# =========================
+# HTTP
+# =========================
+
+def make_session():
+
+    session = requests.Session()
+
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/140.0 Safari/537.36"
+            )
+        }
+    )
+
+    return session
+
+
+# =========================
+# 日付データ取得
+# =========================
 
 @st.cache_data(ttl=180)
 def get_data(d):
 
-    url = f"{API}/{d:%Y/%Y%m%d}.json"
-
-    response = SESSION.get(
-        url,
-        timeout=20
+    url = (
+        f"{API}/"
+        f"{d:%Y/%Y%m%d}.json"
     )
 
+
+    session = make_session()
+
+
+    response = session.get(
+        url,
+        timeout=30,
+    )
+
+
     response.raise_for_status()
+
 
     return response.json()
 
 
-# =========================================================
-# racer list 共通処理
-# =========================================================
+# =========================
+# list / dict 共通
+# =========================
 
 def racers(value):
 
-    if isinstance(value, list):
+    if isinstance(
+        value,
+        list,
+    ):
+
         return value
 
-    if isinstance(value, dict):
-        return list(value.values())
+
+    if isinstance(
+        value,
+        dict,
+    ):
+
+        return list(
+            value.values()
+        )
+
 
     return []
 
 
-# =========================================================
+# =========================
 # レース取得
-# =========================================================
+# =========================
 
-def get_race(data, sno, rno):
+def get_race(
+    data,
+    sno,
+    rno,
+):
 
     stadiums = (
         data
@@ -78,110 +109,75 @@ def get_race(data, sno, rno):
         .get("stadiums", {})
     )
 
+
     stadium = stadiums.get(
         str(sno)
     )
 
+
     if not stadium:
+
         return None
+
 
     races = stadium.get(
         "races",
         {}
     )
 
+
     return races.get(
         str(rno)
     )
 
 
-# =========================================================
-# 直前情報MAP
-# =========================================================
-
-def pmap(race):
-
-    result = {}
-
-    preview = (
-        race
-        .get("preview", {})
-        .get("racers", {})
-    )
-
-    for p in racers(preview):
-
-        entry_number = p.get(
-            "entry_number"
-        )
-
-        course_number = p.get(
-            "course_number"
-        )
-
-        if entry_number is not None:
-
-            result[
-                str(entry_number)
-            ] = p
-
-        if course_number is not None:
-
-            result.setdefault(
-                str(course_number),
-                p
-            )
-
-    return result
-
-
-# =========================================================
-# 数値変換
-# =========================================================
-
-def to_float(value, default=0.0):
-
-    if value is None:
-        return default
-
-    try:
-        return float(value)
-
-    except (TypeError, ValueError):
-        return default
-
-
-# =========================================================
-# 過去14日データ
-# =========================================================
+# =========================
+# 過去14日
+# =========================
 
 @st.cache_data(ttl=1800)
 def history14(td):
 
     rows = []
 
-    for days_ago in range(1, 15):
 
-        d = td - timedelta(
-            days=days_ago
+    for i in range(
+        1,
+        15,
+    ):
+
+        d = (
+            td
+            - timedelta(days=i)
         )
 
-        if d < date(2026, 1, 1):
+
+        if d < date(
+            2026,
+            1,
+            1,
+        ):
+
             continue
+
 
         try:
 
-            data = get_data(d)
+            data = get_data(
+                d
+            )
 
         except Exception:
 
             continue
+
 
         stadiums = (
             data
             .get("programs", {})
             .get("stadiums", {})
         )
+
 
         for sno, stadium in stadiums.items():
 
@@ -190,473 +186,401 @@ def history14(td):
                 {}
             )
 
+
             for rno, race in races.items():
 
-                # -----------------------------------------
+                # -------------------------
                 # 結果
-                # -----------------------------------------
+                # -------------------------
 
-                result_racers = (
-                    race
-                    .get("result", {})
-                    .get("racers", {})
+                result = race.get(
+                    "result",
+                    {}
                 )
+
+
+                result_racers = result.get(
+                    "racers",
+                    {}
+                )
+
 
                 places = {}
 
-                for item in racers(
+
+                for x in racers(
                     result_racers
                 ):
 
                     place = str(
-                        item.get(
+                        x.get(
                             "place_number",
-                            ""
+                            "",
                         )
                     )
 
-                    if place in (
+
+                    if place in [
                         "1",
                         "2",
-                        "3"
-                    ):
+                        "3",
+                    ]:
 
-                        places[place] = str(
-                            item.get(
+                        places[
+                            place
+                        ] = str(
+                            x.get(
                                 "number",
-                                ""
+                                "",
                             )
                         )
 
+
                 if "1" not in places:
+
                     continue
 
-                # -----------------------------------------
+
+                # -------------------------
                 # 出走選手
-                # -----------------------------------------
+                # -------------------------
 
                 race_racers = race.get(
                     "racers",
                     {}
                 )
 
+
                 if not isinstance(
                     race_racers,
-                    dict
+                    dict,
                 ):
+
                     continue
 
-                # -----------------------------------------
-                # 直前情報
-                # -----------------------------------------
 
-                preview = (
-                    race
-                    .get("preview", {})
-                    .get("racers", {})
-                )
-
-                preview_map = {}
-
-                for p in racers(
-                    preview
+                for lane in range(
+                    1,
+                    7,
                 ):
-
-                    entry = p.get(
-                        "entry_number"
-                    )
-
-                    course = p.get(
-                        "course_number"
-                    )
-
-                    if entry is not None:
-
-                        preview_map[
-                            str(entry)
-                        ] = p
-
-                    if course is not None:
-
-                        preview_map.setdefault(
-                            str(course),
-                            p
-                        )
-
-                # -----------------------------------------
-                # 6艇
-                # -----------------------------------------
-
-                for lane in range(1, 7):
 
                     racer = race_racers.get(
                         str(lane),
-                        {}
+                        {},
                     )
 
+
                     if not racer:
+
                         continue
+
 
                     number = str(
                         racer.get(
                             "number",
-                            ""
+                            "",
                         )
                     )
 
-                    preview_data = preview_map.get(
-                        str(lane),
-                        {}
+
+                    if not number:
+
+                        continue
+
+
+                    rows.append(
+                        {
+                            "日付": d,
+
+                            "場": int(
+                                sno
+                            ),
+
+                            "レース": int(
+                                rno
+                            ),
+
+                            "枠": lane,
+
+                            "選手番号": number,
+
+                            "1着": int(
+                                number
+                                == places.get(
+                                    "1"
+                                )
+                            ),
+
+                            "2着": int(
+                                number
+                                == places.get(
+                                    "2"
+                                )
+                            ),
+
+                            "3着": int(
+                                number
+                                == places.get(
+                                    "3"
+                                )
+                            ),
+                        }
                     )
 
-                    course = preview_data.get(
-                        "course_number"
-                    )
-
-                    try:
-                        course = int(course)
-
-                    except (TypeError, ValueError):
-                        course = lane
-
-                    rows.append({
-
-                        "日付": d,
-
-                        "場": int(sno),
-
-                        "レース": int(rno),
-
-                        "枠": lane,
-
-                        "コース": course,
-
-                        "選手番号": number,
-
-                        "1着": int(
-                            number ==
-                            places.get("1")
-                        ),
-
-                        "2着": int(
-                            number ==
-                            places.get("2")
-                        ),
-
-                        "3着": int(
-                            number ==
-                            places.get("3")
-                        )
-
-                    })
 
     return rows
 
 
-# =========================================================
-# 公式3連単オッズURL
-# =========================================================
+# =========================
+# 3連単オッズURL
+# =========================
 
-def odds_url(td, sno, rno):
-
-    hd = td.strftime(
-        "%Y%m%d"
-    )
+def odds_url(
+    td,
+    sno,
+    rno,
+):
 
     return (
-        "https://www.boatrace.jp"
-        "/owpc/pc/race/odds3t"
-        f"?rno={int(rno)}"
-        f"&jcd={int(sno):02d}"
-        f"&hd={hd}"
+        "https://www.boatrace.jp/"
+        "owpc/pc/race/odds3t"
+        f"?rno={rno}"
+        f"&jcd={sno:02d}"
+        f"&hd={td:%Y%m%d}"
     )
 
 
-# =========================================================
-# 3連単120通り
-#
-# BOATRACE公式オッズ表の並び順
-# =========================================================
+# =========================
+# オッズ文字列を数字化
+# =========================
 
-TRIFECTA_CODES = [
-
-    123, 213, 312, 412, 512, 612,
-    124, 214, 314, 413, 513, 613,
-    125, 215, 315, 415, 514, 614,
-    126, 216, 316, 416, 516, 615,
-
-    132, 231, 321, 421, 521, 621,
-    134, 234, 324, 423, 523, 623,
-    135, 235, 325, 425, 524, 624,
-    136, 236, 326, 426, 526, 625,
-
-    142, 241, 341, 431, 531, 631,
-    143, 243, 342, 432, 532, 632,
-    145, 245, 345, 435, 534, 634,
-    146, 246, 346, 436, 536, 635,
-
-    152, 251, 351, 451, 541, 641,
-    153, 253, 352, 452, 542, 642,
-    154, 254, 354, 453, 543, 643,
-    156, 256, 356, 456, 546, 645,
-
-    162, 261, 361, 461, 561, 651,
-    163, 263, 362, 462, 562, 652,
-    164, 264, 364, 463, 563, 653,
-    165, 265, 365, 465, 564, 654,
-
-]
-
-
-# =========================================================
-# オッズ文字列 → float
-# =========================================================
-
-def parse_odds(value):
+def parse_odds(
+    value,
+):
 
     if value is None:
+
         return None
 
-    text = str(value)
 
-    # 空欄・欠場など
-    if not text:
-        return None
+    text = str(
+        value
+    ).strip()
 
-    # 改行など除去
-    text = (
-        text
-        .replace("\n", "")
-        .replace("\r", "")
-        .replace("\t", "")
-        .strip()
+
+    text = text.replace(
+        ",",
+        "",
     )
 
-    # -----------------------------
-    # 数字を取得
-    # -----------------------------
+
+    # 「発売なし」など
+    if not re.search(
+        r"\d",
+        text,
+    ):
+
+        return None
+
 
     match = re.search(
         r"\d+(?:\.\d+)?",
-        text
+        text,
     )
 
+
     if not match:
+
         return None
+
 
     try:
 
-        odds = float(
+        return float(
             match.group()
         )
 
-    except ValueError:
+    except Exception:
 
         return None
 
-    # -----------------------------
-    # 明らかにおかしい値を除外
-    # -----------------------------
 
-    if odds < 1:
-        return None
+# =========================
+# 3連単120通り
+# =========================
 
-    if odds > 100000:
-        return None
+TRIFECTA_CODES = [
 
-    return odds
+    "123", "124", "125", "126",
+    "132", "134", "135", "136",
+    "142", "143", "145", "146",
+    "152", "153", "154", "156",
+    "162", "163", "164", "165",
+
+    "213", "214", "215", "216",
+    "231", "234", "235", "236",
+    "241", "243", "245", "246",
+    "251", "253", "254", "256",
+    "261", "263", "264", "265",
+
+    "312", "314", "315", "316",
+    "321", "324", "325", "326",
+    "341", "342", "345", "346",
+    "351", "352", "354", "356",
+    "361", "362", "364", "365",
+
+    "412", "413", "415", "416",
+    "421", "423", "425", "426",
+    "431", "432", "435", "436",
+    "451", "452", "453", "456",
+    "461", "462", "463", "465",
+
+    "512", "513", "514", "516",
+    "521", "523", "524", "526",
+    "531", "532", "534", "536",
+    "541", "542", "543", "546",
+    "561", "562", "563", "564",
+
+    "612", "613", "614", "615",
+    "621", "623", "624", "625",
+    "631", "632", "634", "635",
+    "641", "642", "643", "645",
+    "651", "652", "653", "654",
+]
 
 
-# =========================================================
-# 公式3連単オッズ取得
-# =========================================================
+# =========================
+# オッズ取得
+# =========================
 
 @st.cache_data(ttl=30)
-def get_odds(td, sno, rno):
+def get_odds(
+    td,
+    sno,
+    rno,
+):
 
     url = odds_url(
         td,
         sno,
-        rno
+        rno,
     )
 
-    try:
 
-        response = SESSION.get(
-            url,
-            timeout=20
-        )
+    session = make_session()
 
-        response.raise_for_status()
 
-    except requests.RequestException:
+    response = session.get(
+        url,
+        timeout=30,
+    )
 
-        return {}
+
+    response.raise_for_status()
 
 
     soup = BeautifulSoup(
         response.text,
-        "html.parser"
+        "html.parser",
     )
 
 
-    # =====================================================
-    # データなし
-    # =====================================================
-
-    no_data = soup.find(
-        "span",
-        string=lambda x:
-        x and "データがありません" in x
-    )
-
-    if no_data:
-
-        return {}
-
-
-    # =====================================================
-    # 中止
-    # =====================================================
-
-    page_text = soup.get_text(
-        " ",
-        strip=True
-    )
-
-    if "中止" in page_text:
-
-        return {}
-
-
-    # =====================================================
-    # 公式サイトの3連単表
-    #
-    # 現行ページでは table1 の2番目のテーブル内に
-    # oddsPoint が並ぶ構造
-    # =====================================================
+    # =========================
+    # オッズ表
+    # =========================
 
     tables = soup.find_all(
         "div",
-        class_="table1"
+        class_="table1",
     )
+
 
     if len(tables) < 2:
 
         return {}
 
 
-    try:
+    table = tables[1]
 
-        tbody = tables[
-            1
-        ].find(
-            "tbody"
-        )
 
-        if tbody is None:
+    tbody = table.find(
+        "tbody"
+    )
 
-            return {}
 
-        rows = tbody.find_all(
-            "tr"
-        )
-
-    except Exception:
+    if tbody is None:
 
         return {}
 
 
-    odds_values = []
+    rows = tbody.find_all(
+        "tr"
+    )
 
 
-    # =====================================================
-    # oddsPointだけ取得
-    # =====================================================
+    values = []
+
 
     for row in rows:
 
         cells = row.find_all(
             "td",
-            class_="oddsPoint"
+            class_="oddsPoint",
         )
+
 
         for cell in cells:
 
-            value = parse_odds(
-                cell.get_text(
-                    " ",
-                    strip=True
+            text = cell.get_text(
+                " ",
+                strip=True,
+            )
+
+
+            odds = parse_odds(
+                text
+            )
+
+
+            if odds is not None:
+
+                values.append(
+                    odds
                 )
-            )
-
-            odds_values.append(
-                value
-            )
 
 
-    # =====================================================
-    # 120個取れなかった場合
-    # =====================================================
-
-    if len(odds_values) < 120:
-
-        # 別パターンを試す
-        cells = soup.select(
-            "td.oddsPoint"
-        )
-
-        odds_values = []
-
-        for cell in cells:
-
-            value = parse_odds(
-                cell.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            odds_values.append(
-                value
-            )
-
-
-    # =====================================================
+    # =========================
     # 120通りに対応
-    # =====================================================
+    # =========================
 
     result = {}
 
-    for code, value in zip(
+
+    for code, odd in zip(
         TRIFECTA_CODES,
-        odds_values
+        values,
     ):
 
-        code_text = str(
-            code
-        ).zfill(3)
-
-        combo = (
-            f"{code_text[0]}-"
-            f"{code_text[1]}-"
-            f"{code_text[2]}"
-        )
-
-        if value is not None:
-
-            result[
-                combo
-            ] = value
+        result[
+            f"{code[0]}-"
+            f"{code[1]}-"
+            f"{code[2]}"
+        ] = odd
 
 
     return result
 
 
-# =========================================================
-# オッズキャッシュ強制更新
-# =========================================================
+# =========================
+# オッズキャッシュ削除
+# =========================
 
 def clear_odds_cache():
 
-    get_odds.clear()
+    try:
+
+        get_odds.clear()
+
+    except Exception:
+
+        pass

@@ -1,851 +1,272 @@
-import re
-from datetime import date, timedelta
-
-import requests
 import streamlit as st
-from bs4 import BeautifulSoup
+import pandas as pd
 
+import data
+from ai import score, tri_ai
 
-API = "https://boatraceopenapi.github.io/api/v1"
+STADIUMS = {
+    1: "桐生", 2: "戸田", 3: "江戸川", 4: "平和島",
+    5: "多摩川", 6: "浜名湖", 7: "蒲郡", 8: "常滑",
+    9: "津", 10: "三国", 11: "びわこ", 12: "住之江",
+    13: "尼崎", 14: "鳴門", 15: "丸亀", 16: "児島",
+    17: "宮島", 18: "徳山", 19: "下関", 20: "若松",
+    21: "芦屋", 22: "福岡", 23: "唐津", 24: "大村",
+}
 
+st.set_page_config(
+    page_title="やっちゃんの競艇AI予想 PRO",
+    layout="wide",
+)
 
-def make_session():
+st.title("🚤 やっちゃんの競艇AI予想 PRO")
+st.caption("AIスコア＋過去成績＋展示データによる3連単予想")
 
-    session = requests.Session()
+td = st.date_input("開催日")
 
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/140.0 Safari/537.36"
-        ),
-        "Accept-Language": (
-            "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7"
-        ),
-    })
+sno = st.selectbox(
+    "競艇場",
+    list(STADIUMS.keys()),
+    format_func=lambda x: f"{x} {STADIUMS[x]}",
+)
 
-    return session
+rno = st.selectbox(
+    "レース",
+    list(range(1, 13)),
+)
 
+if st.button("🔮 AI予想を計算", type="primary"):
 
-@st.cache_data(ttl=180)
-def get_data(d):
-
-    url = (
-        f"{API}/"
-        f"{d:%Y/%Y%m%d}.json"
-    )
-
-    session = make_session()
-
-    response = session.get(
-        url,
-        timeout=30,
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-
-
-def racers(value):
-
-    if isinstance(value, list):
-        return value
-
-    if isinstance(value, dict):
-        return list(value.values())
-
-    return []
-
-
-def get_race(data, sno, rno):
-
-    stadiums = (
-        data
-        .get("programs", {})
-        .get("stadiums", {})
-    )
-
-    stadium = stadiums.get(
-        str(sno)
-    )
-
-    if not stadium:
-        return None
-
-    races = stadium.get(
-        "races",
-        {}
-    )
-
-    return races.get(
-        str(rno)
-    )
-
-
-@st.cache_data(ttl=1800)
-def history14(td):
-
-    rows = []
-
-    for i in range(1, 15):
-
-        d = td - timedelta(
-            days=i
-        )
-
-        if d < date(2026, 1, 1):
-            continue
+    with st.spinner("データ取得中..."):
 
         try:
-            data = get_data(d)
-        except Exception:
-            continue
+            all_data = data.get_data(td)
+        except Exception as e:
+            st.error("データ取得に失敗しました。")
+            st.exception(e)
+            st.stop()
 
-        stadiums = (
-            data
-            .get("programs", {})
-            .get("stadiums", {})
+        race = data.get_race(
+            all_data,
+            sno,
+            rno,
         )
 
-        for sno, stadium in stadiums.items():
+        if not race:
+            st.error("このレースのデータがありません。")
+            st.stop()
 
-            races = stadium.get(
-                "races",
-                {}
+        racers_data = race.get("racers", {})
+        preview_data = race.get("preview", {})
+
+        if isinstance(racers_data, dict):
+            racers_list = list(racers_data.values())
+        else:
+            racers_list = racers_data
+
+        if isinstance(preview_data, dict):
+            preview_list = list(preview_data.values())
+        else:
+            preview_list = preview_data
+
+        preview_map = {}
+
+        for p in preview_list:
+
+            entry = str(
+                p.get("entry_number", "")
             )
 
-            for rno, race in races.items():
+            preview_map[entry] = {
+                "展示ST": p.get(
+                    "start_timing",
+                    0,
+                ),
+                "展示タイム": p.get(
+                    "exhibition_time",
+                    0,
+                ),
+                "展示進入": p.get(
+                    "course_number",
+                    entry,
+                ),
+            }
 
-                result = race.get(
-                    "result",
-                    {}
-                )
+        rows = []
 
-                result_racers = result.get(
-                    "racers",
-                    {}
-                )
+        for r in racers_list:
 
-                places = {}
+            lane = int(
+                r.get("entry_number", 0)
+            )
 
-                for x in racers(
-                    result_racers
-                ):
+            number = str(
+                r.get("number", "")
+            )
 
-                    place = str(
-                        x.get(
-                            "place_number",
-                            ""
-                        )
-                    )
+            p = preview_map.get(
+                str(lane),
+                {},
+            )
 
-                    if place in [
-                        "1",
-                        "2",
-                        "3",
-                    ]:
+            rows.append({
+                "枠": lane,
+                "展示進入": p.get(
+                    "展示進入",
+                    lane,
+                ),
+                "選手名": r.get(
+                    "name",
+                    "",
+                ),
+                "選手番号": number,
+                "級別": r.get(
+                    "rank_number",
+                    "",
+                ),
+                "全国勝率": float(
+                    r.get(
+                        "national_win_rate",
+                        0,
+                    ) or 0
+                ),
+                "全国2連率": float(
+                    r.get(
+                        "national_top_2_percent",
+                        0,
+                    ) or 0
+                ),
+                "当地勝率": float(
+                    r.get(
+                        "local_win_rate",
+                        0,
+                    ) or 0
+                ),
+                "モーター2連率": float(
+                    r.get(
+                        "motor_top_2_percent",
+                        0,
+                    ) or 0
+                ),
+                "平均ST": float(
+                    r.get(
+                        "average_start_timing",
+                        0,
+                    ) or 0
+                ),
+                "展示ST": float(
+                    p.get(
+                        "展示ST",
+                        0,
+                    ) or 0
+                ),
+                "展示タイム": float(
+                    p.get(
+                        "展示タイム",
+                        0,
+                    ) or 0
+                ),
+            })
 
-                        places[place] = str(
-                            x.get(
-                                "number",
-                                ""
-                            )
-                        )
+        df = pd.DataFrame(rows)
 
-                if "1" not in places:
-                    continue
+        if df.empty:
+            st.error(
+                "選手データが取得できませんでした。"
+            )
+            st.stop()
 
-                race_racers = race.get(
-                    "racers",
-                    {}
-                )
-
-                if not isinstance(
-                    race_racers,
-                    dict
-                ):
-                    continue
-
-                for lane in range(1, 7):
-
-                    racer = race_racers.get(
-                        str(lane),
-                        {}
-                    )
-
-                    if not racer:
-                        continue
-
-                    number = str(
-                        racer.get(
-                            "number",
-                            ""
-                        )
-                    )
-
-                    if not number:
-                        continue
-
-                    rows.append({
-
-                        "日付": d,
-
-                        "場": int(sno),
-
-                        "レース": int(rno),
-
-                        "枠": lane,
-
-                        "選手番号": number,
-
-                        "1着": int(
-                            number
-                            == places.get("1")
-                        ),
-
-                        "2着": int(
-                            number
-                            == places.get("2")
-                        ),
-
-                        "3着": int(
-                            number
-                            == places.get("3")
-                        ),
-                    })
-
-    return rows
-
-
-@st.cache_data(ttl=1800)
-def backtest_races(
-    start_date,
-    days=14,
-):
-
-    rows = []
-
-    for i in range(days):
-
-        d = start_date - timedelta(
-            days=i
+        df["学習AI"] = df.apply(
+            score,
+            axis=1,
         )
 
-        if d < date(2026, 1, 1):
-            continue
-
-        try:
-            data = get_data(d)
-        except Exception:
-            continue
-
-        stadiums = (
-            data
-            .get("programs", {})
-            .get("stadiums", {})
+        history = pd.DataFrame(
+            data.history14(td)
         )
 
-        for sno, stadium in stadiums.items():
-
-            races = stadium.get(
-                "races",
-                {}
-            )
-
-            for rno, race in races.items():
-
-                result = race.get(
-                    "result",
-                    {}
-                )
-
-                result_racers = result.get(
-                    "racers",
-                    {}
-                )
-
-                places = {}
-
-                for x in racers(
-                    result_racers
-                ):
-
-                    place = str(
-                        x.get(
-                            "place_number",
-                            ""
-                        )
-                    )
-
-                    course = str(
-                        x.get(
-                            "course_number",
-                            ""
-                        )
-                    )
-
-                    if (
-                        place in [
-                            "1",
-                            "2",
-                            "3",
-                        ]
-                        and course in [
-                            "1",
-                            "2",
-                            "3",
-                            "4",
-                            "5",
-                            "6",
-                        ]
-                    ):
-
-                        places[place] = course
-
-                if len(places) < 3:
-                    continue
-
-                actual = (
-                    f"{places['1']}-"
-                    f"{places['2']}-"
-                    f"{places['3']}"
-                )
-
-                payout = 0
-
-                payouts = result.get(
-                    "payouts",
-                    {}
-                )
-
-                if isinstance(
-                    payouts,
-                    dict
-                ):
-
-                    trifecta = payouts.get(
-                        "trifecta",
-                        []
-                    )
-
-                    if isinstance(
-                        trifecta,
-                        list
-                    ):
-
-                        for item in trifecta:
-
-                            if not isinstance(
-                                item,
-                                dict
-                            ):
-                                continue
-
-                            combination = str(
-                                item.get(
-                                    "combination",
-                                    ""
-                                )
-                            )
-
-                            if combination == actual:
-
-                                try:
-
-                                    payout = int(
-                                        item.get(
-                                            "amount",
-                                            0
-                                        )
-                                        or 0
-                                    )
-
-                                except Exception:
-
-                                    payout = 0
-
-                                break
-
-                rows.append({
-
-                    "日付": d,
-
-                    "場": int(sno),
-
-                    "レース": int(rno),
-
-                    "実際の3連単": actual,
-
-                    "払戻金": payout,
-                })
-
-    return rows
-
-
-def odds_url(
-    td,
-    sno,
-    rno,
-):
-
-    return (
-        "https://www.boatrace.jp/"
-        "owpc/pc/race/odds3t"
-        f"?rno={rno}"
-        f"&jcd={sno:02d}"
-        f"&hd={td:%Y%m%d}"
-    )
-
-
-def parse_odds(value):
-
-    if value is None:
-        return None
-
-    text = (
-        str(value)
-        .strip()
-        .replace(",", "")
-    )
-
-    if not re.search(
-        r"\d",
-        text
-    ):
-        return None
-
-    match = re.search(
-        r"\d+(?:\.\d+)?",
-        text
-    )
-
-    if not match:
-        return None
-
-    try:
-
-        return float(
-            match.group()
+        result = tri_ai(
+            df,
+            history,
         )
 
-    except Exception:
+        if result.empty:
+            st.error(
+                "3連単予想を作成できませんでした。"
+            )
+            st.stop()
 
-        return None
-
-
-def _cell_classes(cell):
-
-    return cell.get(
-        "class",
-        []
-    )
-
-
-def _is_odds_cell(cell):
-
-    return (
-        "oddsPoint"
-        in _cell_classes(cell)
-    )
-
-
-def _expand_table(table):
-
-    rows = table.find_all(
-        "tr"
-    )
-
-    grid = []
-
-    occupied = {}
-
-    for r, tr in enumerate(rows):
-
-        row = []
-
-        cells = tr.find_all(
-            ["th", "td"],
-            recursive=False,
+        st.subheader(
+            f"🏁 {STADIUMS[sno]} {rno}R"
         )
 
-        col = 0
-
-        for cell in cells:
-
-            while (
-                r,
-                col
-            ) in occupied:
-
-                row.append(
-                    occupied[
-                        (r, col)
-                    ]
-                )
-
-                col += 1
-
-            rowspan = cell.get(
-                "rowspan",
-                "1",
-            )
-
-            colspan = cell.get(
-                "colspan",
-                "1",
-            )
-
-            try:
-                rowspan = int(
-                    rowspan
-                )
-            except Exception:
-                rowspan = 1
-
-            try:
-                colspan = int(
-                    colspan
-                )
-            except Exception:
-                colspan = 1
-
-            for c in range(
-                colspan
-            ):
-
-                row.append(
-                    cell
-                )
-
-                if rowspan > 1:
-
-                    for rr in range(
-                        1,
-                        rowspan,
-                    ):
-
-                        occupied[
-                            (
-                                r + rr,
-                                col + c,
-                            )
-                        ] = cell
-
-                col += 1
-
-        while (
-            r,
-            col
-        ) in occupied:
-
-            row.append(
-                occupied[
-                    (r, col)
-                ]
-            )
-
-            col += 1
-
-        grid.append(
-            row
+        st.dataframe(
+            df.sort_values(
+                "学習AI",
+                ascending=False,
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
 
-    return grid
+        st.subheader("🎯 AI 3連単 TOP10")
 
-
-def _find_odds_table(
-    soup
-):
-
-    tables = soup.find_all(
-        "table"
-    )
-
-    for table in tables:
-
-        odds_cells = table.find_all(
-            "td",
-            class_="oddsPoint"
+        st.dataframe(
+            result.head(10),
+            use_container_width=True,
+            hide_index=True,
         )
 
-        if len(
-            odds_cells
-        ) != 120:
-            continue
+        best = result.iloc[0]
 
-        text = table.get_text(
-            " ",
-            strip=True
+        st.success(
+            f"🔥 本命：{best['3連単']} "
+            f"AIスコア {best['AIスコア']}"
         )
 
-        if "3連単" in text:
-            return table
+        second = result.iloc[1]
 
-    div_tables = soup.find_all(
-        "div",
-        class_="table1"
-    )
-
-    for table in div_tables:
-
-        odds_cells = table.find_all(
-            "td",
-            class_="oddsPoint"
+        st.info(
+            f"🥈 対抗：{second['3連単']} "
+            f"AIスコア {second['AIスコア']}"
         )
 
-        if len(
-            odds_cells
-        ) == 120:
-            return table
+        third = result.iloc[2]
 
-    return None
-
-
-def _parse_official_odds_table(
-    table
-):
-
-    grid = _expand_table(
-        table
-    )
-
-    if not grid:
-        return {}
-
-    data_rows = []
-
-    for row in grid:
-
-        if len(row) < 18:
-            continue
-
-        valid = True
-
-        for block in range(6):
-
-            base = block * 3
-
-            second_cell = row[
-                base
-            ]
-
-            third_cell = row[
-                base + 1
-            ]
-
-            odds_cell = row[
-                base + 2
-            ]
-
-            if (
-                second_cell is None
-                or third_cell is None
-                or odds_cell is None
-            ):
-
-                valid = False
-                break
-
-            if not _is_odds_cell(
-                odds_cell
-            ):
-
-                valid = False
-                break
-
-            odd = parse_odds(
-                odds_cell.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if odd is None:
-
-                valid = False
-                break
-
-        if valid:
-
-            data_rows.append(
-                row
-            )
-
-    if len(
-        data_rows
-    ) != 20:
-
-        return {}
-
-    result = {}
-
-    for row in data_rows:
-
-        for block in range(6):
-
-            first = block + 1
-
-            base = block * 3
-
-            second_cell = row[
-                base
-            ]
-
-            third_cell = row[
-                base + 1
-            ]
-
-            odds_cell = row[
-                base + 2
-            ]
-
-            second_text = (
-                second_cell.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            third_text = (
-                third_cell.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            odds_text = (
-                odds_cell.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            second_match = re.search(
-                r"(?<!\d)([1-6])(?!\d)",
-                second_text
-            )
-
-            third_match = re.search(
-                r"(?<!\d)([1-6])(?!\d)",
-                third_text
-            )
-
-            odd = parse_odds(
-                odds_text
-            )
-
-            if (
-                second_match is None
-                or third_match is None
-                or odd is None
-            ):
-
-                continue
-
-            second = int(
-                second_match.group(1)
-            )
-
-            third = int(
-                third_match.group(1)
-            )
-
-            if len({
-                first,
-                second,
-                third,
-            }) != 3:
-
-                continue
-
-            combination = (
-                f"{first}-"
-                f"{second}-"
-                f"{third}"
-            )
-
-            result[
-                combination
-            ] = odd
-
-    if len(result) != 120:
-        return {}
-
-    return result
-
-
-@st.cache_data(ttl=20)
-def get_odds(
-    td,
-    sno,
-    rno,
-):
-
-    url = odds_url(
-        td,
-        sno,
-        rno,
-    )
-
-    session = make_session()
-
-    try:
-
-        response = session.get(
-            url,
-            timeout=30,
+        st.info(
+            f"🥉 穴候補：{third['3連単']} "
+            f"AIスコア {third['AIスコア']}"
         )
 
-        response.raise_for_status()
 
-    except Exception:
+st.divider()
 
-        return {}
+st.subheader("📊 過去レース検証")
 
-    html = response.text
+if st.button("過去14日を検証"):
 
-    if (
-        "データがありません"
-        in html
-        or "中止"
-        in html
-    ):
+    with st.spinner("過去レースを取得中..."):
 
-        return {}
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    table = _find_odds_table(
-        soup
-    )
-
-    if table is None:
-        return {}
-
-    result = (
-        _parse_official_odds_table(
-            table
+        bt = data.backtest_races(
+            td,
+            14,
         )
-    )
 
-    if len(result) != 120:
-        return {}
+    if not bt:
 
-    return result
+        st.warning(
+            "過去レースデータがありません。"
+        )
 
+    else:
 
-def clear_odds_cache():
+        bt_df = pd.DataFrame(bt)
 
-    try:
+        st.write(
+            f"検証レース数：{len(bt_df)}"
+        )
 
-        get_odds.clear()
-
-    except Exception:
-
-        pass
+        st.dataframe(
+            bt_df,
+            use_container_width=True,
+            hide_index=True,
+        )

@@ -18,7 +18,6 @@ def make_session():
     session = requests.Session()
 
     session.headers.update({
-
         "User-Agent": (
             "Mozilla/5.0 "
             "(Windows NT 10.0; Win64; x64) "
@@ -26,7 +25,6 @@ def make_session():
             "(KHTML, like Gecko) "
             "Chrome/140.0 Safari/537.36"
         ),
-
         "Accept-Language": (
             "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7"
         ),
@@ -36,7 +34,7 @@ def make_session():
 
 
 # =========================
-# 日別データ
+# 日別データ取得
 # =========================
 
 @st.cache_data(ttl=180)
@@ -60,7 +58,7 @@ def get_data(d):
 
 
 # =========================
-# 汎用 racers
+# racers共通処理
 # =========================
 
 def racers(value):
@@ -108,7 +106,7 @@ def get_race(
 
 
 # =========================
-# 過去14日
+# 過去14日データ
 # =========================
 
 @st.cache_data(ttl=1800)
@@ -264,9 +262,8 @@ def backtest_races(
 
     for i in range(days):
 
-        d = (
-            start_date
-            - timedelta(days=i)
+        d = start_date - timedelta(
+            days=i
         )
 
         if d < date(2026, 1, 1):
@@ -334,9 +331,7 @@ def backtest_races(
                         and number
                     ):
 
-                        places[
-                            place
-                        ] = number
+                        places[place] = number
 
                 if len(places) < 3:
                     continue
@@ -349,55 +344,59 @@ def backtest_races(
 
                 payout = 0
 
+                # APIの払戻情報を取得
                 payouts = result.get(
                     "payouts",
                     {}
                 )
 
-                trifecta_payouts = (
-                    payouts.get(
+                if isinstance(
+                    payouts,
+                    dict,
+                ):
+
+                    trifecta_data = payouts.get(
                         "trifecta",
                         []
                     )
-                )
 
-                if isinstance(
-                    trifecta_payouts,
-                    list,
-                ):
+                    if isinstance(
+                        trifecta_data,
+                        list,
+                    ):
 
-                    for item in trifecta_payouts:
+                        for item in trifecta_data:
 
-                        if not isinstance(
-                            item,
-                            dict,
-                        ):
-                            continue
+                            if not isinstance(
+                                item,
+                                dict,
+                            ):
+                                continue
 
-                        combination = str(
-                            item.get(
-                                "combination",
-                                ""
-                            )
-                        )
-
-                        if combination == trifecta:
-
-                            try:
-
-                                payout = int(
-                                    item.get(
-                                        "amount",
-                                        0
-                                    )
-                                    or 0
+                            combination = str(
+                                item.get(
+                                    "combination",
+                                    ""
                                 )
+                            )
 
-                            except Exception:
+                            if combination == trifecta:
 
-                                payout = 0
+                                try:
 
-                            break
+                                    payout = int(
+                                        item.get(
+                                            "amount",
+                                            0
+                                        )
+                                        or 0
+                                    )
+
+                                except Exception:
+
+                                    payout = 0
+
+                                break
 
                 result_rows.append({
 
@@ -446,7 +445,7 @@ def odds_url(
 
 
 # =========================
-# オッズ解析
+# オッズ数値変換
 # =========================
 
 def parse_odds(value):
@@ -485,6 +484,10 @@ def parse_odds(value):
         return None
 
 
+# =========================
+# HTMLセル
+# =========================
+
 def _cell_classes(cell):
 
     return cell.get(
@@ -500,6 +503,10 @@ def _is_odds_cell(cell):
         in _cell_classes(cell)
     )
 
+
+# =========================
+# rowspan / colspan展開
+# =========================
 
 def _expand_table(table):
 
@@ -548,17 +555,23 @@ def _expand_table(table):
             )
 
             try:
+
                 rowspan = int(
                     rowspan
                 )
-            except:
+
+            except Exception:
+
                 rowspan = 1
 
             try:
+
                 colspan = int(
                     colspan
                 )
-            except:
+
+            except Exception:
+
                 colspan = 1
 
             for c in range(
@@ -598,12 +611,20 @@ def _expand_table(table):
 
             col += 1
 
-        grid.append(row)
+        grid.append(
+            row
+        )
 
     return grid
 
 
-def _find_odds_table(soup):
+# =========================
+# オッズ表検索
+# =========================
+
+def _find_odds_table(
+    soup
+):
 
     tables = soup.find_all(
         "table"
@@ -616,7 +637,10 @@ def _find_odds_table(soup):
             class_="oddsPoint"
         )
 
-        if len(odds_cells) != 120:
+        if len(
+            odds_cells
+        ) != 120:
+
             continue
 
         text = table.get_text(
@@ -625,6 +649,7 @@ def _find_odds_table(soup):
         )
 
         if "3連単" in text:
+
             return table
 
     div_tables = soup.find_all(
@@ -639,11 +664,18 @@ def _find_odds_table(soup):
             class_="oddsPoint"
         )
 
-        if len(odds_cells) == 120:
+        if len(
+            odds_cells
+        ) == 120:
+
             return table
 
     return None
 
+
+# =========================
+# 公式オッズ解析
+# =========================
 
 def _parse_official_odds_table(
     table
@@ -710,11 +742,15 @@ def _parse_official_odds_table(
                 break
 
         if valid:
+
             data_rows.append(
                 row
             )
 
-    if len(data_rows) != 20:
+    if len(
+        data_rows
+    ) != 20:
+
         return {}
 
     result = {}

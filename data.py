@@ -3,7 +3,6 @@ from datetime import date, timedelta
 
 import requests
 import streamlit as st
-import pandas as pd
 from bs4 import BeautifulSoup
 
 
@@ -15,9 +14,8 @@ def _val(d, keys, default=0):
         return default
 
     for k in keys:
-        v = d.get(k)
-        if v not in (None, ""):
-            return v
+        if k in d and d[k] not in (None, ""):
+            return d[k]
 
     for v in d.values():
         if isinstance(v, dict):
@@ -72,7 +70,7 @@ def _session():
 
 
 # =========================================================
-# APIデータ取得
+# API取得
 # =========================================================
 
 @st.cache_data(ttl=180)
@@ -94,66 +92,155 @@ def get_data(d):
 
 
 # =========================================================
-# 指定レース取得
+# レース検索
 # =========================================================
+
+def _find_race(obj, sno, rno):
+
+    if isinstance(obj, list):
+
+        for item in obj:
+
+            found = _find_race(
+                item,
+                sno,
+                rno
+            )
+
+            if found is not None:
+                return found
+
+        return None
+
+    if not isinstance(obj, dict):
+        return None
+
+    # 現在の階層がレースか確認
+    race_no = _val(
+        obj,
+        [
+            "raceNumber",
+            "race_number",
+            "raceNo",
+            "race_no",
+            "raceIndex",
+            "number",
+        ],
+        None
+    )
+
+    stadium_no = _val(
+        obj,
+        [
+            "stadiumNumber",
+            "stadium_number",
+            "stadiumNo",
+            "stadium_no",
+            "jcd",
+            "stadium",
+        ],
+        None
+    )
+
+    if (
+        race_no is not None
+        and str(race_no) == str(rno)
+    ):
+
+        # 場番号がこの階層にある場合
+        if (
+            stadium_no is None
+            or str(stadium_no) == str(sno)
+        ):
+            return obj
+
+        # stadium情報を親から取得できない場合も
+        # racersを持っていれば候補として返す
+        if any(
+            k in obj
+            for k in [
+                "racers",
+                "entries",
+                "entry",
+                "players",
+            ]
+        ):
+            return obj
+
+    # stadium単位のデータ
+    if (
+        stadium_no is not None
+        and str(stadium_no) == str(sno)
+    ):
+
+        for key in [
+            "races",
+            "race",
+            "program",
+        ]:
+
+            if key in obj:
+
+                found = _find_race(
+                    obj[key],
+                    sno,
+                    rno
+                )
+
+                if found is not None:
+                    return found
+
+    # その他のネストも検索
+    for key, value in obj.items():
+
+        if key in [
+            "result",
+            "results",
+            "odds",
+        ]:
+            continue
+
+        if isinstance(
+            value,
+            (dict, list)
+        ):
+
+            found = _find_race(
+                value,
+                sno,
+                rno
+            )
+
+            if found is not None:
+                return found
+
+    return None
+
 
 def get_race(raw, sno, rno):
 
+    # まず通常構造
     programs = raw.get(
-        "programs",
-        {}
+        "programs"
     )
 
-    if isinstance(programs, dict):
-        stadiums = list(
-            programs.values()
-        )
-    else:
-        stadiums = programs
+    if programs is not None:
 
-    for stadium in stadiums:
-
-        stadium_no = _val(
-            stadium,
-            [
-                "stadiumNumber",
-                "stadium_number",
-                "stadium",
-                "number",
-            ],
-            None
+        found = _find_race(
+            programs,
+            sno,
+            rno
         )
 
-        if str(stadium_no) != str(sno):
-            continue
+        if found is not None:
+            return found
 
-        races = stadium.get(
-            "races",
-            []
-        )
-
-        if isinstance(races, dict):
-            races = list(
-                races.values()
-            )
-
-        for race in races:
-
-            race_no = _val(
-                race,
-                [
-                    "raceNumber",
-                    "race_number",
-                    "race_no",
-                    "number",
-                ],
-                None
-            )
-
-            if str(race_no) == str(rno):
-                return race
-
-    return None
+    # APIの構造が違う場合は全体から検索
+    return _find_race(
+        raw,
+        sno,
+        rno
+    )
 
 
 # =========================================================
@@ -349,11 +436,9 @@ def official_preview(sno, rno, td):
             if lane is None:
                 continue
 
-            text = " ".join(cells)
-
             nums = re.findall(
                 r"(?:\d+\.\d+|\.\d+)",
-                text
+                " ".join(cells)
             )
 
             exhibition = 0
@@ -390,7 +475,7 @@ def official_preview(sno, rno, td):
 
 
 # =========================================================
-# 現在レースの6選手データ
+# 現在レースの選手
 # =========================================================
 
 def get_race_rows(race, sno, rno, td):
@@ -400,43 +485,29 @@ def get_race_rows(race, sno, rno, td):
         or race.get("entries")
         or race.get("entry")
         or race.get("players")
+        or race.get("participants")
         or []
     )
 
-    preview = (
-        race.get("preview")
-        or race.get("previews")
-        or race.get("beforeInfo")
-        or race.get("before_info")
-        or []
-    )
+    # racersが直接ない場合
+    if not entries:
 
-    preview_list = _list(
-        preview
-    )
+        for key in [
+            "racer",
+            "entries",
+            "entry",
+            "players",
+            "participants",
+        ]:
 
-    pmap = {}
+            if key in race:
 
-    for p in preview_list:
+                entries = _list(
+                    race[key]
+                )
 
-        no = _val(
-            p,
-            [
-                "racerNumber",
-                "racer_number",
-                "playerNumber",
-                "player_number",
-                "number",
-            ],
-            None
-        )
-
-        try:
-            pmap[
-                int(float(no))
-            ] = p
-        except:
-            pass
+                if entries:
+                    break
 
     official = official_preview(
         sno,
@@ -475,47 +546,16 @@ def get_race_rows(race, sno, rno, td):
             lane
         )
 
-        try:
-            no = int(
-                float(
-                    row["選手番号"]
-                )
-            )
-        except:
-            no = 0
-
-        p = pmap.get(
-            no,
-            {}
-        )
-
         op = official.get(
             lane,
             {}
         )
 
-        row["展示進入"] = _num(
-            _val(
-                p,
-                [
-                    "courseNumber",
-                    "course_number",
-                    "entryNumber",
-                    "entry_number",
-                    "course",
-                    "展示進入",
-                ],
-                op.get(
-                    "展示進入",
-                    lane
-                )
-            ),
-            lane
-        )
+        row["展示進入"] = lane
 
         row["展示ST"] = _num(
             _val(
-                p,
+                racer,
                 [
                     "startTiming",
                     "start_timing",
@@ -533,7 +573,7 @@ def get_race_rows(race, sno, rno, td):
 
         row["展示タイム"] = _num(
             _val(
-                p,
+                racer,
                 [
                     "exhibitionTime",
                     "exhibition_time",
@@ -549,9 +589,7 @@ def get_race_rows(race, sno, rno, td):
             )
         )
 
-        row["場"] = int(
-            sno
-        )
+        row["場"] = int(sno)
 
         rows.append(row)
 
@@ -559,7 +597,7 @@ def get_race_rows(race, sno, rno, td):
 
 
 # =========================================================
-# 過去14日間の学習データ
+# 過去14日
 # =========================================================
 
 @st.cache_data(ttl=1800)
@@ -588,62 +626,25 @@ def history14(td):
         except:
             continue
 
-        programs = raw.get(
-            "programs",
-            {}
-        )
+        # API全体からレースを探す
+        for sno in range(1, 25):
 
-        if isinstance(programs, dict):
-            stadiums = list(
-                programs.values()
-            )
-        else:
-            stadiums = programs
+            for rno in range(1, 13):
 
-        for stadium in stadiums:
-
-            sno = _num(
-                _val(
-                    stadium,
-                    [
-                        "stadiumNumber",
-                        "stadium_number",
-                        "stadium",
-                        "number",
-                    ],
-                    0
-                )
-            )
-
-            races = stadium.get(
-                "races",
-                []
-            )
-
-            if isinstance(races, dict):
-                races = list(
-                    races.values()
+                race = get_race(
+                    raw,
+                    sno,
+                    rno
                 )
 
-            for race in races:
-
-                rno = _num(
-                    _val(
-                        race,
-                        [
-                            "raceNumber",
-                            "race_number",
-                            "race_no",
-                            "number",
-                        ],
-                        0
-                    )
-                )
+                if race is None:
+                    continue
 
                 entries = _list(
                     race.get("racers")
                     or race.get("entries")
                     or race.get("entry")
+                    or race.get("players")
                     or []
                 )
 
@@ -718,37 +719,31 @@ def history14(td):
                     except:
                         lane = i + 1
 
-                    no = _val(
-                        racer,
-                        [
-                            "racerNumber",
-                            "racer_number",
-                            "playerNumber",
-                            "player_number",
-                            "number",
-                        ],
-                        None
-                    )
-
-                    try:
-                        no = int(
-                            float(no)
-                        )
-                    except:
-                        continue
-
                     row = make_racer(
                         racer,
                         lane
                     )
 
-                    row["日付"] = d
-                    row["レース"] = rno
+                    try:
+                        no = int(
+                            float(
+                                row["選手番号"]
+                            )
+                        )
+                    except:
+                        continue
 
                     place = finish.get(
                         no,
                         99
                     )
+
+                    row["日付"] = d
+                    row["レース"] = rno
+                    row["展示進入"] = lane
+                    row["展示ST"] = 0
+                    row["展示タイム"] = 0
+                    row["場"] = sno
 
                     row["1着"] = int(
                         place == 1
@@ -760,13 +755,6 @@ def history14(td):
 
                     row["3着"] = int(
                         place == 3
-                    )
-
-                    row["展示進入"] = lane
-                    row["展示ST"] = 0
-                    row["展示タイム"] = 0
-                    row["場"] = int(
-                        sno
                     )
 
                     rows.append(row)

@@ -2,8 +2,13 @@ import itertools
 
 import numpy as np
 import pandas as pd
+
 from sklearn.ensemble import RandomForestClassifier
 
+
+# =========================================================
+# AIで使う特徴量
+# =========================================================
 
 FEATURES = [
     "枠",
@@ -11,6 +16,7 @@ FEATURES = [
     "全国勝率",
     "全国2連率",
     "当地勝率",
+    "当地2連率",
     "モーター2連率",
     "平均ST",
     "展示ST",
@@ -19,472 +25,384 @@ FEATURES = [
 ]
 
 
-def _num(x, default=0.0):
+# =========================================================
+# 数値化
+# =========================================================
+
+def _num(value, default=0.0):
     try:
-        if x is None:
+        if value is None:
             return default
 
-        return float(
-            str(x)
-            .replace("%", "")
-            .replace(",", "")
-            .strip()
-        )
-    except:
+        if isinstance(value, str):
+            value = (
+                value
+                .replace("%", "")
+                .replace("秒", "")
+                .strip()
+            )
+
+        return float(value)
+    except Exception:
         return default
 
 
-def _model():
-    return RandomForestClassifier(
-        n_estimators=200,
-        max_depth=10,
-        min_samples_leaf=3,
-        random_state=42,
-        n_jobs=-1,
-        class_weight="balanced_subsample",
+# =========================================================
+# 基本スコア
+# =========================================================
+
+def score(df):
+    """
+    6艇の総合スコア。
+    """
+
+    x = df.copy()
+
+    # 欠損を0にする
+    for col in FEATURES:
+        if col not in x.columns:
+            x[col] = 0.0
+
+        x[col] = pd.to_numeric(
+            x[col],
+            errors="coerce",
+        ).fillna(0.0)
+
+    # -----------------------------------------------------
+    # 各項目
+    # -----------------------------------------------------
+
+    x["AIスコア"] = 0.0
+
+    # 全国勝率
+    x["AIスコア"] += (
+        x["全国勝率"] * 10.0
     )
 
+    # 全国2連率
+    x["AIスコア"] += (
+        x["全国2連率"] * 0.35
+    )
 
-def _prepare(history):
+    # 当地勝率
+    x["AIスコア"] += (
+        x["当地勝率"] * 5.0
+    )
 
+    # 当地2連率
+    x["AIスコア"] += (
+        x["当地2連率"] * 0.20
+    )
+
+    # モーター
+    x["AIスコア"] += (
+        x["モーター2連率"] * 0.25
+    )
+
+    # 枠
+    lane_bonus = {
+        1: 5.0,
+        2: 2.0,
+        3: 1.0,
+        4: 0.0,
+        5: -0.5,
+        6: -1.0,
+    }
+
+    x["AIスコア"] += (
+        x["枠"].map(lane_bonus).fillna(0)
+    )
+
+    # 展示進入
+    x["AIスコア"] += (
+        (7 - x["展示進入"]) * 1.0
+    )
+
+    # 平均ST
+    x["AIスコア"] += (
+        (0.25 - x["平均ST"]) * 8.0
+    )
+
+    # 展示ST
+    x["AIスコア"] += (
+        (0.25 - x["展示ST"]) * 10.0
+    )
+
+    # 展示タイム
+    valid_time = x["展示タイム"].replace(0, np.nan)
+
+    if valid_time.notna().any():
+        best_time = valid_time.min()
+
+        x["AIスコア"] += (
+            (best_time - valid_time.fillna(best_time))
+            * 15.0
+        )
+
+    return x
+
+
+# =========================================================
+# AI特徴量
+# =========================================================
+
+def _prepare_features(df):
+    x = df.copy()
+
+    for col in FEATURES:
+        if col not in x.columns:
+            x[col] = 0.0
+
+        x[col] = pd.to_numeric(
+            x[col],
+            errors="coerce",
+        ).fillna(0.0)
+
+    return x[FEATURES]
+
+
+# =========================================================
+# 機械学習
+# =========================================================
+
+def _machine_prob(df, history):
+    """
+    過去データが十分ならRandomForestで1着確率を作る。
+    """
     if history is None:
         return None
 
-    df = (
-        history.copy()
-        if isinstance(history, pd.DataFrame)
-        else pd.DataFrame(history)
+    if not isinstance(history, pd.DataFrame):
+        return None
+
+    if history.empty:
+        return None
+
+    if "1着" not in history.columns:
+        return None
+
+    # 学習対象
+    train = history.copy()
+
+    # 必須特徴量
+    for col in FEATURES:
+        if col not in train.columns:
+            train[col] = 0.0
+
+        train[col] = pd.to_numeric(
+            train[col],
+            errors="coerce",
+        ).fillna(0.0)
+
+    train["1着"] = pd.to_numeric(
+        train["1着"],
+        errors="coerce",
+    ).fillna(0).astype(int)
+
+    # 0/1両方がないと学習できない
+    if train["1着"].nunique() < 2:
+        return None
+
+    # 最低限のデータ量
+    if len(train) < 100:
+        return None
+
+    X = train[FEATURES]
+    y = train["1着"]
+
+    model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=7,
+        min_samples_leaf=3,
+        random_state=42,
+        class_weight="balanced",
+        n_jobs=-1,
     )
-
-    if df.empty:
-        return None
-
-    for c in FEATURES + ["1着", "2着", "3着"]:
-        if c not in df.columns:
-            df[c] = 0
-
-    for c in FEATURES:
-        df[c] = df[c].apply(_num)
-
-    for c in ["1着", "2着", "3着"]:
-        df[c] = df[c].apply(_num)
-
-    df = df.replace(
-        [np.inf, -np.inf],
-        np.nan
-    ).fillna(0)
-
-    if len(df) < 30:
-        return None
-
-    return df
-
-
-def _train(history):
-
-    df = _prepare(history)
-
-    if df is None:
-        return None
-
-    X = df[FEATURES]
-    models = {}
-
-    for target in ["1着", "2着", "3着"]:
-
-        y = df[target].astype(int)
-
-        if y.nunique() < 2:
-            return None
-
-        m = _model()
-        m.fit(X, y)
-        models[target] = m
-
-    return models
-
-
-def _prob(model, row):
 
     try:
-        p = model.predict_proba(
-            row[FEATURES]
-        )[0]
+        model.fit(X, y)
+    except Exception:
+        return None
 
-        classes = list(
-            model.classes_
-        )
+    current_x = _prepare_features(df)
+
+    try:
+        probabilities = model.predict_proba(current_x)
+
+        classes = list(model.classes_)
 
         if 1 in classes:
-            return float(
-                p[classes.index(1)]
-            )
+            idx = classes.index(1)
+            p = probabilities[:, idx]
+        else:
+            return None
 
-    except:
-        pass
+        p = np.asarray(p, dtype=float)
 
-    return 0.0
+        if np.all(p <= 0):
+            return None
 
+        # 1着確率として合計100%
+        total = p.sum()
 
-# =========================================================
-# フォールバック
-# =========================================================
+        if total <= 0:
+            return None
 
-def _fallback(df):
+        return p / total
 
-    work = df.copy()
-
-    scores = []
-
-    for _, r in work.iterrows():
-
-        s = (
-            _num(r.get("全国勝率")) * 10
-            + _num(r.get("全国2連率")) * 0.25
-            + _num(r.get("当地勝率")) * 5
-            + _num(r.get("モーター2連率")) * 0.12
-        )
-
-        lane = int(
-            _num(r.get("枠"))
-        )
-
-        s += {
-            1: 20,
-            2: 8,
-            3: 6,
-            4: 7,
-            5: 2,
-            6: 0,
-        }.get(lane, 0)
-
-        ex = _num(
-            r.get("展示タイム")
-        )
-
-        if ex > 0:
-            s += max(
-                0,
-                (6.90 - ex) * 10
-            )
-
-        st = _num(
-            r.get("展示ST")
-        )
-
-        if st > 0:
-            s += max(
-                0,
-                (0.15 - st) * 20
-            )
-
-        scores.append(
-            max(s, 0.01)
-        )
-
-    work["_score"] = scores
-
-    lane_score = dict(
-        zip(
-            work["枠"].astype(int),
-            work["_score"]
-        )
-    )
-
-    results = []
-
-    for combo in itertools.permutations(
-        work["枠"].astype(int),
-        3
-    ):
-
-        p = (
-            lane_score[combo[0]]
-            * lane_score[combo[1]]
-            * lane_score[combo[2]]
-        )
-
-        results.append({
-            "3連単":
-                f"{combo[0]}-{combo[1]}-{combo[2]}",
-            "raw": p,
-        })
-
-    result = pd.DataFrame(results)
-
-    total = result["raw"].sum()
-
-    result["AI確率"] = (
-        result["raw"] / total * 100
-    )
-
-    result = result.sort_values(
-        "AI確率",
-        ascending=False
-    ).reset_index(drop=True)
-
-    result["AI順位"] = (
-        result.index + 1
-    )
-
-    result["信頼度"] = (
-        result["AI確率"]
-        / result["AI確率"].max()
-        * 100
-    )
-
-    # 枠別確率
-    total_score = sum(scores)
-
-    boat_probs = {}
-
-    for lane, s in lane_score.items():
-        boat_probs[lane] = (
-            s / total_score
-        )
-
-    result["AI確率"] = result[
-        "AI確率"
-    ].round(2)
-
-    result["信頼度"] = result[
-        "信頼度"
-    ].round(1)
-
-    result["1着AI"] = 0.0
-    result["2着AI"] = 0.0
-    result["3着AI"] = 0.0
-
-    return (
-        result[
-            [
-                "AI順位",
-                "3連単",
-                "AI確率",
-                "信頼度",
-                "1着AI",
-                "2着AI",
-                "3着AI",
-            ]
-        ],
-        boat_probs
-    )
+    except Exception:
+        return None
 
 
 # =========================================================
-# メインAI
+# 予測
 # =========================================================
 
 def tri_ai(df, history=None):
+    """
+    3連単予想を作る。
 
-    work = df.copy()
+    戻り値:
+      result
+      boat_probs
+    """
 
-    for c in FEATURES:
-        if c not in work.columns:
-            work[c] = 0
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("dfがDataFrameではありません。")
 
-        work[c] = work[c].apply(_num)
-
-    models = _train(history)
-
-    if models is None:
-        return _fallback(work)
-
-    first = []
-    second = []
-    third = []
-
-    for _, row in work.iterrows():
-
-        first.append(
-            _prob(
-                models["1着"],
-                row.to_frame().T
-            )
+    if len(df) != 6:
+        raise ValueError(
+            f"AIに渡された選手数が6人ではありません: {len(df)}"
         )
 
-        second.append(
-            _prob(
-                models["2着"],
-                row.to_frame().T
-            )
-        )
+    # -----------------------------------------------------
+    # 基本スコア
+    # -----------------------------------------------------
 
-        third.append(
-            _prob(
-                models["3着"],
-                row.to_frame().T
-            )
-        )
+    scored = score(df)
 
-    work["1着AI"] = first
-    work["2着AI"] = second
-    work["3着AI"] = third
-
-    pmap = {
-        int(r["枠"]): (
-            max(r["1着AI"], 0.000001)
-            * max(r["2着AI"], 0.000001)
-            * max(r["3着AI"], 0.000001)
-        )
-        for _, r in work.iterrows()
-    }
-
-    results = []
-
-    for combo in itertools.permutations(
-        work["枠"].astype(int),
-        3
-    ):
-
-        r1 = work[
-            work["枠"] == combo[0]
-        ].iloc[0]
-
-        r2 = work[
-            work["枠"] == combo[1]
-        ].iloc[0]
-
-        r3 = work[
-            work["枠"] == combo[2]
-        ].iloc[0]
-
-        p = (
-            max(r1["1着AI"], 0.000001)
-            * max(r2["2着AI"], 0.000001)
-            * max(r3["3着AI"], 0.000001)
-        )
-
-        results.append({
-            "3連単":
-                f"{combo[0]}-{combo[1]}-{combo[2]}",
-            "raw": p,
-            "1着AI": r1["1着AI"],
-            "2着AI": r2["2着AI"],
-            "3着AI": r3["3着AI"],
-        })
-
-    result = pd.DataFrame(results)
-
-    total = result["raw"].sum()
-
-    result["AI確率"] = (
-        result["raw"] / total * 100
+    heuristic = scored["AIスコア"].to_numpy(
+        dtype=float
     )
 
+    # -----------------------------------------------------
+    # 機械学習確率
+    # -----------------------------------------------------
+
+    ml_prob = _machine_prob(
+        df,
+        history,
+    )
+
+    if ml_prob is not None:
+
+        # ヒューリスティックも確率化
+        h = heuristic - heuristic.max()
+
+        exp_h = np.exp(
+            np.clip(h, -20, 20)
+        )
+
+        h_prob = exp_h / exp_h.sum()
+
+        # ML 70% + ルール30%
+        boat_probs = (
+            ml_prob * 0.70
+            + h_prob * 0.30
+        )
+
+    else:
+
+        h = heuristic - heuristic.max()
+
+        exp_h = np.exp(
+            np.clip(h, -20, 20)
+        )
+
+        boat_probs = exp_h / exp_h.sum()
+
+    # -----------------------------------------------------
+    # 100%に正規化
+    # -----------------------------------------------------
+
+    boat_probs = np.asarray(
+        boat_probs,
+        dtype=float,
+    )
+
+    boat_probs = boat_probs / boat_probs.sum()
+
+    # -----------------------------------------------------
+    # 3連単全組み合わせ
+    # -----------------------------------------------------
+
+    combos = []
+
+    lanes = [1, 2, 3, 4, 5, 6]
+
+    for a, b, c in itertools.permutations(lanes, 3):
+
+        p = (
+            boat_probs[a - 1]
+            * boat_probs[b - 1]
+            * boat_probs[c - 1]
+        )
+
+        # 進入・枠の補正
+        if a == 1:
+            p *= 1.15
+
+        if b == 1:
+            p *= 0.90
+
+        combos.append(
+            {
+                "買い目": f"{a}-{b}-{c}",
+                "確率": float(p),
+            }
+        )
+
+    result = pd.DataFrame(combos)
+
+    # -----------------------------------------------------
+    # 確率を100%基準にする
+    # -----------------------------------------------------
+
+    total = result["確率"].sum()
+
+    if total > 0:
+        result["確率"] = (
+            result["確率"] / total * 100
+        )
+
     result = result.sort_values(
-        "AI確率",
-        ascending=False
+        "確率",
+        ascending=False,
     ).reset_index(drop=True)
 
-    result["AI順位"] = (
+    # -----------------------------------------------------
+    # 上位だけに順位を付ける
+    # -----------------------------------------------------
+
+    result["順位"] = (
         result.index + 1
     )
 
-    result["信頼度"] = (
-        result["AI確率"]
-        / result["AI確率"].max()
-        * 100
-    )
+    # -----------------------------------------------------
+    # 選手ごとの1着確率
+    # -----------------------------------------------------
 
-    # 枠別AI確率
-    boat_probs = {}
-
-    for _, r in work.iterrows():
-        boat_probs[int(r["枠"])] = float(
-            r["1着AI"]
-        )
-
-    total_boat = sum(
-        boat_probs.values()
-    )
-
-    if total_boat > 0:
-        boat_probs = {
-            k: v / total_boat
-            for k, v in boat_probs.items()
+    boat_probs_df = pd.DataFrame(
+        {
+            "枠": lanes,
+            "選手名": df["選手名"].tolist(),
+            "1着確率": (
+                boat_probs * 100
+            ),
+            "AIスコア": (
+                scored["AIスコア"].to_numpy()
+            ),
         }
-
-    result["AI確率"] = result[
-        "AI確率"
-    ].round(2)
-
-    result["信頼度"] = result[
-        "信頼度"
-    ].round(1)
-
-    result["1着AI"] = (
-        result["1着AI"] * 100
-    ).round(2)
-
-    result["2着AI"] = (
-        result["2着AI"] * 100
-    ).round(2)
-
-    result["3着AI"] = (
-        result["3着AI"] * 100
-    ).round(2)
-
-    return (
-        result[
-            [
-                "AI順位",
-                "3連単",
-                "AI確率",
-                "信頼度",
-                "1着AI",
-                "2着AI",
-                "3着AI",
-            ]
-        ],
-        boat_probs
     )
 
-
-# =========================================================
-# 選手スコア
-# =========================================================
-
-def score(r):
-
-    value = (
-        _num(r.get("全国勝率")) * 10
-        + _num(r.get("全国2連率")) * 0.25
-        + _num(r.get("当地勝率")) * 5
-        + _num(r.get("モーター2連率")) * 0.12
-    )
-
-    lane = int(
-        _num(r.get("枠"))
-    )
-
-    value += {
-        1: 20,
-        2: 8,
-        3: 6,
-        4: 7,
-        5: 2,
-        6: 0,
-    }.get(lane, 0)
-
-    ex = _num(
-        r.get("展示タイム")
-    )
-
-    if ex > 0:
-        value += max(
-            0,
-            (6.90 - ex) * 10
-        )
-
-    st = _num(
-        r.get("展示ST")
-    )
-
-    if st > 0:
-        value += max(
-            0,
-            (0.15 - st) * 20
-        )
-
-    return round(value, 2)
+    return result, boat_probs_df

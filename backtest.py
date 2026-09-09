@@ -8,10 +8,6 @@ import data
 from ai import tri_ai
 
 
-# =========================================================
-# 設定
-# =========================================================
-
 START_DATE = data.API_START_DATE
 
 
@@ -24,7 +20,7 @@ def get_actual_order(race):
 
 
 # =========================================================
-# 3連単配当
+# 3連単の実際の払戻金を取得
 # =========================================================
 
 def get_trifecta_payout(race, order):
@@ -39,17 +35,15 @@ def get_trifecta_payout(race, order):
     if not isinstance(payouts, dict):
         return 0
 
-    trifecta = payouts.get(
-        "trifecta",
-        [],
-    )
+    trifecta = payouts.get("trifecta", [])
 
     if not isinstance(trifecta, list):
         return 0
 
-    target = tuple(
-        int(x)
-        for x in order[:3]
+    target = (
+        int(order[0]),
+        int(order[1]),
+        int(order[2]),
     )
 
     for item in trifecta:
@@ -70,9 +64,10 @@ def get_trifecta_payout(race, order):
         if len(nums) < 3:
             continue
 
-        combo = tuple(
-            int(x)
-            for x in nums[:3]
+        combo = (
+            int(nums[0]),
+            int(nums[1]),
+            int(nums[2]),
         )
 
         if combo == target:
@@ -139,7 +134,7 @@ def normalize_ranking(ranking):
 
 
 # =========================================================
-# 6点買い
+# AI 6点買い
 # =========================================================
 
 def make_bets(
@@ -198,9 +193,7 @@ def analyze_race(
     race_no,
 ):
 
-    rows = data.get_race_rows(
-        race
-    )
+    rows = data.get_race_rows(race)
 
     if rows is None or rows.empty:
         return None
@@ -217,9 +210,7 @@ def analyze_race(
         stadium_no,
     )
 
-    actual = get_actual_order(
-        race
-    )
+    actual = get_actual_order(race)
 
     if len(actual) < 3:
         return None
@@ -251,20 +242,25 @@ def analyze_race(
         hole,
     )
 
-    actual_trifecta = tuple(
-        actual[:3]
+    actual_trifecta = (
+        actual[0],
+        actual[1],
+        actual[2],
     )
 
     hit = (
-        actual_trifecta
-        in bets
+        actual_trifecta in bets
     )
 
-    payout = (
-        get_trifecta_payout(
-            race,
-            actual,
-        )
+    # 実際のレース結果の配当
+    actual_payout = get_trifecta_payout(
+        race,
+        actual,
+    )
+
+    # AIが当てた場合だけ回収対象
+    ai_payout = (
+        actual_payout
         if hit
         else 0
     )
@@ -297,30 +293,40 @@ def analyze_race(
             stadium_no
         ),
         "レース": f"{race_no}R",
+
         "本命": main,
         "対抗": counter,
         "穴": hole,
+
         "結果": "-".join(
             str(x)
             for x in actual[:3]
         ),
-        "3連単配当": payout,
+
+        # 実際の3連単払戻
+        "実配当": actual_payout,
+
+        # AI買いで回収した金額
+        "3連単配当": ai_payout,
+
         "本命1着": (
             actual[0] == main
         ),
+
         "本命3連対": (
             main in actual[:3]
         ),
-        "AI上位3艇3連対": (
-            top3_hit
-        ),
+
+        "AI上位3艇3連対": top3_hit,
+
         "AI買い的中": hit,
+
         "3連単完全的中": hit,
     }
 
 
 # =========================================================
-# 1日分の全国24場を取得
+# 1日分の全国24場
 # =========================================================
 
 def get_completed_races_for_date(
@@ -370,7 +376,7 @@ def get_completed_races_for_date(
 
 
 # =========================================================
-# バックテスト実行
+# バックテスト
 # =========================================================
 
 def run_backtest(
@@ -516,9 +522,8 @@ def calculate_metrics(df):
 
     total = len(df)
 
-    investment = (
-        total * 600
-    )
+    # 1レース6点 × 100円
+    investment = total * 600
 
     payout = int(
         df["3連単配当"].sum()
@@ -534,27 +539,35 @@ def calculate_metrics(df):
 
     return {
         "検証レース数": total,
+
         "投資金額": investment,
+
         "払戻金額": payout,
+
         "回収率": roi,
+
         "本命1着率": (
             df["本命1着"].mean()
             * 100
         ),
+
         "本命3連対率": (
             df["本命3連対"].mean()
             * 100
         ),
+
         "AI上位3艇3連対": (
             df[
                 "AI上位3艇3連対"
             ].mean()
             * 100
         ),
+
         "AI買い的中率": (
             df["AI買い的中"].mean()
             * 100
         ),
+
         "3連単完全的中率": (
             df[
                 "3連単完全的中"
@@ -572,25 +585,24 @@ BOAT_HTML = """
 <style>
 
 .bt-wrap {
-    width: 100%;
-    margin: 8px 0 18px 0;
+    width:100%;
+    margin:8px 0 18px 0;
 }
 
 .bt-title {
-    text-align: center;
-    font-size: 17px;
-    font-weight: 800;
-    margin-bottom: 8px;
+    text-align:center;
+    font-size:17px;
+    font-weight:800;
+    margin-bottom:8px;
 }
 
 .bt-track {
-    position: relative;
-    width: 100%;
-    height: 66px;
-    overflow: hidden;
-    border-radius: 16px;
-    border: 1px solid rgba(120,120,120,.25);
-
+    position:relative;
+    width:100%;
+    height:66px;
+    overflow:hidden;
+    border-radius:16px;
+    border:1px solid rgba(120,120,120,.25);
     background:
         linear-gradient(
             to bottom,
@@ -600,42 +612,39 @@ BOAT_HTML = """
 }
 
 .bt-boat {
-    position: absolute;
-    left: -70px;
-    top: 8px;
-    font-size: 38px;
-
+    position:absolute;
+    left:-70px;
+    top:8px;
+    font-size:38px;
     animation:
         bt-run 2.2s linear infinite;
 }
 
 .bt-wave {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 5px;
-
-    text-align: center;
-    font-size: 18px;
-    letter-spacing: 6px;
-
-    opacity: .6;
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:5px;
+    text-align:center;
+    font-size:18px;
+    letter-spacing:6px;
+    opacity:.6;
 }
 
 @keyframes bt-run {
 
     0% {
-        left: -70px;
-        transform: translateY(0);
+        left:-70px;
+        transform:translateY(0);
     }
 
     50% {
-        transform: translateY(-5px);
+        transform:translateY(-5px);
     }
 
     100% {
-        left: calc(100% + 20px);
-        transform: translateY(0);
+        left:calc(100% + 20px);
+        transform:translateY(0);
     }
 }
 
@@ -673,13 +682,52 @@ def show_result_cards(df):
         "### 📋 検証結果"
     )
 
-    for _, row in df.iterrows():
+    # 10レースずつ表示
+    page_size = 10
+
+    pages = (
+        len(df) + page_size - 1
+    ) // page_size
+
+    page = st.selectbox(
+        "表示ページ",
+        list(
+            range(
+                1,
+                pages + 1,
+            )
+        ),
+        key="backtest_result_page",
+    )
+
+    start = (
+        page - 1
+    ) * page_size
+
+    end = min(
+        start + page_size,
+        len(df),
+    )
+
+    page_df = df.iloc[
+        start:end
+    ]
+
+    st.caption(
+        f"{start + 1}〜{end}レースを表示"
+    )
+
+    for _, row in page_df.iterrows():
 
         hit = bool(
             row["AI買い的中"]
         )
 
-        payout = int(
+        actual_payout = int(
+            row["実配当"]
+        )
+
+        ai_payout = int(
             row["3連単配当"]
         )
 
@@ -689,11 +737,15 @@ def show_result_cards(df):
 
         if hit:
 
-            judge = "🎯 的中"
+            judge = (
+                "🎯 AI買い的中"
+            )
 
         else:
 
-            judge = "—"
+            judge = (
+                "❌ AI買い外れ"
+            )
 
         st.markdown(
             f"""
@@ -708,7 +760,7 @@ def show_result_cards(df):
                 <div style="
                     font-weight:800;
                     font-size:16px;
-                    margin-bottom:8px;
+                    margin-bottom:9px;
                 ">
                     📅 {row["日付"]}
                    　
@@ -719,7 +771,7 @@ def show_result_cards(df):
 
                 <div style="
                     font-size:14px;
-                    margin-bottom:7px;
+                    margin-bottom:8px;
                 ">
                     🎯 本命
                     <b>{row["本命"]}号艇</b>
@@ -733,21 +785,28 @@ def show_result_cards(df):
 
                 <div style="
                     font-size:15px;
-                    margin-bottom:7px;
+                    margin-bottom:8px;
                 ">
-                    🏆 結果
+                    🏆 実着順
                     <b>{result}</b>
                 </div>
 
                 <div style="
                     font-size:14px;
+                    margin-bottom:6px;
                 ">
-                    💴 3連単
-                    <b>
-                        {payout:,}円
-                    </b>
-                   　
+                    💴 実際の3連単
+                    <b>{actual_payout:,}円</b>
+                </div>
+
+                <div style="
+                    font-size:14px;
+                    font-weight:700;
+                ">
                     {judge}
+                   　
+                    AI回収
+                    <b>{ai_payout:,}円</b>
                 </div>
 
             </div>
@@ -757,7 +816,7 @@ def show_result_cards(df):
 
 
 # =========================================================
-# バックテスト画面
+# メイン画面
 # =========================================================
 
 def render_backtest(
@@ -874,11 +933,8 @@ def render_backtest(
     except Exception as e:
 
         animation.empty()
-
         progress.empty()
-
         status.empty()
-
         count_box.empty()
 
         st.error(
@@ -890,10 +946,6 @@ def render_backtest(
         return
 
     animation.empty()
-
-    # =====================================================
-    # データなし
-    # =====================================================
 
     if not records:
 
@@ -929,10 +981,6 @@ def render_backtest(
 
         return
 
-    # =====================================================
-    # DataFrame
-    # =====================================================
-
     df = pd.DataFrame(
         records
     )
@@ -952,7 +1000,7 @@ def render_backtest(
     )
 
     # =====================================================
-    # 指標
+    # 成績
     # =====================================================
 
     st.markdown(
@@ -1024,9 +1072,9 @@ def render_backtest(
         )
 
     # =====================================================
-    # スマホ向け結果
+    # カード表示
     # =====================================================
 
     show_result_cards(
         df
-        )
+    )

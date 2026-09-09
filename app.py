@@ -18,7 +18,6 @@ from data import (
 )
 
 from ai import tri_ai
-
 from backtest import render_backtest
 
 
@@ -42,12 +41,6 @@ st.markdown(
     """
 <style>
 
-html, body, [class*="css"] {
-    font-family: sans-serif;
-}
-
-/* タイトル */
-
 .main-title {
     font-size: 30px;
     font-weight: 900;
@@ -57,11 +50,11 @@ html, body, [class*="css"] {
 .sub-title {
     font-size: 14px;
     color: #777;
-    margin-bottom: 18px;
+    margin-bottom: 20px;
 }
 
 
-/* レース情報 */
+/* レースヘッダー */
 
 .race-header {
     background: linear-gradient(
@@ -69,10 +62,10 @@ html, body, [class*="css"] {
         #111827,
         #1f2937
     );
-    color: white;
+    color: #ffffff;
     padding: 18px;
     border-radius: 16px;
-    margin: 15px 0;
+    margin: 18px 0;
 }
 
 .race-date {
@@ -83,15 +76,16 @@ html, body, [class*="css"] {
 .race-title {
     font-size: 25px;
     font-weight: 900;
+    margin-top: 4px;
 }
 
 
-/* 予想カード */
+/* AIカード */
 
 .pred-card {
     padding: 20px;
     border-radius: 16px;
-    color: white;
+    color: #ffffff;
     min-height: 135px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.15);
 }
@@ -107,9 +101,6 @@ html, body, [class*="css"] {
     margin-top: 8px;
 }
 
-
-/* 本命 */
-
 .main-card {
     background: linear-gradient(
         135deg,
@@ -118,9 +109,6 @@ html, body, [class*="css"] {
     );
 }
 
-
-/* 対抗 */
-
 .counter-card {
     background: linear-gradient(
         135deg,
@@ -128,9 +116,6 @@ html, body, [class*="css"] {
         #b45309
     );
 }
-
-
-/* 穴 */
 
 .hole-card {
     background: linear-gradient(
@@ -159,7 +144,7 @@ html, body, [class*="css"] {
 .boat-number {
     font-size: 20px;
     font-weight: 900;
-    min-width: 45px;
+    min-width: 55px;
 }
 
 .boat-name {
@@ -174,32 +159,14 @@ html, body, [class*="css"] {
 }
 
 
-/* バックテスト */
+/* 予想前 */
 
-.backtest-box {
-    padding: 18px;
-    border-radius: 16px;
-    background: #111827;
-    color: white;
-    margin-top: 15px;
-}
-
-.metric-card {
+.predict-info {
     padding: 16px;
     border-radius: 14px;
     background: #f3f4f6;
-    color: #111827;
-    text-align: center;
-}
-
-.metric-title {
-    font-size: 13px;
-    color: #6b7280;
-}
-
-.metric-value {
-    font-size: 25px;
-    font-weight: 900;
+    color: #374151;
+    margin: 15px 0;
 }
 
 </style>
@@ -224,13 +191,23 @@ st.markdown(
 
 
 # =========================================================
-# 今日のデータ
+# 今日の日付
 # =========================================================
 
 target_date = date.today()
 
-with st.spinner("📡 本日のレースデータを取得中..."):
-    raw = get_data(target_date)
+
+# =========================================================
+# 本日のAPI
+# =========================================================
+
+with st.spinner(
+    "📡 本日のレースデータを取得中..."
+):
+
+    raw = get_data(
+        target_date
+    )
 
 
 if raw is None:
@@ -240,7 +217,7 @@ if raw is None:
     )
 
     st.info(
-        "APIに接続できない、または本日のデータがまだ公開されていない可能性があります。"
+        "時間を置いて再読み込みしてください。"
     )
 
     st.stop()
@@ -250,7 +227,9 @@ if raw is None:
 # 開催場
 # =========================================================
 
-stadiums = available_stadiums(raw)
+stadiums = available_stadiums(
+    raw
+)
 
 if not stadiums:
 
@@ -261,15 +240,19 @@ if not stadiums:
     st.stop()
 
 
-st.subheader("📍 開催場")
+st.subheader(
+    "📍 開催場"
+)
 
 stadium_number = st.selectbox(
     "開催場を選択",
     stadiums,
-    format_func=lambda x: STADIUM_NAMES.get(
-        x,
-        f"{x}場"
-    ),
+    format_func=lambda x:
+        STADIUM_NAMES.get(
+            x,
+            f"{x}場"
+        ),
+    key="stadium_select",
 )
 
 
@@ -285,47 +268,27 @@ races = available_races(
 if not races:
 
     st.warning(
-        "⚠️ 選択した開催場にレースデータがありません。"
+        "⚠️ この開催場のレースデータがありません。"
     )
 
     st.stop()
 
 
-st.subheader("🏁 レース")
+st.subheader(
+    "🏁 レース"
+)
 
 race_number = st.selectbox(
     "レースを選択",
     races,
-    format_func=lambda x: f"{x}R",
+    format_func=lambda x:
+        f"{x}R",
+    key="race_select",
 )
 
 
 # =========================================================
-# レースヘッダー
-# =========================================================
-
-venue_name = STADIUM_NAMES.get(
-    stadium_number,
-    f"{stadium_number}場",
-)
-
-st.markdown(
-    f"""
-<div class="race-header">
-    <div class="race-date">
-        🗓 {target_date.strftime("%Y-%m-%d")}
-    </div>
-    <div class="race-title">
-        📍 {venue_name}　{race_number}R
-    </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# レース存在確認
+# 選択されたレース
 # =========================================================
 
 race = get_race(
@@ -337,54 +300,117 @@ race = get_race(
 if race is None:
 
     st.error(
-        "⚠️ このレースのデータを取得できませんでした。"
+        "⚠️ 選択したレースのデータがありません。"
     )
 
     st.stop()
 
 
 # =========================================================
-# AI予想開始ボタン
+# 予想キー
 # =========================================================
 
-st.markdown(
-    "### 🤖 AI予想"
-)
-
-predict_key = (
-    f"predict_{target_date}_"
+prediction_key = (
+    f"{target_date.isoformat()}_"
     f"{stadium_number}_"
     f"{race_number}"
 )
 
-if predict_key not in st.session_state:
-    st.session_state[predict_key] = False
+session_key = (
+    "prediction_started_"
+    + prediction_key
+)
 
 
-if st.button(
-    "🚀 AI予想開始",
-    type="primary",
-    use_container_width=True,
-):
+if session_key not in st.session_state:
 
-    st.session_state[predict_key] = True
+    st.session_state[
+        session_key
+    ] = False
 
 
 # =========================================================
-# ボタンを押す前
+# AI予想
 # =========================================================
 
-if not st.session_state[predict_key]:
+st.subheader(
+    "🤖 AI予想"
+)
 
-    st.info(
-        "👆 「AI予想開始」を押すと、展示・選手成績・モーターなどを解析します。"
+
+# ---------------------------------------------------------
+# AI開始前
+# ---------------------------------------------------------
+
+if not st.session_state[
+    session_key
+]:
+
+    st.markdown(
+        """
+<div class="predict-info">
+👆 「AI予想開始」を押すと、
+展示・選手成績・モーターなどを解析します。
+</div>
+""",
+        unsafe_allow_html=True,
     )
+
+    if st.button(
+        "🚀 AI予想開始",
+        type="primary",
+        use_container_width=True,
+        key="predict_button",
+    ):
+
+        st.session_state[
+            session_key
+        ] = True
+
+        st.rerun()
+
+
+    # -----------------------------------------------------
+    # 予想前はここで終了
+    # -----------------------------------------------------
 
     st.divider()
 
     render_backtest()
 
     st.stop()
+
+
+# =========================================================
+# AI予想開始後
+# =========================================================
+
+venue_name = STADIUM_NAMES.get(
+    stadium_number,
+    f"{stadium_number}場",
+)
+
+
+# =========================================================
+# レースヘッダー
+# =========================================================
+
+st.markdown(
+    f"""
+<div class="race-header">
+
+    <div class="race-date">
+        🗓 {target_date.strftime("%Y-%m-%d")}
+    </div>
+
+    <div class="race-title">
+        📍 {venue_name}　{race_number}R
+    </div>
+
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # =========================================================
@@ -399,20 +425,25 @@ rows = get_race_rows(
 if len(rows) < 6:
 
     st.error(
-        f"⚠️ 6艇分のデータを取得できませんでした。現在 {len(rows)}艇です。"
+        f"⚠️ 出走艇データが6艇揃っていません。"
+        f"現在 {len(rows)}艇です。"
     )
 
     st.stop()
 
 
-df = pd.DataFrame(rows)
+df = pd.DataFrame(
+    rows
+)
 
 
 # =========================================================
-# 過去データ
+# 過去14日
 # =========================================================
 
-with st.spinner("📚 過去14日分のデータを解析中..."):
+with st.spinner(
+    "📚 過去データを解析中..."
+):
 
     hist = history14(
         stadium_number,
@@ -422,10 +453,12 @@ with st.spinner("📚 過去14日分のデータを解析中..."):
 
 
 # =========================================================
-# AI
+# AI計算
 # =========================================================
 
-with st.spinner("🤖 AIがレースを解析中..."):
+with st.spinner(
+    "🤖 AIがレースを解析中..."
+):
 
     prediction = tri_ai(
         df,
@@ -435,14 +468,32 @@ with st.spinner("🤖 AIがレースを解析中..."):
 
 
 # =========================================================
-# AI予想表示
+# AI結果
 # =========================================================
 
-main = prediction["main"]
-counter = prediction["counter"]
-hole = prediction["hole"]
+main = int(
+    prediction["main"]
+)
 
-confidence = prediction["confidence"]
+counter = int(
+    prediction["counter"]
+)
+
+hole = int(
+    prediction["hole"]
+)
+
+confidence = float(
+    prediction.get(
+        "confidence",
+        0.5,
+    )
+)
+
+
+# =========================================================
+# 自信度
+# =========================================================
 
 star_count = int(
     round(
@@ -460,11 +511,19 @@ star_count = max(
 
 stars = (
     "★" * star_count
-    + "☆" * (5 - star_count)
+    + "☆" * (
+        5 - star_count
+    )
 )
 
 
-col1, col2, col3 = st.columns(3)
+# =========================================================
+# 本命・対抗・穴
+# =========================================================
+
+col1, col2, col3 = st.columns(
+    3
+)
 
 
 with col1:
@@ -472,8 +531,15 @@ with col1:
     st.markdown(
         f"""
 <div class="pred-card main-card">
-    <div class="pred-label">🎯 本命</div>
-    <div class="pred-boat">{main}号艇</div>
+
+    <div class="pred-label">
+        🎯 本命
+    </div>
+
+    <div class="pred-boat">
+        {main}号艇
+    </div>
+
 </div>
 """,
         unsafe_allow_html=True,
@@ -485,8 +551,15 @@ with col2:
     st.markdown(
         f"""
 <div class="pred-card counter-card">
-    <div class="pred-label">🔥 対抗</div>
-    <div class="pred-boat">{counter}号艇</div>
+
+    <div class="pred-label">
+        🔥 対抗
+    </div>
+
+    <div class="pred-boat">
+        {counter}号艇
+    </div>
+
 </div>
 """,
         unsafe_allow_html=True,
@@ -498,8 +571,15 @@ with col3:
     st.markdown(
         f"""
 <div class="pred-card hole-card">
-    <div class="pred-label">💥 穴</div>
-    <div class="pred-boat">{hole}号艇</div>
+
+    <div class="pred-label">
+        💥 穴
+    </div>
+
+    <div class="pred-boat">
+        {hole}号艇
+    </div>
+
 </div>
 """,
         unsafe_allow_html=True,
@@ -515,29 +595,42 @@ st.markdown(
 # 出走艇
 # =========================================================
 
-st.subheader("🚤 出走艇")
+st.subheader(
+    "🚤 出走艇"
+)
 
 
 for _, row in df.iterrows():
 
-    boat = int(row["枠"])
-    name = str(row["選手名"])
+    boat = int(
+        row["枠"]
+    )
+
+    name = str(
+        row["選手名"]
+    )
 
     if boat == main:
+
         mark = "🎯 本命"
 
     elif boat == counter:
+
         mark = "🔥 対抗"
 
     elif boat == hole:
+
         mark = "💥 穴"
 
     else:
+
         mark = ""
+
 
     st.markdown(
         f"""
 <div class="boat-card">
+
     <div class="boat-number">
         {boat}号艇
     </div>
@@ -549,6 +642,7 @@ for _, row in df.iterrows():
     <div class="boat-mark">
         {mark}
     </div>
+
 </div>
 """,
         unsafe_allow_html=True,
@@ -559,12 +653,16 @@ for _, row in df.iterrows():
 # AI予測確率
 # =========================================================
 
-st.subheader("📊 AI予測確率")
+st.subheader(
+    "📊 AI予測確率"
+)
+
 
 boat_probs = prediction.get(
     "boat_probs",
     {},
 )
+
 
 if boat_probs:
 
@@ -573,16 +671,21 @@ if boat_probs:
             {
                 "艇番": int(boat),
                 "AI予測確率": round(
-                    float(prob) * 100,
+                    float(prob)
+                    * 100,
                     1,
                 ),
             }
-            for boat, prob in boat_probs.items()
+            for boat, prob
+            in boat_probs.items()
         ]
     )
 
-    probability_df = probability_df.sort_values(
-        "艇番"
+    probability_df = (
+        probability_df
+        .sort_values(
+            "艇番"
+        )
     )
 
     st.bar_chart(
@@ -596,14 +699,19 @@ if boat_probs:
 # AIランキング
 # =========================================================
 
-st.subheader("🏆 AI総合ランキング")
+st.subheader(
+    "🏆 AI総合ランキング"
+)
+
 
 ranking = prediction.get(
     "ranking",
     [],
 )
 
+
 ranking_rows = []
+
 
 for rank, boat in enumerate(
     ranking,
@@ -622,15 +730,22 @@ for rank, boat in enumerate(
         {
             "順位": rank,
             "艇番": f"{boat}号艇",
-            "AI確率": f"{probability:.1f}%",
+            "AI予測確率": (
+                f"{probability:.1f}%"
+            ),
         }
     )
 
-st.dataframe(
-    pd.DataFrame(ranking_rows),
-    use_container_width=True,
-    hide_index=True,
-)
+
+if ranking_rows:
+
+    st.dataframe(
+        pd.DataFrame(
+            ranking_rows
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # =========================================================

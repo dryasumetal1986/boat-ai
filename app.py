@@ -1,499 +1,364 @@
+import re
+import requests
 import streamlit as st
 import pandas as pd
 from datetime import date
+from bs4 import BeautifulSoup
 
 import data
 from ai import score, tri_ai
 
 
-# =========================
-# 会場一覧
-# =========================
 STADIUMS = {
-    1: "桐生",
-    2: "戸田",
-    3: "江戸川",
-    4: "平和島",
-    5: "多摩川",
-    6: "浜名湖",
-    7: "蒲郡",
-    8: "常滑",
-    9: "津",
-    10: "三国",
-    11: "びわこ",
-    12: "住之江",
-    13: "尼崎",
-    14: "鳴門",
-    15: "丸亀",
-    16: "児島",
-    17: "宮島",
-    18: "徳山",
-    19: "下関",
-    20: "若松",
-    21: "芦屋",
-    22: "福岡",
-    23: "唐津",
-    24: "大村",
+    1:"桐生",2:"戸田",3:"江戸川",4:"平和島",5:"多摩川",6:"浜名湖",
+    7:"蒲郡",8:"常滑",9:"津",10:"三国",11:"びわこ",12:"住之江",
+    13:"尼崎",14:"鳴門",15:"丸亀",16:"児島",17:"宮島",18:"徳山",
+    19:"下関",20:"若松",21:"芦屋",22:"福岡",23:"唐津",24:"大村"
 }
 
-
-# =========================
-# ページ設定
-# =========================
 st.set_page_config(
     page_title="競艇AI予想",
     page_icon="🚤",
-    layout="wide",
+    layout="wide"
 )
 
 st.title("🚤 競艇AI予想")
 
 
-# =========================
-# 入力
-# =========================
-col1, col2, col3 = st.columns(3)
+def val(d, keys, default=0):
+    if not isinstance(d, dict):
+        return default
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return default
 
-with col1:
+
+def num(x, default=0):
+    try:
+        return float(
+            str(x)
+            .replace(",", "")
+            .replace("%", "")
+            .replace("秒", "")
+            .strip()
+        )
+    except:
+        return default
+
+
+@st.cache_data(ttl=120)
+def official_preview(sno, rno, td):
+    try:
+        url = (
+            "https://www.boatrace.jp/owpc/pc/race/beforeinfo"
+            f"?rno={rno}&jcd={int(sno):02d}&hd={td:%Y%m%d}"
+        )
+
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15
+        )
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        out = {}
+
+        for tr in soup.find_all("tr"):
+            cells = [
+                x.get_text(" ", strip=True)
+                for x in tr.find_all(["th", "td"])
+            ]
+
+            if not cells:
+                continue
+
+            lane = next(
+                (
+                    int(x) for x in cells
+                    if re.fullmatch(r"[1-6]", x)
+                ),
+                None
+            )
+
+            if lane is None:
+                continue
+
+            text = " ".join(cells)
+
+            times = re.findall(
+                r"\d\.\d{2}",
+                text
+            )
+
+            exhibition = next(
+                (
+                    float(x) for x in times
+                    if 6.0 <= float(x) <= 8.0
+                ),
+                0
+            )
+
+            sts = re.findall(
+                r"(?:F|L)?(\d\.\d{2})",
+                text
+            )
+
+            st_value = next(
+                (
+                    float(x) for x in sts
+                    if 0 <= float(x) <= 0.6
+                ),
+                0
+            )
+
+            out[lane] = {
+                "展示タイム": exhibition,
+                "展示ST": st_value,
+                "展示進入": lane
+            }
+
+        return out
+
+    except:
+        return {}
+
+
+def build_rows(race, sno, rno, td):
+
+    racers = data.racers(
+        race.get("racers")
+        or race.get("entries")
+        or race.get("entry")
+        or []
+    )
+
+    preview = data.racers(
+        race.get("preview")
+        or race.get("exhibition")
+        or []
+    )
+
+    pmap = {}
+
+    for p in preview:
+        no = val(
+            p,
+            ["racerNumber","playerNumber","number","選手番号"],
+            None
+        )
+        try:
+            pmap[int(float(no))] = p
+        except:
+            pass
+
+    official = official_preview(
+        sno,
+        rno,
+        td
+    )
+
+    rows = []
+
+    for i, r in enumerate(racers):
+
+        lane = val(
+            r,
+            ["entryNumber","boatNumber","courseNumber","枠","lane"],
+            i + 1
+        )
+
+        try:
+            lane = int(float(lane))
+        except:
+            lane = i + 1
+
+        no = val(
+            r,
+            ["racerNumber","playerNumber","number","選手番号"],
+            0
+        )
+
+        try:
+            no = int(float(no))
+        except:
+            no = 0
+
+        p = pmap.get(no, {})
+        op = official.get(lane, {})
+
+        def get(keys, default=0):
+            return val(r, keys, default)
+
+        def getp(keys, default=None):
+            x = val(p, keys, default)
+            return x if x is not None else default
+
+        exhibition_time = getp(
+            ["exhibitionTime","exhibition_time","exTime","time","展示タイム"],
+            op.get("展示タイム", 0)
+        )
+
+        exhibition_st = getp(
+            ["startTiming","exhibitionST","exhibitionSt","st","展示ST"],
+            op.get("展示ST", 0)
+        )
+
+        exhibition_course = getp(
+            ["courseNumber","entryNumber","course","展示進入"],
+            op.get("展示進入", lane)
+        )
+
+        rows.append({
+            "枠": lane,
+            "展示進入": num(exhibition_course, lane),
+            "選手名": get(
+                ["racerName","playerName","name","選手名"],
+                "-"
+            ),
+            "選手番号": no,
+            "級別": get(
+                ["grade","racerClass","class","級別"],
+                "-"
+            ),
+            "全国勝率": num(get([
+                "nationwideWinRate",
+                "nationalWinRate",
+                "winRate",
+                "全国勝率"
+            ])),
+            "全国2連率": num(get([
+                "nationwide2Rate",
+                "national2Rate",
+                "secondRate",
+                "全国2連率"
+            ])),
+            "当地勝率": num(get([
+                "localWinRate",
+                "localRate",
+                "placeWinRate",
+                "当地勝率"
+            ])),
+            "モーター2連率": num(get([
+                "motor2Rate",
+                "motorSecondRate",
+                "モーター2連率"
+            ])),
+            "平均ST": num(get([
+                "averageST",
+                "avgST",
+                "averageStartTiming",
+                "平均ST"
+            ])),
+            "展示ST": num(exhibition_st),
+            "展示タイム": num(exhibition_time),
+            "場": sno
+        })
+
+    return rows
+
+
+# =========================================================
+# 入力
+# =========================================================
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
     td = st.date_input(
         "開催日",
-        value=date.today(),
+        date.today()
     )
 
-with col2:
-    stadium_no = st.selectbox(
+with c2:
+    sno = st.selectbox(
         "競艇場",
-        options=list(STADIUMS.keys()),
-        format_func=lambda x: STADIUMS[x],
+        list(STADIUMS),
+        format_func=lambda x: STADIUMS[x]
     )
 
-with col3:
-    race_no = st.selectbox(
+with c3:
+    rno = st.selectbox(
         "レース",
-        options=list(range(1, 13)),
-        format_func=lambda x: f"{x}R",
+        range(1, 13),
+        format_func=lambda x: f"{x}R"
     )
 
 
-# =========================
+# =========================================================
 # AI予想
-# =========================
+# =========================================================
+
 if st.button(
     "🤖 AI予想を実行",
     type="primary",
-    use_container_width=True,
+    use_container_width=True
 ):
 
-    with st.spinner("レースデータを取得しています..."):
+    with st.spinner("AI分析中..."):
 
-        # ---------------------------------
-        # データ取得
-        # ---------------------------------
         try:
             all_data = data.get_data(td)
+            race = data.get_race(
+                all_data,
+                sno,
+                rno
+            )
+
+            if race is None:
+                st.error("レースデータがありません。")
+                st.stop()
+
+            rows = build_rows(
+                race,
+                sno,
+                rno,
+                td
+            )
+
+            df = pd.DataFrame(rows)
+
+            if df.empty:
+                st.error("選手データが取得できませんでした。")
+                st.stop()
+
+            df["学習AI"] = df.apply(
+                score,
+                axis=1
+            )
+
+            history = pd.DataFrame(
+                data.history14(td)
+            )
+
+            result = tri_ai(
+                df,
+                history
+            )
 
         except Exception as e:
             st.error(
-                f"データ取得に失敗しました。\n\n{e}"
+                f"AI予想でエラーが発生しました。\n\n{e}"
             )
             st.stop()
 
-        race = data.get_race(
-            all_data,
-            stadium_no,
-            race_no,
-        )
 
-        if race is None:
-            st.error(
-                "指定したレースのデータが見つかりません。"
-            )
-            st.stop()
+    # =====================================================
+    # レース情報
+    # =====================================================
 
-        # ---------------------------------
-        # 選手データ
-        # ---------------------------------
-        racers = data.racers(
-            race.get("racers")
-            or race.get("entries")
-            or race.get("entry")
-            or []
-        )
+    st.subheader(
+        f"🚤 {STADIUMS[sno]} {rno}R"
+    )
 
-        if not racers:
-            st.error(
-                "選手データが取得できませんでした。"
-            )
-            st.stop()
 
-        # ---------------------------------
-        # 展示データ
-        # ---------------------------------
-        preview = (
-            race.get("preview")
-            or race.get("exhibition")
-            or []
-        )
+    # =====================================================
+    # データ
+    # =====================================================
 
-        preview_list = data.racers(
-            preview
-        )
+    st.subheader("📋 選手データ")
 
-        preview_map = {}
-
-        for p in preview_list:
-
-            try:
-                player_no = p.get(
-                    "racerNumber",
-                    p.get(
-                        "playerNumber",
-                        p.get(
-                            "number",
-                            p.get("選手番号")
-                        )
-                    ),
-                )
-
-                if player_no is None:
-                    continue
-
-                player_no = int(
-                    float(player_no)
-                )
-
-                preview_map[player_no] = p
-
-            except Exception:
-                continue
-
-        # ---------------------------------
-        # AI用データ作成
-        # ---------------------------------
-        rows = []
-
-        for i, r in enumerate(racers):
-
-            lane = r.get(
-                "entryNumber",
-                r.get(
-                    "boatNumber",
-                    r.get(
-                        "courseNumber",
-                        r.get(
-                            "枠",
-                            r.get(
-                                "lane",
-                                i + 1
-                            )
-                        )
-                    )
-                ),
-            )
-
-            try:
-                lane = int(
-                    float(lane)
-                )
-            except Exception:
-                lane = i + 1
-
-            player_no = r.get(
-                "racerNumber",
-                r.get(
-                    "playerNumber",
-                    r.get(
-                        "number",
-                        r.get("選手番号")
-                    )
-                ),
-            )
-
-            try:
-                player_no = int(
-                    float(player_no)
-                )
-            except Exception:
-                player_no = 0
-
-            p = preview_map.get(
-                player_no,
-                {}
-            )
-
-            # -----------------------------
-            # 選手名
-            # -----------------------------
-            name = r.get(
-                "racerName",
-                r.get(
-                    "name",
-                    r.get(
-                        "選手名",
-                        "-"
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 級別
-            # -----------------------------
-            grade = r.get(
-                "grade",
-                r.get(
-                    "class",
-                    r.get(
-                        "級別",
-                        "-"
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 全国勝率
-            # -----------------------------
-            nationwide_win = r.get(
-                "nationwideWinRate",
-                r.get(
-                    "nationalWinRate",
-                    r.get(
-                        "winRate",
-                        r.get(
-                            "全国勝率",
-                            0
-                        )
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 全国2連率
-            # -----------------------------
-            nationwide_2 = r.get(
-                "nationwide2Rate",
-                r.get(
-                    "national2Rate",
-                    r.get(
-                        "secondRate",
-                        r.get(
-                            "全国2連率",
-                            0
-                        )
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 当地勝率
-            # -----------------------------
-            local_win = r.get(
-                "localWinRate",
-                r.get(
-                    "localRate",
-                    r.get(
-                        "当地勝率",
-                        0
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # モーター2連率
-            # -----------------------------
-            motor_2 = r.get(
-                "motor2Rate",
-                r.get(
-                    "motorSecondRate",
-                    r.get(
-                        "モーター2連率",
-                        0
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 平均ST
-            # -----------------------------
-            avg_st = r.get(
-                "averageST",
-                r.get(
-                    "avgST",
-                    r.get(
-                        "averageStartTiming",
-                        r.get(
-                            "平均ST",
-                            0
-                        )
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 展示ST
-            # -----------------------------
-            exhibition_st = p.get(
-                "startTiming",
-                p.get(
-                    "exhibitionST",
-                    p.get(
-                        "st",
-                        p.get(
-                            "展示ST",
-                            0
-                        )
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 展示タイム
-            # -----------------------------
-            exhibition_time = p.get(
-                "exhibitionTime",
-                p.get(
-                    "time",
-                    p.get(
-                        "展示タイム",
-                        0
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 展示進入
-            # -----------------------------
-            exhibition_course = p.get(
-                "courseNumber",
-                p.get(
-                    "entryNumber",
-                    p.get(
-                        "course",
-                        lane
-                    )
-                ),
-            )
-
-            # -----------------------------
-            # 数値変換
-            # -----------------------------
-            def to_float(value):
-
-                try:
-
-                    if value is None:
-                        return 0.0
-
-                    return float(
-                        str(value)
-                        .replace(",", "")
-                        .replace("%", "")
-                        .strip()
-                    )
-
-                except Exception:
-                    return 0.0
-
-            rows.append(
-                {
-                    "枠": lane,
-                    "展示進入": to_float(
-                        exhibition_course
-                    ),
-                    "選手名": name,
-                    "選手番号": player_no,
-                    "級別": grade,
-                    "全国勝率": to_float(
-                        nationwide_win
-                    ),
-                    "全国2連率": to_float(
-                        nationwide_2
-                    ),
-                    "当地勝率": to_float(
-                        local_win
-                    ),
-                    "モーター2連率": to_float(
-                        motor_2
-                    ),
-                    "平均ST": to_float(
-                        avg_st
-                    ),
-                    "展示ST": to_float(
-                        exhibition_st
-                    ),
-                    "展示タイム": to_float(
-                        exhibition_time
-                    ),
-                    "場": stadium_no,
-                }
-            )
-
-        df = pd.DataFrame(rows)
-
-        if df.empty:
-            st.error(
-                "AI計算用のデータが作成できませんでした。"
-            )
-            st.stop()
-
-        # ---------------------------------
-        # 従来スコア
-        # ---------------------------------
-        df["学習AI"] = df.apply(
-            score,
-            axis=1
-        )
-
-        # ---------------------------------
-        # 過去データ取得
-        # ---------------------------------
-        with st.spinner(
-            "過去レースデータを読み込んでAIを学習しています..."
-        ):
-
-            try:
-
-                history = pd.DataFrame(
-                    data.history14(td)
-                )
-
-            except Exception as e:
-
-                st.warning(
-                    "過去データの取得に失敗したため、"
-                    "現在のデータのみで予想します。\n\n"
-                    f"{e}"
-                )
-
-                history = pd.DataFrame()
-
-        # ---------------------------------
-        # AI予想
-        # ---------------------------------
-        with st.spinner(
-            "AIが3連単を計算しています..."
-        ):
-
-            try:
-
-                result = tri_ai(
-                    df,
-                    history
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"AI予想の計算中にエラーが発生しました。\n\n{e}"
-                )
-
-                st.stop()
-
-    # =========================================================
-    # 選手評価
-    # =========================================================
-    st.subheader("👤 選手評価")
-
-    racer_display = df[
+    show = df[
         [
             "枠",
             "選手名",
@@ -506,207 +371,131 @@ if st.button(
             "平均ST",
             "展示ST",
             "展示タイム",
-            "学習AI",
+            "学習AI"
         ]
     ].copy()
 
-    racer_display = racer_display.sort_values(
-        "学習AI",
-        ascending=False
-    )
-
     st.dataframe(
-        racer_display,
+        show.sort_values(
+            "学習AI",
+            ascending=False
+        ),
         use_container_width=True,
-        hide_index=True,
+        hide_index=True
     )
 
-    # =========================================================
-    # AI予想ランキング
-    # =========================================================
+
+    # =====================================================
+    # 3連単予想
+    # =====================================================
+
     st.subheader("🏆 AI 3連単予想")
 
-    if result is None or result.empty:
+    if result is not None and not result.empty:
 
-        st.warning(
-            "AI予想結果がありません。"
-        )
-
-    else:
-
-        result_display = result.copy()
+        display = result.copy()
 
         for col in [
             "AI確率",
             "信頼度",
             "1着AI",
             "2着AI",
-            "3着AI",
+            "3着AI"
         ]:
-
-            if col in result_display.columns:
-
-                result_display[col] = pd.to_numeric(
-                    result_display[col],
+            if col in display:
+                display[col] = pd.to_numeric(
+                    display[col],
                     errors="coerce"
                 ).round(2)
 
         st.dataframe(
-            result_display.head(10),
+            display.head(10),
             use_container_width=True,
-            hide_index=True,
+            hide_index=True
         )
 
-        # =====================================================
-        # 本命
-        # =====================================================
         best = result.iloc[0]
 
         st.success(
-            f"🥇 本命：{best['3連単']}"
+            f"🥇 本命：{best['3連単']}　"
+            f"AI確率 {float(best['AI確率']):.2f}%"
         )
 
-        st.write(
-            f"AI確率：**{float(best['AI確率']):.2f}%**"
-        )
-
-        if "信頼度" in best:
-
-            st.write(
-                f"信頼度：**{float(best['信頼度']):.2f}**"
-            )
-
-        # =====================================================
-        # 2番手
-        # =====================================================
         if len(result) >= 2:
-
-            second = result.iloc[1]
-
+            x = result.iloc[1]
             st.info(
-                f"🥈 2番手：{second['3連単']} "
-                f"（AI確率 {float(second['AI確率']):.2f}%）"
+                f"🥈 2番手：{x['3連単']}　"
+                f"{float(x['AI確率']):.2f}%"
             )
 
-        # =====================================================
-        # 3番手
-        # =====================================================
         if len(result) >= 3:
-
-            third = result.iloc[2]
-
+            x = result.iloc[2]
             st.info(
-                f"🥉 3番手：{third['3連単']} "
-                f"（AI確率 {float(third['AI確率']):.2f}%）"
+                f"🥉 3番手：{x['3連単']}　"
+                f"{float(x['AI確率']):.2f}%"
             )
 
-    # =========================================================
-    # 各着順のAI評価
-    # =========================================================
+
+    # =====================================================
+    # 各着順AI
+    # =====================================================
+
     st.subheader("🏆 各着順のAI評価")
 
     place_rows = []
 
-    for lane in sorted(
-        df["枠"].unique()
-    ):
+    for lane in sorted(df["枠"].unique()):
 
         lane = int(lane)
 
-        # 1着AI
         first = result[
-            result["3連単"]
-            .astype(str)
-            .str.startswith(
-                f"{lane}-"
-            )
+            result["3連単"].astype(str)
+            .str.startswith(f"{lane}-")
         ]["1着AI"]
 
-        # 2着AI
         second = result[
-            result["3連単"]
-            .astype(str)
-            .str.contains(
-                f"-{lane}-"
-            )
+            result["3連単"].astype(str)
+            .str.contains(f"-{lane}-")
         ]["2着AI"]
 
-        # 3着AI
         third = result[
-            result["3連単"]
-            .astype(str)
-            .str.endswith(
-                f"-{lane}"
-            )
+            result["3連単"].astype(str)
+            .str.endswith(f"-{lane}")
         ]["3着AI"]
-
-        first_ai = (
-            float(first.max())
-            if not first.empty
-            else 0
-        )
-
-        second_ai = (
-            float(second.max())
-            if not second.empty
-            else 0
-        )
-
-        third_ai = (
-            float(third.max())
-            if not third.empty
-            else 0
-        )
 
         racer = df[
             df["枠"] == lane
-        ]
+        ].iloc[0]
 
-        if racer.empty:
-            continue
-
-        racer = racer.iloc[0]
-
-        place_rows.append(
-            {
-                "枠": lane,
-                "選手名": racer.get(
-                    "選手名",
-                    "-"
-                ),
-                "選手番号": racer.get(
-                    "選手番号",
-                    "-"
-                ),
-                "1着AI": round(
-                    first_ai,
-                    2
-                ),
-                "2着AI": round(
-                    second_ai,
-                    2
-                ),
-                "3着AI": round(
-                    third_ai,
-                    2
-                ),
-            }
-        )
-
-    place_df = pd.DataFrame(
-        place_rows
-    )
+        place_rows.append({
+            "枠": lane,
+            "選手名": racer["選手名"],
+            "選手番号": racer["選手番号"],
+            "1着AI": round(
+                first.max() if not first.empty else 0,
+                2
+            ),
+            "2着AI": round(
+                second.max() if not second.empty else 0,
+                2
+            ),
+            "3着AI": round(
+                third.max() if not third.empty else 0,
+                2
+            )
+        })
 
     st.dataframe(
-        place_df,
+        pd.DataFrame(place_rows),
         use_container_width=True,
-        hide_index=True,
+        hide_index=True
     )
 
 
-# =============================================================
+# =========================================================
 # 過去レース検証
-# =============================================================
+# =========================================================
+
 st.divider()
 
 st.subheader("📊 過去レース検証")
@@ -717,38 +506,28 @@ if st.button(
 ):
 
     with st.spinner(
-        "過去14日分のレース結果を取得しています..."
+        "過去データを取得中..."
     ):
 
         try:
-
             backtest = data.backtest_races(
                 td,
                 14
             )
 
+            if backtest:
+                st.dataframe(
+                    pd.DataFrame(backtest),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.warning(
+                    "過去レースのデータがありません。"
+                )
+
         except Exception as e:
 
             st.error(
-                f"過去レース検証でエラーが発生しました。\n\n{e}"
-            )
-
-            st.stop()
-
-    if not backtest:
-
-        st.warning(
-            "過去レースのデータがありません。"
-        )
-
-    else:
-
-        backtest_df = pd.DataFrame(
-            backtest
-        )
-
-        st.dataframe(
-            backtest_df,
-            use_container_width=True,
-            hide_index=True,
-        )
+                f"検証エラー：{e}"
+                )

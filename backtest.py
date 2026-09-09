@@ -1,902 +1,551 @@
-import streamlit as st
-import pandas as pd
+import io
 from datetime import date, timedelta
+
+import pandas as pd
+import streamlit as st
 
 import data
 from ai import tri_ai
 
 
-# =========================================================
-# 設定
-# =========================================================
-
 RACE_OPTIONS = [100, 300, 500, 1000]
 
 
-# =========================================================
-# バックテスト専用CSS
-# =========================================================
-
-def _inject_css():
-    st.markdown(
-        """
-        <style>
-
-        /* ==============================================
-           バックテスト全体
-        ============================================== */
-
-        .bt-wrap {
-            margin-top: 4px;
-        }
-
-        .bt-title {
-            color: #111827 !important;
-            font-size: 24px !important;
-            font-weight: 900 !important;
-            line-height: 1.3 !important;
-            margin: 0 0 5px 0 !important;
-        }
-
-        .bt-description {
-            color: #64748b !important;
-            font-size: 13px !important;
-            line-height: 1.7 !important;
-            margin-bottom: 18px !important;
-        }
-
-        /* ==============================================
-           選択エリア
-        ============================================== */
-
-        .bt-select-title {
-            color: #111827 !important;
-            font-size: 14px !important;
-            font-weight: 900 !important;
-            margin-bottom: 8px !important;
-        }
-
-        .bt-select-card {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
-            padding: 14px 15px 6px 15px;
-            margin-bottom: 14px;
-        }
-
-        /* ==============================================
-           Radio
-        ============================================== */
-
-        div[data-testid="stRadio"] {
-            margin-top: 0 !important;
-        }
-
-        div[data-testid="stRadio"] > label {
-            color: #111827 !important;
-            font-weight: 900 !important;
-            font-size: 14px !important;
-        }
-
-        div[data-testid="stRadio"] label {
-            color: #111827 !important;
-        }
-
-        div[data-testid="stRadio"] label p {
-            color: #111827 !important;
-            font-size: 14px !important;
-            font-weight: 800 !important;
-        }
-
-        div[data-testid="stRadio"] [role="radiogroup"] {
-            gap: 7px !important;
-        }
-
-        div[data-testid="stRadio"] [role="radio"] {
-            color: #111827 !important;
-            background: #ffffff !important;
-            border: 1px solid #d7dee8 !important;
-            border-radius: 12px !important;
-            padding: 10px 12px !important;
-        }
-
-        /* ==============================================
-           実行ボタン
-        ============================================== */
-
-        .bt-run-area {
-            margin: 12px 0 20px 0;
-        }
-
-        /* ==============================================
-           情報カード
-        ============================================== */
-
-        .bt-info {
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 14px;
-            padding: 12px 14px;
-            color: #1e40af !important;
-            font-size: 13px;
-            font-weight: 700;
-            margin-bottom: 16px;
-        }
-
-        /* ==============================================
-           結果タイトル
-        ============================================== */
-
-        .bt-result-title {
-            color: #111827 !important;
-            font-size: 20px !important;
-            font-weight: 900 !important;
-            margin: 22px 0 12px 0 !important;
-        }
-
-        /* ==============================================
-           成功表示
-        ============================================== */
-
-        .bt-success {
-            background: #ecfdf5;
-            border: 1px solid #a7f3d0;
-            color: #065f46 !important;
-            border-radius: 14px;
-            padding: 12px 14px;
-            font-size: 14px;
-            font-weight: 800;
-            margin: 14px 0;
-        }
-
-        /* ==============================================
-           モバイル
-        ============================================== */
-
-        @media (max-width: 600px) {
-
-            .bt-title {
-                font-size: 21px !important;
-            }
-
-            .bt-description {
-                font-size: 12px !important;
-            }
-
-            div[data-testid="stRadio"] [role="radio"] {
-                padding: 9px 10px !important;
-            }
-        }
-
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# =========================================================
-# ユーティリティ
-# =========================================================
-
-def _combo_tuple(combo):
-    if not combo:
-        return tuple()
-
-    try:
-        return tuple(int(x) for x in combo)
-    except (TypeError, ValueError):
-        return tuple()
-
-
 def _combo_text(combo):
-    values = _combo_tuple(combo)
-
-    if not values:
-        return "—"
-
-    return "-".join(str(x) for x in values)
+    return "-".join(str(x) for x in combo)
 
 
-def _confidence_from_probs(boat_probs):
-    if not isinstance(boat_probs, dict):
+def _confidence_from_probs(probs):
+    if not probs:
         return 0.0
 
-    values = []
-
-    for value in boat_probs.values():
-        try:
-            values.append(float(value))
-        except (TypeError, ValueError):
-            pass
+    values = list(probs.values())
 
     if not values:
         return 0.0
 
-    values.sort(reverse=True)
-
-    if len(values) >= 2:
-        return values[0] * 0.7 + values[1] * 0.3
-
-    return values[0]
+    return max(values)
 
 
-def _confidence_stars(value):
-    value = float(value)
-
-    if value >= 42:
+def _confidence_stars(confidence):
+    if confidence >= 0.35:
         return "★★★★★"
-    if value >= 34:
+    if confidence >= 0.28:
         return "★★★★☆"
-    if value >= 27:
+    if confidence >= 0.22:
         return "★★★☆☆"
-    if value >= 20:
+    if confidence >= 0.16:
         return "★★☆☆☆"
-
     return "★☆☆☆☆"
 
 
-# =========================================================
-# 1レース検証
-# =========================================================
+def _normalize_prediction(prediction):
+    """
+    tri_ai の戻り値を安全に統一する。
+    """
 
-def evaluate_race(
-    raw,
-    target_date,
-    stadium_no,
-    race_no,
-    history=None,
-):
-    race = data.get_race(
-        raw,
-        stadium_no,
-        race_no,
-    )
+    if isinstance(prediction, dict):
+        return {
+            "main": prediction.get("main", []),
+            "counter": prediction.get("counter", []),
+            "hole": prediction.get("hole", []),
+            "boat_probs": prediction.get("boat_probs", {}),
+        }
 
-    if race is None:
-        return None
+    # 古い tri_ai が tuple を返す場合にも対応
+    if isinstance(prediction, tuple) and len(prediction) >= 2:
+        combinations = prediction[0]
+        boat_probs = prediction[1]
 
-    if not data.validate_race(
-        race,
-        target_date,
-        stadium_no,
-        race_no,
-    ):
-        return None
+        combinations = combinations or []
 
-    actual = data.get_result_order(
-        raw,
-        stadium_no,
-        race_no,
-    )
+        main = combinations[0] if len(combinations) > 0 else []
+        counter = combinations[1] if len(combinations) > 1 else []
+        hole = combinations[2] if len(combinations) > 2 else []
 
-    if actual is None:
-        return None
-
-    actual_tuple = tuple(
-        int(x) for x in actual[:3]
-    )
-
-    if len(actual_tuple) != 3:
-        return None
-
-    race_rows = data.get_race_rows(
-        race,
-        stadium_no,
-        race_no,
-    )
-
-    if race_rows is None or race_rows.empty:
-        return None
-
-    if history is None:
-        history = data.history14(
-            target_date
-        )
-
-    prediction = tri_ai(
-        race_rows,
-        history,
-    )
-
-    if not isinstance(prediction, dict):
-        return None
-
-    main = _combo_tuple(
-        prediction.get("main")
-    )
-
-    counter = _combo_tuple(
-        prediction.get("counter")
-    )
-
-    hole = _combo_tuple(
-        prediction.get("hole")
-    )
+        return {
+            "main": main,
+            "counter": counter,
+            "hole": hole,
+            "boat_probs": boat_probs or {},
+        }
 
     return {
-        "日付": str(target_date),
-        "場": data.stadium_name(stadium_no),
-        "場番号": int(stadium_no),
-        "R": f"{race_no}R",
-        "R番号": int(race_no),
-
-        "実際の結果": _combo_text(
-            actual_tuple
-        ),
-
-        "本命": _combo_text(main),
-        "対抗": _combo_text(counter),
-        "穴": _combo_text(hole),
-
-        "本命的中": int(
-            main == actual_tuple
-        ),
-
-        "対抗的中": int(
-            counter == actual_tuple
-        ),
-
-        "穴的中": int(
-            hole == actual_tuple
-        ),
-
-        "3点カバー": int(
-            actual_tuple in {
-                main,
-                counter,
-                hole,
-            }
-        ),
-
-        "AI自信度": round(
-            _confidence_from_probs(
-                prediction.get(
-                    "boat_probs",
-                    {},
-                )
-            ) * 100,
-            1,
-        ),
+        "main": [],
+        "counter": [],
+        "hole": [],
+        "boat_probs": {},
     }
 
 
-# =========================================================
-# バックテスト実行
-# =========================================================
+def evaluate_race(race, stadium_no, race_no, history):
+    """
+    完了レース1件をAIで予想し、実際の結果と比較する。
+    """
+
+    actual = data.get_result_order(
+        race_raw={
+            "programs": {
+                "stadiums": {
+                    str(stadium_no): {
+                        "races": {
+                            str(race_no): race
+                        }
+                    }
+                }
+            }
+        },
+        stadium_no=stadium_no,
+        race_no=race_no,
+    )
+
+    if not actual:
+        return None
+
+    try:
+        race_rows = data.get_race_rows(
+            race,
+            stadium_no,
+            race_no,
+        )
+    except TypeError:
+        race_rows = data.get_race_rows(race)
+
+    if race_rows is None:
+        return None
+
+    if len(race_rows) != 6:
+        return None
+
+    try:
+        prediction = tri_ai(
+            race_rows,
+            history,
+        )
+    except Exception:
+        return None
+
+    prediction = _normalize_prediction(prediction)
+
+    main = prediction["main"]
+    counter = prediction["counter"]
+    hole = prediction["hole"]
+    probs = prediction["boat_probs"]
+
+    if len(actual) < 3:
+        return None
+
+    actual_tuple = tuple(actual[:3])
+
+    main_hit = tuple(main[:3]) == actual_tuple if len(main) >= 3 else False
+    counter_hit = (
+        tuple(counter[:3]) == actual_tuple
+        if len(counter) >= 3
+        else False
+    )
+    hole_hit = tuple(hole[:3]) == actual_tuple if len(hole) >= 3 else False
+
+    confidence = _confidence_from_probs(probs)
+
+    return {
+        "場": data.stadium_name(stadium_no),
+        "場番号": stadium_no,
+        "R": race_no,
+        "本命": _combo_text(main),
+        "対抗": _combo_text(counter),
+        "穴": _combo_text(hole),
+        "実結果": _combo_text(actual_tuple),
+        "本命的中": main_hit,
+        "対抗的中": counter_hit,
+        "穴的中": hole_hit,
+        "AI自信度": confidence,
+        "評価": _confidence_stars(confidence),
+    }
+
+
+def _get_completed_races(raw):
+    """
+    v1 API形式から完了済みレースを取得。
+    """
+
+    results = []
+
+    programs = raw.get("programs", {})
+    stadiums = programs.get("stadiums", {})
+
+    for stadium_key, stadium in stadiums.items():
+        try:
+            stadium_no = int(stadium_key)
+        except (TypeError, ValueError):
+            continue
+
+        races = stadium.get("races", {})
+
+        for race_key, race in races.items():
+            try:
+                race_no = int(race_key)
+            except (TypeError, ValueError):
+                continue
+
+            order = data.get_result_order(
+                raw,
+                stadium_no,
+                race_no,
+            )
+
+            if order:
+                results.append(
+                    (
+                        stadium_no,
+                        race_no,
+                        race,
+                    )
+                )
+
+    results.sort(
+        key=lambda x: (
+            x[0],
+            x[1],
+        )
+    )
+
+    return results
+
 
 def run_backtest(
     race_count=100,
     progress_callback=None,
     status_callback=None,
 ):
-    race_count = int(race_count)
-
-    records = []
-
-    # 今日の未完了レースを除外
-    current = date.today() - timedelta(days=1)
-
-    max_days = 180
-    days_checked = 0
-
-    while (
-        len(records) < race_count
-        and days_checked < max_days
-    ):
-
-        target_date = current
-
-        if status_callback:
-            status_callback(
-                f"🔎 {target_date} を確認中　"
-                f"{len(records)} / {race_count}R"
-            )
-
-        raw = data.get_data(
-            target_date
-        )
-
-        if raw:
-
-            completed_races = []
-
-            # ---------------------------------------------
-            # 完了済みレースだけ抽出
-            # ---------------------------------------------
-
-            for stadium_no in range(1, 25):
-
-                for race_no in range(1, 13):
-
-                    actual = data.get_result_order(
-                        raw,
-                        stadium_no,
-                        race_no,
-                    )
-
-                    if actual is not None:
-                        completed_races.append(
-                            (
-                                stadium_no,
-                                race_no,
-                            )
-                        )
-
-            # ---------------------------------------------
-            # 完了レースが存在
-            # ---------------------------------------------
-
-            if completed_races:
-
-                if status_callback:
-                    status_callback(
-                        f"📊 {target_date}　"
-                        f"完了 {len(completed_races)}R　"
-                        f"取得 {len(records)} / "
-                        f"{race_count}R"
-                    )
-
-                # その日のAI用履歴を1回だけ取得
-                history = data.history14(
-                    target_date
-                )
-
-                for stadium_no, race_no in completed_races:
-
-                    if len(records) >= race_count:
-                        break
-
-                    result = evaluate_race(
-                        raw,
-                        target_date,
-                        stadium_no,
-                        race_no,
-                        history=history,
-                    )
-
-                    if result is None:
-                        continue
-
-                    records.append(result)
-
-                    if progress_callback:
-                        progress_callback(
-                            min(
-                                len(records)
-                                / race_count,
-                                1.0,
-                            )
-                        )
-
-                    if status_callback:
-                        status_callback(
-                            f"📈 {target_date} "
-                            f"{data.stadium_name(stadium_no)} "
-                            f"{race_no}R　"
-                            f"{len(records)} / "
-                            f"{race_count}R"
-                        )
-
-            else:
-
-                if status_callback:
-                    status_callback(
-                        f"⏭ {target_date}　"
-                        f"完了レースなし"
-                    )
-
-        else:
-
-            if status_callback:
-                status_callback(
-                    f"⏭ {target_date}　"
-                    f"データなし"
-                )
-
-        days_checked += 1
-
-        if len(records) >= race_count:
-            break
-
-        current -= timedelta(days=1)
-
-    if not records:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(records)
-
-    # 新しいレースを上に
-    df = df.sort_values(
-        [
-            "日付",
-            "場番号",
-            "R番号",
-        ],
-        ascending=[
-            False,
-            True,
-            True,
-        ],
-    )
-
-    df = df.head(
-        race_count
-    ).reset_index(
-        drop=True
-    )
-
-    if progress_callback:
-        progress_callback(1.0)
-
-    return df
-
-
-# =========================================================
-# 集計
-# =========================================================
-
-def summarize_backtest(df):
-    if df is None or df.empty:
-        return {
-            "races": 0,
-            "main": 0.0,
-            "counter": 0.0,
-            "hole": 0.0,
-            "coverage": 0.0,
-        }
-
-    total = len(df)
-
-    return {
-        "races": total,
-
-        "main": round(
-            df["本命的中"].mean() * 100,
-            1,
-        ),
-
-        "counter": round(
-            df["対抗的中"].mean() * 100,
-            1,
-        ),
-
-        "hole": round(
-            df["穴的中"].mean() * 100,
-            1,
-        ),
-
-        "coverage": round(
-            df["3点カバー"].mean() * 100,
-            1,
-        ),
-    }
-
-
-# =========================================================
-# 自信度別
-# =========================================================
-
-def confidence_summary(df):
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    work = df.copy()
-
-    def rank(value):
-        value = float(value)
-
-        if value >= 42:
-            return "★★★★★"
-        if value >= 34:
-            return "★★★★☆"
-        if value >= 27:
-            return "★★★☆☆"
-        if value >= 20:
-            return "★★☆☆☆"
-
-        return "★☆☆☆☆"
-
-    work["自信度"] = work[
-        "AI自信度"
-    ].apply(rank)
-
-    levels = [
-        "★★★★★",
-        "★★★★☆",
-        "★★★☆☆",
-        "★★☆☆☆",
-        "★☆☆☆☆",
-    ]
+    """
+    直近の完了レースを指定件数まで自動探索して検証。
+    """
 
     rows = []
 
-    for level in levels:
+    # 今日ではなく「昨日」から開始
+    current_date = date.today() - timedelta(days=1)
 
-        subset = work[
-            work["自信度"] == level
-        ]
+    # 最大180日まで遡る
+    max_days = 180
 
-        if subset.empty:
+    for day_index in range(max_days):
+        if len(rows) >= race_count:
+            break
+
+        target_date = current_date - timedelta(days=day_index)
+        date_text = target_date.isoformat()
+
+        if status_callback:
+            status_callback(
+                f"📡 {date_text} の完了レースを確認中… "
+                f"({len(rows)}/{race_count})"
+            )
+
+        try:
+            raw = data.get_data(date_text)
+        except Exception:
             continue
 
-        rows.append(
-            {
-                "AI自信度": level,
-                "レース数": len(subset),
-                "本命的中率": round(
-                    subset["本命的中"].mean()
-                    * 100,
-                    1,
-                ),
-                "3点カバー率": round(
-                    subset["3点カバー"].mean()
-                    * 100,
-                    1,
-                ),
-            }
-        )
+        if not raw:
+            continue
+
+        completed = _get_completed_races(raw)
+
+        if not completed:
+            continue
+
+        # 日ごとに履歴を一度だけ取得
+        try:
+            history = data.history14(date_text)
+        except Exception:
+            history = None
+
+        for stadium_no, race_no, race in completed:
+            if len(rows) >= race_count:
+                break
+
+            result = evaluate_race(
+                race,
+                stadium_no,
+                race_no,
+                history,
+            )
+
+            if result is None:
+                continue
+
+            result["日付"] = date_text
+            rows.append(result)
+
+            if progress_callback:
+                progress_callback(
+                    min(len(rows) / race_count, 1.0)
+                )
 
     return pd.DataFrame(rows)
 
 
-# =========================================================
-# UI
-# =========================================================
+def summarize_backtest(df):
+    if df is None or df.empty:
+        return {
+            "total": 0,
+            "main": 0,
+            "counter": 0,
+            "hole": 0,
+        }
+
+    return {
+        "total": len(df),
+        "main": int(df["本命的中"].sum()),
+        "counter": int(df["対抗的中"].sum()),
+        "hole": int(df["穴的中"].sum()),
+    }
+
+
+def confidence_summary(df):
+    if df is None or df.empty:
+        return "—"
+
+    value = float(df["AI自信度"].mean())
+
+    return _confidence_stars(value)
+
 
 def render_backtest():
-
-    _inject_css()
-
-    # =====================================================
-    # ヘッダー
-    # =====================================================
-
     st.markdown(
         """
-        <div class="bt-wrap">
+        <style>
+        .bt-title {
+            font-size: 22px;
+            font-weight: 900;
+            color: #111827;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
 
-            <div class="bt-title">
-                📊 AI実力テスト
-            </div>
+        .bt-subtitle {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 18px;
+        }
 
-            <div class="bt-description">
-                最新の完了レースから自動取得して、
-                AI予想の的中率を検証します。
-            </div>
+        .bt-label {
+            font-size: 14px;
+            font-weight: 800;
+            color: #111827;
+            margin-top: 8px;
+            margin-bottom: 6px;
+        }
 
-        </div>
+        .bt-info {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px 14px;
+            color: #334155;
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .bt-result-title {
+            font-size: 18px;
+            font-weight: 900;
+            color: #111827;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        div[data-testid="stSelectbox"] label {
+            color: #111827 !important;
+            font-weight: 800 !important;
+        }
+
+        div[data-testid="stSelectbox"] div[role="combobox"] {
+            background: #ffffff !important;
+            color: #111827 !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 10px !important;
+        }
+
+        div[data-testid="stSelectbox"] div[role="combobox"] * {
+            color: #111827 !important;
+        }
+
+        div[data-testid="stButton"] button {
+            width: 100%;
+            min-height: 48px;
+            border-radius: 12px;
+            font-weight: 900;
+            font-size: 15px;
+        }
+
+        @media (max-width: 640px) {
+            .bt-title {
+                font-size: 20px;
+            }
+
+            .bt-subtitle {
+                font-size: 12px;
+            }
+        }
+        </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # =====================================================
-    # 選択
-    # =====================================================
-
     st.markdown(
-        '<div class="bt-select-card">',
+        '<div class="bt-title">📊 AIバックテスト</div>',
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        '<div class="bt-select-title">検証するレース数</div>',
+        '<div class="bt-subtitle">'
+        '過去の完了レースを使ってAI予想の精度を検証します'
+        '</div>',
         unsafe_allow_html=True,
     )
 
-    race_count = st.radio(
+    st.markdown(
+        '<div class="bt-info">'
+        '📌 日付ではなく<strong>完了レース数</strong>で指定します。'
+        '<br>'
+        '指定した件数に達するまで、過去へ自動的に遡ります。'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="bt-label">検証するレース数</div>',
+        unsafe_allow_html=True,
+    )
+
+    race_count = st.selectbox(
         "検証するレース数",
-        options=RACE_OPTIONS,
+        RACE_OPTIONS,
         format_func=lambda x: f"直近{x:,}レース",
         label_visibility="collapsed",
         key="bt_race_count",
     )
 
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
+    st.write("")
+
+    run = st.button(
+        "🚀 バックテスト開始",
+        type="primary",
+        key="run_backtest",
     )
 
-    # =====================================================
-    # 説明
-    # =====================================================
+    if not run:
+        return
 
-    st.markdown(
-        f"""
-        <div class="bt-info">
-            🔎 昨日のレースから逆順に探して、
-            完了済みのレースを {race_count:,}R 集めます。
-            <br>
-            目標数に到達した時点で自動終了します。
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    progress = st.progress(0.0)
+    status = st.empty()
 
-    # =====================================================
-    # 実行
-    # =====================================================
-
-    if st.button(
-        "🚀 この条件で検証開始",
-        use_container_width=True,
-        key="bt_start",
-    ):
-
-        progress = st.progress(0)
-
-        status = st.empty()
-
-        with st.spinner(
-            "AIが過去レースを検証しています…"
-        ):
-
-            def update_progress(value):
-                progress.progress(
-                    max(
-                        0.0,
-                        min(
-                            float(value),
-                            1.0,
-                        ),
-                    )
-                )
-
-            def update_status(message):
-                status.write(message)
-
-            df = run_backtest(
-                race_count=race_count,
-                progress_callback=update_progress,
-                status_callback=update_status,
-            )
-
-        st.session_state[
-            "bt_result"
-        ] = df
-
-        st.session_state[
-            "bt_result_count"
-        ] = race_count
-
-        if df.empty:
-
-            st.error(
-                "⚠️ 検証できる完了レースが見つかりませんでした。"
-            )
-
-            return
-
-        st.markdown(
-            f"""
-            <div class="bt-success">
-                ✅ {len(df):,}レースの検証が完了しました。
-            </div>
-            """,
-            unsafe_allow_html=True,
+    try:
+        df = run_backtest(
+            race_count=race_count,
+            progress_callback=progress.progress,
+            status_callback=status.info,
         )
+    except Exception as e:
+        progress.empty()
+        status.empty()
 
-    # =====================================================
-    # 結果取得
-    # =====================================================
+        st.error(
+            "バックテスト中にエラーが発生しました。"
+        )
+        st.exception(e)
+        return
 
-    df = st.session_state.get(
-        "bt_result"
-    )
-
-    result_count = st.session_state.get(
-        "bt_result_count"
-    )
+    progress.empty()
+    status.empty()
 
     if df is None or df.empty:
+        st.error(
+            "ここまで探しましたが、検証できる完了レースが見つかりませんでした。"
+        )
         return
 
-    # 現在選択している件数と結果が違う場合
-    if result_count != race_count:
-        return
-
-    # =====================================================
-    # 集計
-    # =====================================================
-
-    summary = summarize_backtest(
-        df
-    )
+    summary = summarize_backtest(df)
 
     st.markdown(
         '<div class="bt-result-title">📈 検証結果</div>',
         unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns(2)
+    c1, c2, c3, c4 = st.columns(4)
 
-    with col1:
+    with c1:
         st.metric(
             "検証レース",
-            f"{summary['races']:,}R",
+            f"{summary['total']:,}",
         )
 
-    with col2:
+    with c2:
+        main_rate = (
+            summary["main"] / summary["total"] * 100
+            if summary["total"]
+            else 0
+        )
         st.metric(
-            "3点カバー率",
-            f"{summary['coverage']:.1f}%",
+            "本命的中率",
+            f"{main_rate:.1f}%",
         )
 
-    col3, col4 = st.columns(2)
-
-    with col3:
+    with c3:
+        counter_rate = (
+            summary["counter"] / summary["total"] * 100
+            if summary["total"]
+            else 0
+        )
         st.metric(
-            "🎯 本命的中率",
-            f"{summary['main']:.1f}%",
+            "対抗的中率",
+            f"{counter_rate:.1f}%",
         )
 
-    with col4:
+    with c4:
+        hole_rate = (
+            summary["hole"] / summary["total"] * 100
+            if summary["total"]
+            else 0
+        )
         st.metric(
-            "🔥 対抗的中率",
-            f"{summary['counter']:.1f}%",
+            "穴的中率",
+            f"{hole_rate:.1f}%",
         )
-
-    st.metric(
-        "💥 穴的中率",
-        f"{summary['hole']:.1f}%",
-    )
-
-    # =====================================================
-    # 自信度
-    # =====================================================
 
     st.markdown(
-        '<div class="bt-result-title">🤖 AI自信度別</div>',
+        '<div class="bt-result-title">🎯 AI自信度</div>',
         unsafe_allow_html=True,
     )
 
-    confidence_df = confidence_summary(
-        df
+    st.write(
+        f"平均自信度：{confidence_summary(df)}"
     )
 
-    if not confidence_df.empty:
-
-        st.dataframe(
-            confidence_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # =====================================================
-    # 詳細
-    # =====================================================
-
-    st.markdown(
-        '<div class="bt-result-title">🏁 レース別検証</div>',
-        unsafe_allow_html=True,
-    )
-
-    columns = [
+    display_columns = [
         "日付",
         "場",
         "R",
-        "実際の結果",
         "本命",
         "対抗",
         "穴",
-        "AI自信度",
-        "3点カバー",
+        "実結果",
+        "評価",
     ]
 
-    columns = [
-        x
-        for x in columns
-        if x in df.columns
+    available_columns = [
+        col for col in display_columns
+        if col in df.columns
     ]
 
     st.dataframe(
-        df[columns],
+        df[available_columns],
         use_container_width=True,
         hide_index=True,
     )
-
-    # =====================================================
-    # CSV
-    # =====================================================
 
     csv = df.to_csv(
         index=False,
@@ -904,12 +553,9 @@ def render_backtest():
     )
 
     st.download_button(
-        "📥 検証結果をCSV保存",
+        "⬇️ 検証結果をCSV保存",
         data=csv,
-        file_name=(
-            f"yacchan_backtest_"
-            f"{race_count}R.csv"
-        ),
+        file_name=f"boat_ai_backtest_{race_count}.csv",
         mime="text/csv",
         use_container_width=True,
-    
+    )

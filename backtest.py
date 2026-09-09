@@ -20,7 +20,7 @@ def get_actual_order(race):
 
 
 # =========================================================
-# 3連単の実際の払戻金を取得
+# 3連単配当取得
 # =========================================================
 
 def get_trifecta_payout(race, order):
@@ -86,7 +86,7 @@ def get_trifecta_payout(race, order):
 
 
 # =========================================================
-# AIランキング
+# AIランキングを艇番に統一
 # =========================================================
 
 def normalize_ranking(ranking):
@@ -134,7 +134,7 @@ def normalize_ranking(ranking):
 
 
 # =========================================================
-# AI 6点買い
+# AIの6点買い
 # =========================================================
 
 def make_bets(
@@ -144,36 +144,12 @@ def make_bets(
 ):
 
     bets = [
-        (
-            main,
-            counter,
-            hole,
-        ),
-        (
-            main,
-            hole,
-            counter,
-        ),
-        (
-            counter,
-            main,
-            hole,
-        ),
-        (
-            counter,
-            hole,
-            main,
-        ),
-        (
-            hole,
-            main,
-            counter,
-        ),
-        (
-            hole,
-            counter,
-            main,
-        ),
+        (main, counter, hole),
+        (main, hole, counter),
+        (counter, main, hole),
+        (counter, hole, main),
+        (hole, main, counter),
+        (hole, counter, main),
     ]
 
     return [
@@ -248,20 +224,18 @@ def analyze_race(
         actual[2],
     )
 
-    hit = (
+    ai_hit = (
         actual_trifecta in bets
     )
 
-    # 実際のレース結果の配当
     actual_payout = get_trifecta_payout(
         race,
         actual,
     )
 
-    # AIが当てた場合だけ回収対象
     ai_payout = (
         actual_payout
-        if hit
+        if ai_hit
         else 0
     )
 
@@ -303,10 +277,8 @@ def analyze_race(
             for x in actual[:3]
         ),
 
-        # 実際の3連単払戻
         "実配当": actual_payout,
 
-        # AI買いで回収した金額
         "3連単配当": ai_payout,
 
         "本命1着": (
@@ -319,14 +291,14 @@ def analyze_race(
 
         "AI上位3艇3連対": top3_hit,
 
-        "AI買い的中": hit,
+        "AI買い的中": ai_hit,
 
-        "3連単完全的中": hit,
+        "3連単完全的中": ai_hit,
     }
 
 
 # =========================================================
-# 1日分の全国24場
+# 1日分の全国24場を取得
 # =========================================================
 
 def get_completed_races_for_date(
@@ -376,7 +348,7 @@ def get_completed_races_for_date(
 
 
 # =========================================================
-# バックテスト
+# バックテスト実行
 # =========================================================
 
 def run_backtest(
@@ -582,98 +554,13 @@ def calculate_metrics(df):
 # =========================================================
 
 BOAT_HTML = """
-<style>
-
-.bt-wrap {
-    width:100%;
-    margin:8px 0 18px 0;
-}
-
-.bt-title {
-    text-align:center;
-    font-size:17px;
-    font-weight:800;
-    margin-bottom:8px;
-}
-
-.bt-track {
-    position:relative;
-    width:100%;
-    height:66px;
-    overflow:hidden;
-    border-radius:16px;
-    border:1px solid rgba(120,120,120,.25);
-    background:
-        linear-gradient(
-            to bottom,
-            rgba(100,170,220,.08),
-            rgba(80,150,210,.25)
-        );
-}
-
-.bt-boat {
-    position:absolute;
-    left:-70px;
-    top:8px;
-    font-size:38px;
-    animation:
-        bt-run 2.2s linear infinite;
-}
-
-.bt-wave {
-    position:absolute;
-    left:0;
-    right:0;
-    bottom:5px;
-    text-align:center;
-    font-size:18px;
-    letter-spacing:6px;
-    opacity:.6;
-}
-
-@keyframes bt-run {
-
-    0% {
-        left:-70px;
-        transform:translateY(0);
-    }
-
-    50% {
-        transform:translateY(-5px);
-    }
-
-    100% {
-        left:calc(100% + 20px);
-        transform:translateY(0);
-    }
-}
-
-</style>
-
-<div class="bt-wrap">
-
-    <div class="bt-title">
-        🚤 AIバックテスト実行中
-    </div>
-
-    <div class="bt-track">
-
-        <div class="bt-boat">
-            🚤
-        </div>
-
-        <div class="bt-wave">
-            〰️ 〰️ 〰️ 〰️ 〰️ 〰️
-        </div>
-
-    </div>
-
-</div>
+🚤　🌊　🌊　🌊　🌊　🌊　🌊
 """
 
 
 # =========================================================
-# 結果カード
+# スマホ向け結果表示
+# HTMLは一切使用しない
 # =========================================================
 
 def show_result_cards(df):
@@ -682,11 +569,12 @@ def show_result_cards(df):
         "### 📋 検証結果"
     )
 
-    # 10レースずつ表示
     page_size = 10
 
     pages = (
-        len(df) + page_size - 1
+        len(df)
+        + page_size
+        - 1
     ) // page_size
 
     page = st.selectbox(
@@ -731,92 +619,47 @@ def show_result_cards(df):
             row["3連単配当"]
         )
 
-        result = str(
-            row["結果"]
-        )
+        # ---------------------------------------------
+        # 1レースをカード風コンテナで表示
+        # ---------------------------------------------
 
-        if hit:
+        with st.container(
+            border=True
+        ):
 
-            judge = (
-                "🎯 AI買い的中"
+            st.markdown(
+                f"**📅 {row['日付']}　🏟️ {row['開催場']}　🏁 {row['レース']}**"
             )
 
-        else:
-
-            judge = (
-                "❌ AI買い外れ"
+            st.markdown(
+                f"🎯 本命 **{row['本命']}号艇**　"
+                f"🔥 対抗 **{row['対抗']}号艇**　"
+                f"💥 穴 **{row['穴']}号艇**"
             )
 
-        st.markdown(
-            f"""
-            <div style="
-                padding:14px;
-                margin-bottom:10px;
-                border-radius:14px;
-                border:1px solid rgba(120,120,120,.22);
-                background:rgba(120,120,120,.06);
-            ">
+            st.markdown(
+                f"🏆 実着順 **{row['結果']}**"
+            )
 
-                <div style="
-                    font-weight:800;
-                    font-size:16px;
-                    margin-bottom:9px;
-                ">
-                    📅 {row["日付"]}
-                   　
-                    🏟️ {row["開催場"]}
-                   　
-                    🏁 {row["レース"]}
-                </div>
+            st.markdown(
+                f"💴 実際の3連単 **{actual_payout:,}円**"
+            )
 
-                <div style="
-                    font-size:14px;
-                    margin-bottom:8px;
-                ">
-                    🎯 本命
-                    <b>{row["本命"]}号艇</b>
-                   　
-                    🔥 対抗
-                    <b>{row["対抗"]}号艇</b>
-                   　
-                    💥 穴
-                    <b>{row["穴"]}号艇</b>
-                </div>
+            if hit:
 
-                <div style="
-                    font-size:15px;
-                    margin-bottom:8px;
-                ">
-                    🏆 実着順
-                    <b>{result}</b>
-                </div>
+                st.success(
+                    f"🎯 AI買い的中　AI回収 **{ai_payout:,}円**"
+                )
 
-                <div style="
-                    font-size:14px;
-                    margin-bottom:6px;
-                ">
-                    💴 実際の3連単
-                    <b>{actual_payout:,}円</b>
-                </div>
+            else:
 
-                <div style="
-                    font-size:14px;
-                    font-weight:700;
-                ">
-                    {judge}
-                   　
-                    AI回収
-                    <b>{ai_payout:,}円</b>
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                st.error(
+                    "❌ AI買い外れ　AI回収 **0円**"
+                )
 
 
 # =========================================================
-# メイン画面
+# バックテスト画面
 # =========================================================
 
 def render_backtest(
@@ -861,9 +704,17 @@ def render_backtest(
 
     with animation.container():
 
-        st.html(
+        st.markdown(
+            "### 🚤 AIバックテスト実行中"
+        )
+
+        st.markdown(
             BOAT_HTML
         )
+
+    # =====================================================
+    # 進捗表示
+    # =====================================================
 
     def update_progress(
         done,
@@ -917,6 +768,10 @@ def render_backtest(
             f"### {done} / {total} レース"
         )
 
+    # =====================================================
+    # 実行
+    # =====================================================
+
     try:
 
         (
@@ -933,8 +788,11 @@ def render_backtest(
     except Exception as e:
 
         animation.empty()
+
         progress.empty()
+
         status.empty()
+
         count_box.empty()
 
         st.error(
@@ -946,6 +804,10 @@ def render_backtest(
         return
 
     animation.empty()
+
+    # =====================================================
+    # データなし
+    # =====================================================
 
     if not records:
 
@@ -981,6 +843,10 @@ def render_backtest(
 
         return
 
+    # =====================================================
+    # DataFrame
+    # =====================================================
+
     df = pd.DataFrame(
         records
     )
@@ -988,6 +854,10 @@ def render_backtest(
     metrics = calculate_metrics(
         df
     )
+
+    # =====================================================
+    # 完了
+    # =====================================================
 
     progress.progress(1.0)
 
@@ -1072,9 +942,9 @@ def render_backtest(
         )
 
     # =====================================================
-    # カード表示
+    # 結果カード
     # =====================================================
 
     show_result_cards(
         df
-    )
+            )

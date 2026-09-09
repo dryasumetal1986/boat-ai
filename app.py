@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import math
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -8,7 +9,6 @@ from data import (
     get_race,
     history14,
     get_odds,
-    odds_url,
 )
 
 from ai import score, tri_ai
@@ -47,7 +47,7 @@ STADIUMS = {
 
 
 # =========================
-# Streamlit設定
+# 設定
 # =========================
 
 st.set_page_config(
@@ -61,10 +61,12 @@ st.set_page_config(
 # タイトル
 # =========================
 
-st.title("🚤 やっちゃんの競艇AI予想 PRO")
+st.title(
+    "🚤 やっちゃんの競艇AI予想 PRO"
+)
 
 st.write(
-    "展示タイム＋選手データ＋過去14日データ＋3連単オッズで予想"
+    "選手データ＋展示タイム＋展示ST＋展示進入＋天候＋過去14日＋3連単オッズ"
 )
 
 
@@ -83,8 +85,8 @@ today = datetime.now(
 
 c1, c2, c3 = st.columns(3)
 
-
 with c1:
+
     td = st.date_input(
         "開催日",
         today,
@@ -93,6 +95,7 @@ with c1:
 
 
 with c2:
+
     name = st.selectbox(
         "競艇場",
         list(STADIUMS.values()),
@@ -100,6 +103,7 @@ with c2:
 
 
 with c3:
+
     rno = st.selectbox(
         "レース",
         range(1, 13),
@@ -122,11 +126,12 @@ if st.button(
     use_container_width=True,
 ):
 
-    # -------------------------
-    # レースデータ
-    # -------------------------
+    # =========================
+    # レース取得
+    # =========================
 
     try:
+
         data = get_data(td)
 
         race = get_race(
@@ -137,7 +142,9 @@ if st.button(
 
     except Exception as e:
 
-        st.error("レースデータ取得に失敗しました")
+        st.error(
+            "レースデータ取得に失敗しました"
+        )
 
         st.exception(e)
 
@@ -153,11 +160,9 @@ if st.button(
         st.stop()
 
 
-    # -------------------------
-    # 出走選手
-    # -------------------------
-
-    rows = []
+    # =========================
+    # 出走データ
+    # =========================
 
     racers_data = race.get(
         "racers",
@@ -177,14 +182,228 @@ if st.button(
         racers_data,
         dict,
     ):
+
         racers_data = {}
 
 
-    if not isinstance(
+    # =========================
+    # 展示データを枠番号へ変換
+    # =========================
+
+    preview_map = {}
+
+    if isinstance(
         preview_data,
         dict,
     ):
-        preview_data = {}
+
+        preview_items = preview_data.values()
+
+    elif isinstance(
+        preview_data,
+        list,
+    ):
+
+        preview_items = preview_data
+
+    else:
+
+        preview_items = []
+
+
+    for p in preview_items:
+
+        if not isinstance(
+            p,
+            dict,
+        ):
+
+            continue
+
+        entry = p.get(
+            "entry_number"
+        )
+
+        course = p.get(
+            "course_number"
+        )
+
+        if entry is not None:
+
+            preview_map[
+                str(entry)
+            ] = p
+
+        if course is not None:
+
+            preview_map.setdefault(
+                str(course),
+                p,
+            )
+
+
+    # =========================
+    # 天候
+    # =========================
+
+    result_data = race.get(
+        "result",
+        {}
+    )
+
+    if not isinstance(
+        result_data,
+        dict,
+    ):
+
+        result_data = {}
+
+
+    wind_speed = result_data.get(
+        "wind_speed",
+        0,
+    )
+
+    wind_direction = result_data.get(
+        "wind_direction_number",
+        0,
+    )
+
+    wave_height = result_data.get(
+        "wave_height",
+        0,
+    )
+
+    air_temperature = result_data.get(
+        "air_temperature",
+        0,
+    )
+
+    water_temperature = result_data.get(
+        "water_temperature",
+        0,
+    )
+
+
+    # =========================
+    # 数値変換
+    # =========================
+
+    def num(value):
+
+        try:
+
+            return float(
+                value or 0
+            )
+
+        except Exception:
+
+            return 0.0
+
+
+    wind_speed = num(
+        wind_speed
+    )
+
+    wave_height = num(
+        wave_height
+    )
+
+    air_temperature = num(
+        air_temperature
+    )
+
+    water_temperature = num(
+        water_temperature
+    )
+
+
+    # =========================
+    # 天候表示
+    # =========================
+
+    direction_names = {
+        1: "北",
+        2: "北東",
+        3: "東",
+        4: "南東",
+        5: "南",
+        6: "南西",
+        7: "西",
+        8: "北西",
+    }
+
+    try:
+
+        direction_text = direction_names.get(
+            int(wind_direction),
+            "不明",
+        )
+
+    except Exception:
+
+        direction_text = "不明"
+
+
+    # =========================
+    # 天候表示
+    # =========================
+
+    st.subheader(
+        "🌤️ レース直前情報"
+    )
+
+    w1, w2, w3, w4, w5, w6 = st.columns(6)
+
+    with w1:
+
+        st.metric(
+            "風速",
+            f"{wind_speed:g} m",
+        )
+
+    with w2:
+
+        st.metric(
+            "風向",
+            direction_text,
+        )
+
+    with w3:
+
+        st.metric(
+            "波高",
+            f"{wave_height:g} cm",
+        )
+
+    with w4:
+
+        st.metric(
+            "気温",
+            f"{air_temperature:g} ℃",
+        )
+
+    with w5:
+
+        st.metric(
+            "水温",
+            f"{water_temperature:g} ℃",
+        )
+
+    with w6:
+
+        st.metric(
+            "展示情報",
+            "取得済み",
+        )
+
+
+    # =========================
+    # 選手データ
+    # =========================
+
+    rows = []
 
 
     for lane in range(1, 7):
@@ -194,98 +413,133 @@ if st.button(
             {},
         )
 
-        preview = preview_data.get(
+        preview = preview_map.get(
             str(lane),
             {},
         )
 
 
         if not racer:
+
             continue
 
 
-        exhibition = preview.get(
-            "exhibition_time",
-            0,
+        # -------------------------
+        # 展示タイム
+        # -------------------------
+
+        exhibition = num(
+            preview.get(
+                "exhibition_time",
+                0,
+            )
+        )
+
+
+        # -------------------------
+        # 展示ST
+        # -------------------------
+
+        exhibition_st = num(
+            preview.get(
+                "start_timing",
+                0,
+            )
+        )
+
+
+        # -------------------------
+        # 展示進入
+        # -------------------------
+
+        exhibition_course = preview.get(
+            "course_number",
+            lane,
         )
 
 
         try:
-            exhibition = float(
-                exhibition or 0
+
+            exhibition_course = int(
+                exhibition_course
             )
 
         except Exception:
-            exhibition = 0
+
+            exhibition_course = lane
 
 
-        rows.append(
-            {
-                "枠": lane,
+        # -------------------------
+        # 選手情報
+        # -------------------------
 
-                "選手名": racer.get(
-                    "name",
-                    "不明",
-                ),
+        rows.append({
 
-                "選手番号": str(
-                    racer.get(
-                        "number",
-                        "",
-                    )
-                ),
+            "枠": lane,
 
-                "級別": racer.get(
-                    "rank_number",
+            "展示進入": exhibition_course,
+
+            "選手名": racer.get(
+                "name",
+                "不明",
+            ),
+
+            "選手番号": str(
+                racer.get(
+                    "number",
                     "",
-                ),
+                )
+            ),
 
-                "全国勝率": float(
-                    racer.get(
-                        "national_win_rate",
-                        0,
-                    )
-                    or 0
-                ),
+            "級別": racer.get(
+                "rank_number",
+                "",
+            ),
 
-                "全国2連率": float(
-                    racer.get(
-                        "national_top_2_percent",
-                        0,
-                    )
-                    or 0
-                ),
+            "全国勝率": num(
+                racer.get(
+                    "national_win_rate",
+                    0,
+                )
+            ),
 
-                "当地勝率": float(
-                    racer.get(
-                        "local_win_rate",
-                        0,
-                    )
-                    or 0
-                ),
+            "全国2連率": num(
+                racer.get(
+                    "national_top_2_percent",
+                    0,
+                )
+            ),
 
-                "モーター2連率": float(
-                    racer.get(
-                        "motor_top_2_percent",
-                        0,
-                    )
-                    or 0
-                ),
+            "当地勝率": num(
+                racer.get(
+                    "local_win_rate",
+                    0,
+                )
+            ),
 
-                "平均ST": float(
-                    racer.get(
-                        "average_start_timing",
-                        0,
-                    )
-                    or 0
-                ),
+            "モーター2連率": num(
+                racer.get(
+                    "motor_top_2_percent",
+                    0,
+                )
+            ),
 
-                "展示タイム": exhibition,
-            }
-        )
+            "平均ST": num(
+                racer.get(
+                    "average_start_timing",
+                    0,
+                )
+            ),
+
+            "展示ST": exhibition_st,
+
+            "展示タイム": exhibition,
+        })
 
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(
+        rows
+    )
 
 
     if df.empty:
@@ -310,8 +564,14 @@ if st.button(
     df = df.sort_values(
         "学習AI",
         ascending=False,
-    ).reset_index(drop=True)
+    ).reset_index(
+        drop=True
+    )
 
+
+    # =========================
+    # 出走表
+    # =========================
 
     st.subheader(
         f"🤖 {name} {rno}R AI評価"
@@ -326,7 +586,34 @@ if st.button(
 
 
     # =========================
-    # 選手ランキング
+    # 展示確認
+    # =========================
+
+    st.subheader(
+        "🔎 展示データ確認"
+    )
+
+
+    exhibition_view = df[
+        [
+            "枠",
+            "展示進入",
+            "選手名",
+            "展示ST",
+            "展示タイム",
+        ]
+    ].copy()
+
+
+    st.dataframe(
+        exhibition_view,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+    # =========================
+    # AI順位
     # =========================
 
     st.subheader(
@@ -394,9 +681,9 @@ if st.button(
             st.stop()
 
 
-        # -------------------------
-        # オッズ取得
-        # -------------------------
+        # =========================
+        # オッズ
+        # =========================
 
         try:
 
@@ -415,14 +702,10 @@ if st.button(
             odds = {}
 
 
-        # -------------------------
-        # オッズをAIランキングに追加
-        # -------------------------
-
         if odds:
 
-            tri["オッズ"] = tri["3連単"].map(
-                odds
+            tri["オッズ"] = (
+                tri["3連単"].map(odds)
             )
 
         else:
@@ -430,11 +713,13 @@ if st.button(
             tri["オッズ"] = None
 
 
-        # -------------------------
-        # 最終AIスコア
-        # -------------------------
+        # =========================
+        # 最終AI
+        # =========================
 
-        tri["最終AI"] = tri["AIスコア"]
+        tri["最終AI"] = tri[
+            "AIスコア"
+        ]
 
 
         for idx in tri.index:
@@ -450,12 +735,13 @@ if st.button(
 
                     odd = float(odd)
 
-                    # 人気過ぎる買い目だけに偏らないよう
-                    # オッズを弱めに評価
-                    import math
-
                     odds_bonus = (
-                        math.log(max(odd, 1))
+                        math.log(
+                            max(
+                                odd,
+                                1,
+                            )
+                        )
                         * 2.0
                     )
 
@@ -465,15 +751,21 @@ if st.button(
                     ] += odds_bonus
 
                 except Exception:
+
                     pass
 
 
-        # -------------------------
+        # =========================
         # 信頼度
-        # -------------------------
+        # =========================
 
-        min_score = tri["最終AI"].min()
-        max_score = tri["最終AI"].max()
+        min_score = tri[
+            "最終AI"
+        ].min()
+
+        max_score = tri[
+            "最終AI"
+        ].max()
 
 
         if max_score > min_score:
@@ -495,9 +787,9 @@ if st.button(
             tri["信頼度"] = 50.0
 
 
-        # -------------------------
+        # =========================
         # 穴度
-        # -------------------------
+        # =========================
 
         tri["穴度"] = 0.0
 
@@ -528,7 +820,9 @@ if st.button(
 
                         try:
 
-                            odd = float(odd)
+                            odd = float(
+                                odd
+                            )
 
                             if q75 > 0:
 
@@ -550,22 +844,25 @@ if st.button(
                                 )
 
                         except Exception:
+
                             pass
 
 
-        # -------------------------
+        # =========================
         # 並び替え
-        # -------------------------
+        # =========================
 
         tri = tri.sort_values(
             "最終AI",
             ascending=False,
-        ).reset_index(drop=True)
+        ).reset_index(
+            drop=True
+        )
 
 
-        # -------------------------
+        # =========================
         # TOP
-        # -------------------------
+        # =========================
 
         top = tri.iloc[0]
 
@@ -574,7 +871,6 @@ if st.button(
         third = tri.iloc[2]
 
 
-        # 穴はオッズ上位から選択
         hole_candidates = tri[
             tri["オッズ"].notna()
         ].sort_values(
@@ -585,7 +881,9 @@ if st.button(
 
         if len(hole_candidates) > 0:
 
-            hole = hole_candidates.iloc[0]
+            hole = (
+                hole_candidates.iloc[0]
+            )
 
         else:
 
@@ -593,7 +891,7 @@ if st.button(
 
 
         # =========================
-        # 3連単AI表示
+        # 120通り
         # =========================
 
         st.subheader(
@@ -649,13 +947,18 @@ if st.button(
         )
 
 
-        top10 = tri.head(10).copy()
+        top10 = tri.head(
+            10
+        ).copy()
 
 
         st.dataframe(
             top10[
                 [
                     "3連単",
+                    "1着AI",
+                    "2着AI",
+                    "3着AI",
                     "AIスコア",
                     "オッズ",
                     "最終AI",
@@ -705,17 +1008,14 @@ if st.button(
         )
 
 
-        # =========================
-        # オッズ取得先
-        # =========================
-
         st.caption(
-            "直前3連単オッズを取得してAI評価に反映しています。"
+            "展示ST・展示進入・天候データを取得しています。"
         )
+
 
 else:
 
     st.info(
         "開催日・競艇場・レースを選んで"
         "「AI予想を実行」を押してください。"
-                    )
+                            )

@@ -1,654 +1,763 @@
-# backtest.py
-# 🚤 やっちゃんの競艇AI予想PRO
-# バックテスト完全版
-
-from __future__ import annotations
-
-from datetime import date, timedelta
-from typing import Any, Dict, List
+from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
 
-from data import (
-    STADIUM_NAMES,
-    get_data,
-    get_race,
-    get_race_rows,
-    get_result_order,
-    get_trifecta_payout,
-    is_completed,
-)
-
 from ai import tri_ai
-
-
-# =========================================================
-# API開始日
-# =========================================================
-
-API_START_DATE = date(
-    2026,
-    1,
-    1,
+from data import (
+    API_START_DATE,
+    STADIUM_NAMES,
+    all_races_for_date,
+    get_data,
+    get_result_order,
+    get_race_rows,
+    history14,
+    jst_today,
+    race_has_result,
+    stadium_name,
 )
 
 
-# =========================================================
-# 1レース検証
-# =========================================================
-
-def evaluate_race(
-    race: Dict[str, Any],
-    stadium_number: int,
-    race_number: int,
-    race_date: date,
-) -> Dict[str, Any] | None:
-
-    if not is_completed(
-        race
-    ):
-        return None
-
-    rows = get_race_rows(
-        race,
-        stadium_number,
-    )
-
-    if len(rows) < 6:
-        return None
-
-    result = get_result_order(
-        race
-    )
-
-    if len(result) < 3:
+def _money(value):
+    if value is None:
         return None
 
     try:
-
-        df = pd.DataFrame(
-            rows
+        text = str(value)
+        digits = "".join(
+            ch for ch in text
+            if ch.isdigit()
         )
 
-        prediction = tri_ai(
-            df,
-            history=None,
-            stadium_number=stadium_number,
-        )
+        if not digits:
+            return None
+
+        return int(digits)
 
     except Exception:
+        return None
+
+
+def _normalize_combo(value):
+    if value is None:
+        return ""
+
+    text = str(value)
+
+    text = (
+        text.replace("－", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("→", "-")
+        .replace(" ", "")
+        .replace("　", "")
+        .replace("/", "-")
+        .replace(">", "-")
+    )
+
+    digits = [
+        ch for ch in text
+        if ch in "123456"
+    ]
+
+    if len(digits) >= 3:
+        return "-".join(
+            digits[:3]
+        )
+
+    return text
+
+
+def _search_payout(value, prediction):
+    """
+    payoutsの形が多少違っても
+    3連単配当を探す。
+    """
+
+    target = _normalize_combo(
+        prediction
+    )
+
+    if isinstance(value, dict):
+        combination_keys = [
+            "combination",
+            "combo",
+            "組合せ",
+            "組み合わせ",
+            "組合",
+            "result",
+        ]
+
+        payout_keys = [
+            "payout",
+            "amount",
+            "払戻",
+            "払戻金",
+            "金額",
+        ]
+
+        combination = None
+
+        for key in combination_keys:
+            if key in value:
+                combination = value[key]
+                break
+
+        if combination is not None:
+            if (
+                _normalize_combo(
+                    combination
+                )
+                == target
+            ):
+                for key in payout_keys:
+                    if key in value:
+                        money = _money(
+                            value[key]
+                        )
+                        if money is not None:
+                            return money
+
+        for child in value.values():
+            found = _search_payout(
+                child,
+                prediction,
+            )
+
+            if found is not None:
+                return found
 
         return None
 
-    main = int(
-        prediction["main"]
+    if isinstance(value, list):
+        for item in value:
+            found = _search_payout(
+                item,
+                prediction,
+            )
+
+            if found is not None:
+                return found
+
+    return None
+
+
+def trifecta_payout(
+    race,
+    prediction,
+):
+    """
+    レース結果から3連単配当を取得。
+    """
+
+    if not isinstance(race, dict):
+        return None
+
+    result = race.get(
+        "result",
+        {},
     )
 
-    counter = int(
-        prediction["counter"]
-    )
+    if not isinstance(result, dict):
+        return None
 
-    hole = int(
-        prediction["hole"]
-    )
+    payout_sources = []
 
-    ranking = prediction.get(
-        "ranking",
-        [],
-    )
+    for key in (
+        "payouts",
+        "payout",
+        "払い戻し",
+        "払戻",
+        "payouts_list",
+    ):
+        if key in result:
+            payout_sources.append(
+                result[key]
+            )
 
-    # -----------------------------------------------------
-    # 的中判定
-    # -----------------------------------------------------
-
-    main_win = (
-        main == result[0]
-    )
-
-    main_top3 = (
-        main in result[:3]
-    )
-
-    top3_hit = (
-        len(
-            set(ranking[:3])
-            & set(result[:3])
+    for source in payout_sources:
+        found = _search_payout(
+            source,
+            prediction,
         )
-        == 3
-    )
 
-    exact_trifecta = (
-        result[:3]
-        == [
-            main,
-            counter,
-            hole,
-        ]
-    )
+        if found is not None:
+            return found
 
-    combination = (
-        f"{main}-"
-        f"{counter}-"
-        f"{hole}"
-    )
+    return None
 
-    payout = get_trifecta_payout(
-        race,
-        combination,
-    )
 
-    return {
-        "date": race_date,
-        "stadium_number": stadium_number,
-        "stadium_name": STADIUM_NAMES.get(
+def _history_from_cache(
+    raw_cache,
+    stadium_number,
+    race_number,
+    target_date,
+):
+    """
+    バックテスト中は同じ日付データを
+    メモリキャッシュして高速化する。
+    """
+
+    records = []
+
+    for days_back in range(1, 15):
+        d = (
+            target_date
+            - timedelta(days=days_back)
+        )
+
+        if d < API_START_DATE:
+            break
+
+        if d not in raw_cache:
+            raw_cache[d] = get_data(d)
+
+        raw = raw_cache.get(d)
+
+        if not raw:
+            continue
+
+        from data import get_race
+
+        race = get_race(
+            raw,
             stadium_number,
-            f"{stadium_number}場",
-        ),
-        "race_number": race_number,
+            race_number,
+        )
 
-        "main": main,
-        "counter": counter,
-        "hole": hole,
+        if not race:
+            continue
 
-        "result1": result[0],
-        "result2": result[1],
-        "result3": result[2],
+        actual = get_result_order(
+            race
+        )
 
-        "main_win": main_win,
-        "main_top3": main_top3,
-        "top3_hit": top3_hit,
-        "exact_trifecta": exact_trifecta,
+        if len(actual) < 3:
+            continue
 
-        "combination": combination,
-        "payout": payout,
-    }
+        rows = get_race_rows(
+            race
+        )
 
+        if rows.empty:
+            continue
 
-# =========================================================
-# バックテスト本体
-# =========================================================
+        place_map = {
+            boat: place + 1
+            for place, boat
+            in enumerate(actual)
+        }
+
+        rows = rows.copy()
+
+        rows["着順"] = rows["枠"].map(
+            place_map
+        )
+
+        rows["日付"] = d.isoformat()
+
+        rows = rows.dropna(
+            subset=["着順"]
+        )
+
+        if not rows.empty:
+            records.append(rows)
+
+    if not records:
+        return pd.DataFrame()
+
+    return pd.concat(
+        records,
+        ignore_index=True,
+    )
+
 
 def run_backtest(
-    count: int,
+    target_count,
     progress_callback=None,
-) -> List[Dict[str, Any]]:
+):
+    """
+    2026-01-01まで遡って、
+    完了済みレースをtarget_count件集める。
+    """
 
-    results: List[
-        Dict[str, Any]
-    ] = []
-
-    today = date.today()
+    target_count = int(
+        target_count
+    )
 
     current_date = (
-        today
+        jst_today()
         - timedelta(days=1)
     )
 
-    # -----------------------------------------------------
-    # 2026年1月1日まで遡る
-    # -----------------------------------------------------
+    raw_cache = {}
 
-    total_days = (
-        current_date
-        - API_START_DATE
-    ).days + 1
-
+    records = []
     scanned_days = 0
 
     while (
-        current_date
-        >= API_START_DATE
-        and len(results) < count
+        current_date >= API_START_DATE
+        and len(records) < target_count
     ):
+        if current_date not in raw_cache:
+            raw_cache[current_date] = (
+                get_data(current_date)
+            )
 
-        scanned_days += 1
-
-        raw = get_data(
+        raw = raw_cache.get(
             current_date
         )
 
-        if raw is not None:
+        scanned_days += 1
 
-            stadiums = raw.get(
-                "programs",
-                {},
-            ).get(
-                "stadiums",
-                {},
+        if raw:
+            races = all_races_for_date(
+                raw
             )
 
-            if isinstance(
-                stadiums,
-                dict,
-            ):
+            for (
+                stadium_number,
+                race_number,
+                race,
+            ) in races:
 
-                for (
-                    stadium_key,
-                    stadium_data,
-                ) in stadiums.items():
+                if len(records) >= target_count:
+                    break
 
-                    try:
+                # 結果がない開催中レースは除外
+                if not race_has_result(
+                    race
+                ):
+                    continue
 
-                        stadium_number = int(
-                            stadium_key
+                rows = get_race_rows(
+                    race
+                )
+
+                if rows.empty:
+                    continue
+
+                actual = get_result_order(
+                    race
+                )
+
+                if len(actual) < 3:
+                    continue
+
+                # 現在レースより前の履歴だけを使う
+                history = (
+                    _history_from_cache(
+                        raw_cache,
+                        stadium_number,
+                        race_number,
+                        current_date,
+                    )
+                )
+
+                try:
+                    prediction = tri_ai(
+                        rows,
+                        history,
+                        stadium_number,
+                    )
+                except Exception:
+                    continue
+
+                main = int(
+                    prediction["main"]
+                )
+
+                counter = int(
+                    prediction["counter"]
+                )
+
+                hole = int(
+                    prediction["hole"]
+                )
+
+                ranking = [
+                    int(x)
+                    for x in prediction[
+                        "ranking"
+                    ][:3]
+                ]
+
+                actual_top3 = [
+                    int(x)
+                    for x in actual[:3]
+                ]
+
+                main_win = (
+                    main == actual[0]
+                )
+
+                main_top3 = (
+                    main in actual_top3
+                )
+
+                ai_top3_coverage = (
+                    set(ranking)
+                    == set(actual_top3)
+                )
+
+                predicted_trifecta = (
+                    f"{main}-{counter}-{hole}"
+                )
+
+                actual_trifecta = (
+                    f"{actual[0]}-{actual[1]}-{actual[2]}"
+                )
+
+                trifecta_hit = (
+                    predicted_trifecta
+                    == actual_trifecta
+                )
+
+                payout = None
+
+                if trifecta_hit:
+                    payout = (
+                        trifecta_payout(
+                            race,
+                            predicted_trifecta,
                         )
-
-                    except Exception:
-
-                        continue
-
-                    if not isinstance(
-                        stadium_data,
-                        dict,
-                    ):
-                        continue
-
-                    races = stadium_data.get(
-                        "races",
-                        {},
                     )
 
-                    if not isinstance(
-                        races,
-                        dict,
-                    ):
-                        continue
-
-                    for race_key in sorted(
-                        races.keys(),
-                        key=lambda x: int(x)
-                        if str(x).isdigit()
-                        else 99,
-                    ):
-
-                        if len(results) >= count:
-                            break
-
-                        try:
-
-                            race_number = int(
-                                race_key
+                records.append(
+                    {
+                        "日付": current_date.isoformat(),
+                        "場": stadium_name(
+                            stadium_number
+                        ),
+                        "場番号": stadium_number,
+                        "R": race_number,
+                        "本命": main,
+                        "対抗": counter,
+                        "穴": hole,
+                        "AI上位3艇": "-".join(
+                            map(
+                                str,
+                                ranking,
                             )
-
-                        except Exception:
-
-                            continue
-
-                        race = get_race(
-                            raw,
-                            stadium_number,
-                            race_number,
-                        )
-
-                        if race is None:
-                            continue
-
-                        if not is_completed(
-                            race
-                        ):
-                            continue
-
-                        item = evaluate_race(
-                            race,
-                            stadium_number,
-                            race_number,
-                            current_date,
-                        )
-
-                        if item is None:
-                            continue
-
-                        results.append(
-                            item
-                        )
-
-                        if progress_callback:
-
-                            progress_callback(
-                                len(results),
-                                count,
-                                current_date,
-                                stadium_number,
-                                race_number,
-                                scanned_days,
-                                total_days,
+                        ),
+                        "実着順": "-".join(
+                            map(
+                                str,
+                                actual,
                             )
+                        ),
+                        "本命1着": main_win,
+                        "本命3連対": main_top3,
+                        "上位3艇完全一致": (
+                            ai_top3_coverage
+                        ),
+                        "3連単的中": (
+                            trifecta_hit
+                        ),
+                        "予想3連単": (
+                            predicted_trifecta
+                        ),
+                        "実際3連単": (
+                            actual_trifecta
+                        ),
+                        "3連単配当": payout,
+                    }
+                )
 
-                    if len(results) >= count:
-                        break
+                if progress_callback:
+                    progress_callback(
+                        len(records),
+                        target_count,
+                        current_date,
+                        stadium_number,
+                        race_number,
+                    )
 
-        current_date -= timedelta(
-            days=1
+        current_date -= timedelta(days=1)
+
+    result_df = pd.DataFrame(
+        records
+    )
+
+    return {
+        "data": result_df,
+        "count": len(records),
+        "scanned_days": scanned_days,
+        "completed": (
+            len(records) >= target_count
+        ),
+    }
+
+
+def _rate(series):
+    if len(series) == 0:
+        return 0.0
+
+    return (
+        float(series.mean())
+        * 100
+    )
+
+
+def calculate_metrics(result_df):
+    if result_df.empty:
+        return {
+            "main_win_rate": 0.0,
+            "main_top3_rate": 0.0,
+            "top3_rate": 0.0,
+            "trifecta_rate": 0.0,
+            "roi": None,
+            "grade": "☆☆☆☆☆",
+        }
+
+    main_win_rate = _rate(
+        result_df["本命1着"]
+    )
+
+    main_top3_rate = _rate(
+        result_df["本命3連対"]
+    )
+
+    top3_rate = _rate(
+        result_df["上位3艇完全一致"]
+    )
+
+    trifecta_rate = _rate(
+        result_df["3連単的中"]
+    )
+
+    valid_payouts = result_df[
+        result_df["3連単配当"].notna()
+    ]
+
+    if len(valid_payouts) > 0:
+        total_return = (
+            valid_payouts[
+                "3連単配当"
+            ]
+            .astype(float)
+            .sum()
         )
 
-    return results
-
-
-# =========================================================
-# 結果表示
-# =========================================================
-
-def show_backtest_result(
-    results: List[Dict[str, Any]]
-):
-
-    if not results:
-
-        st.error(
-            "⚠️ 検証可能なレースがありませんでした。"
+        # 1レース100円投資として計算
+        total_bet = (
+            len(result_df) * 100
         )
 
-        return
-
-    df = pd.DataFrame(
-        results
-    )
-
-    total = len(df)
-
-    main_win_rate = (
-        df["main_win"].mean()
-        * 100
-    )
-
-    main_top3_rate = (
-        df["main_top3"].mean()
-        * 100
-    )
-
-    top3_rate = (
-        df["top3_hit"].mean()
-        * 100
-    )
-
-    trifecta_rate = (
-        df["exact_trifecta"].mean()
-        * 100
-    )
-
-    # -----------------------------------------------------
-    # 回収率
-    # -----------------------------------------------------
-
-    bet_count = total
-
-    total_bet = (
-        bet_count
-        * 100
-    )
-
-    total_return = int(
-        df["payout"].sum()
-    )
-
-    recovery = (
-        total_return
-        / total_bet
-        * 100
-        if total_bet > 0
-        else 0
-    )
-
-    # -----------------------------------------------------
-    # 評価
-    # -----------------------------------------------------
-
-    if (
-        main_top3_rate >= 75
-        and recovery >= 100
-    ):
-        rating = "★★★★★"
-
-    elif (
-        main_top3_rate >= 65
-        and recovery >= 90
-    ):
-        rating = "★★★★☆"
-
-    elif (
-        main_top3_rate >= 55
-    ):
-        rating = "★★★☆☆"
-
-    elif (
-        main_top3_rate >= 45
-    ):
-        rating = "★★☆☆☆"
-
+        roi = (
+            total_return
+            / total_bet
+            * 100
+        )
     else:
-        rating = "★☆☆☆☆"
+        roi = None
 
-    # -----------------------------------------------------
-    # 結果
-    # -----------------------------------------------------
+    score = 0
+
+    if main_win_rate >= 50:
+        score += 1
+
+    if main_top3_rate >= 75:
+        score += 1
+
+    if top3_rate >= 15:
+        score += 1
+
+    if trifecta_rate >= 8:
+        score += 1
+
+    if roi is not None and roi >= 100:
+        score += 1
+
+    grade = (
+        "★" * score
+        + "☆" * (5 - score)
+    )
+
+    return {
+        "main_win_rate": main_win_rate,
+        "main_top3_rate": main_top3_rate,
+        "top3_rate": top3_rate,
+        "trifecta_rate": trifecta_rate,
+        "roi": roi,
+        "grade": grade,
+    }
+
+
+def render_backtest():
+    st.markdown("---")
 
     st.markdown(
-        "## 🏆 AIバックテスト結果"
+        "## 📊 AIバックテスト"
     )
 
     st.caption(
-        "過去の完了レースを使ってAI予想の精度を検証しました。"
+        "2026-01-01まで自動で遡り、完了済みレースを検証します。"
     )
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "検証レース数",
-            f"{total:,}",
-        )
-
-    with col2:
-
-        st.metric(
-            "🎯 本命1着率",
-            f"{main_win_rate:.1f}%",
-        )
-
-    with col3:
-
-        st.metric(
-            "🎯 本命3連対率",
-            f"{main_top3_rate:.1f}%",
-        )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "🏆 AI上位3艇3連対",
-            f"{top3_rate:.1f}%",
-        )
-
-    with col2:
-
-        st.metric(
-            "🎯 3連単完全的中",
-            f"{trifecta_rate:.1f}%",
-        )
-
-    with col3:
-
-        st.metric(
-            "💰 簡易回収率",
-            f"{recovery:.1f}%",
-        )
-
-    st.markdown(
-        f"### 🤖 AI評価　{rating}"
-    )
-
-    # -----------------------------------------------------
-    # 最近の検証
-    # -----------------------------------------------------
-
-    st.subheader(
-        "📋 検証結果"
-    )
-
-    display_df = df[
-        [
-            "date",
-            "stadium_name",
-            "race_number",
-            "main",
-            "counter",
-            "hole",
-            "result1",
-            "result2",
-            "result3",
-            "main_win",
-            "main_top3",
-            "exact_trifecta",
-            "payout",
-        ]
-    ].copy()
-
-    display_df.columns = [
-        "日付",
-        "会場",
-        "R",
-        "本命",
-        "対抗",
-        "穴",
-        "1着",
-        "2着",
-        "3着",
-        "本命1着",
-        "本命3連対",
-        "3連単的中",
-        "払戻",
-    ]
-
-    display_df["R"] = (
-        display_df["R"].astype(str)
-        + "R"
-    )
-
-    st.dataframe(
-        display_df.head(100),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-# =========================================================
-# UI
-# =========================================================
-
-def render_backtest():
-
-    st.divider()
-
-    st.markdown(
-        "## 📊 AIの実力を検証する"
-    )
-
-    st.write(
-        "過去の完了レースを使って、AI予想の精度を検証します。"
-    )
-
-    st.info(
-        "📌 日付ではなく完了レース数で指定します。"
-        "指定した件数に達するまで、"
-        "2026年1月1日まで自動的に遡ります。"
-    )
-
-    count = st.selectbox(
+    target_count = st.selectbox(
         "検証するレース数",
-        [
-            100,
-            300,
-            500,
-            1000,
-        ],
+        [100, 300, 500, 1000],
         format_func=lambda x: (
-            f"直近{x:,}レース"
+            f"{x}レース"
         ),
         key="backtest_count",
     )
 
-    if st.button(
-        "🚀 バックテスト開始",
-        type="primary",
+    start = st.button(
+        "🔍 バックテスト開始",
+        key="backtest_start",
         use_container_width=True,
-        key="start_backtest",
+    )
+
+    if not start:
+        return
+
+    progress = st.progress(0.0)
+
+    status = st.empty()
+    count_text = st.empty()
+    boat_text = st.empty()
+
+    def callback(
+        done,
+        total,
+        d,
+        stadium_number,
+        race_number,
     ):
-
-        progress = st.progress(
-            0
+        ratio = min(
+            done / max(total, 1),
+            1.0,
         )
-
-        status = st.empty()
-
-        def update(
-            current,
-            target,
-            current_date,
-            stadium_number,
-            race_number,
-            scanned_days,
-            total_days,
-        ):
-
-            ratio = min(
-                current / target,
-                1.0,
-            )
-
-            progress.progress(
-                ratio
-            )
-
-            venue = STADIUM_NAMES.get(
-                stadium_number,
-                f"{stadium_number}場",
-            )
-
-            status.markdown(
-                f"""
-**🔄 {current_date} {venue} {race_number}Rを検証中**
-
-**{current:,} / {target:,} レース**
-
-過去へ {scanned_days} 日遡っています。
-"""
-            )
-
-        with st.spinner(
-            "🔍 過去レースを検索・検証しています..."
-        ):
-
-            results = run_backtest(
-                count,
-                update,
-            )
 
         progress.progress(
-            1.0
+            ratio
         )
 
-        status.empty()
+        status.markdown(
+            f"🔄 {d.isoformat()} "
+            f"{stadium_name(stadium_number)} "
+            f"{race_number}Rを検証中"
+        )
 
-        if len(results) < count:
+        count_text.markdown(
+            f"**{done} / {total} レース**"
+        )
 
-            st.warning(
-                f"⚠️ APIから取得できた検証可能レースは "
-                f"{len(results):,}件でした。"
-                f"（2026年1月1日まで検索）"
-            )
+        blocks = int(
+            ratio * 20
+        )
 
-        if results:
+        boat_text.markdown(
+            "🚤"
+            + "━" * blocks
+            + "●"
+            + "━" * (20 - blocks)
+        )
 
-            show_backtest_result(
-                results
-            )
-
-        else:
-
-            st.error(
-                "⚠️ 検証可能な完了レースを取得できませんでした。"
+    result = run_backtest(
+        target_count,
+        progress_callback=callback,
     )
+
+    progress.progress(1.0)
+
+    result_df = result["data"]
+
+    if result_df.empty:
+        status.error(
+            "検証可能な完了済みレースを取得できませんでした。"
+        )
+
+        st.info(
+            f"2026-01-01まで遡って"
+            f"{result['scanned_days']}日間を確認しました。"
+        )
+
+        return
+
+    metrics = calculate_metrics(
+        result_df
+    )
+
+    status.success(
+        f"✅ {result['count']}レースの検証が完了しました。"
+    )
+
+    if result["count"] < target_count:
+        st.warning(
+            f"2026-01-01まで検索しましたが、"
+            f"{target_count}レース中"
+            f"{result['count']}レースしか取得できませんでした。"
+        )
+
+    col1, col2 = st.columns(2)
+    col3, col4 = st.columns(2)
+
+    with col1:
+        st.metric(
+            "本命1着率",
+            f"{metrics['main_win_rate']:.1f}%",
+        )
+
+    with col2:
+        st.metric(
+            "本命3連対率",
+            f"{metrics['main_top3_rate']:.1f}%",
+        )
+
+    with col3:
+        st.metric(
+            "AI上位3艇 完全一致",
+            f"{metrics['top3_rate']:.1f}%",
+        )
+
+    with col4:
+        st.metric(
+            "3連単完全的中",
+            f"{metrics['trifecta_rate']:.1f}%",
+        )
+
+    if metrics["roi"] is not None:
+        st.metric(
+            "簡易回収率",
+            f"{metrics['roi']:.1f}%",
+        )
+    else:
+        st.metric(
+            "簡易回収率",
+            "—",
+        )
+
+    st.markdown(
+        f"### 🤖 AI評価 {metrics['grade']}"
+    )
+
+    display_columns = [
+        "日付",
+        "場",
+        "R",
+        "本命",
+        "対抗",
+        "穴",
+        "AI上位3艇",
+        "実着順",
+        "本命1着",
+        "本命3連対",
+        "3連単的中",
+    ]
+
+    display_columns = [
+        col
+        for col in display_columns
+        if col in result_df.columns
+    ]
+
+    st.dataframe(
+        result_df[
+            display_columns
+        ],
+        use_container_width=True,
+        height=450,
+        )

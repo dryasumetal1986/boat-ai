@@ -294,3 +294,32 @@ if st.button("🔮 AI予想を計算", type="primary"):
             f"🥉 穴候補：{third['3連単']}  "
             f"AIスコア {third['AIスコア']}"
 )
+st.divider()
+
+st.subheader("📊 過去レース検証")
+
+if st.button("過去14日を検証"):
+
+    with st.spinner("過去レースを取得中..."):
+
+        bt = data.backtest_races(
+            td,
+            14,
+        )
+
+    if not bt:
+        st.warning(
+            "過去レースデータがありません。"
+        )
+    else:
+        bt_df = pd.DataFrame(bt)
+
+        st.write(
+            f"検証レース数：{len(bt_df)}"
+        )
+
+        st.dataframe(
+            bt_df,
+            use_container_width=True,
+            hide_index=True,
+        )

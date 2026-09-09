@@ -15,15 +15,44 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# =========================================================
-# タイトル
-# =========================================================
-
 st.title("🚤 やっちゃんのAI予想PRO")
-st.caption(
-    "出走表・直前情報・過去データを使ったAI予想"
-)
+st.caption("出走表・直前情報・過去データを使ったAI予想")
+
+
+# =========================================================
+# 場名
+# =========================================================
+
+STADIUMS = {
+    1: "桐生",
+    2: "戸田",
+    3: "江戸川",
+    4: "平和島",
+    5: "多摩川",
+    6: "浜名湖",
+    7: "蒲郡",
+    8: "常滑",
+    9: "津",
+    10: "三国",
+    11: "びわこ",
+    12: "住之江",
+    13: "尼崎",
+    14: "鳴門",
+    15: "丸亀",
+    16: "児島",
+    17: "宮島",
+    18: "徳山",
+    19: "下関",
+    20: "若松",
+    21: "芦屋",
+    22: "福岡",
+    23: "唐津",
+    24: "大村",
+}
+
+
+def stadium_name(no):
+    return STADIUMS.get(int(no), f"場{no}")
 
 
 # =========================================================
@@ -39,7 +68,7 @@ target_date = st.date_input(
 
 
 # =========================================================
-# 場・R選択
+# 場・R
 # =========================================================
 
 col1, col2 = st.columns(2)
@@ -48,7 +77,7 @@ with col1:
 
     stadium_options = {
         f"{no:02d} {name}": no
-        for no, name in data.STADIUMS.items()
+        for no, name in STADIUMS.items()
     }
 
     selected_stadium = st.selectbox(
@@ -56,9 +85,8 @@ with col1:
         list(stadium_options.keys()),
     )
 
-    stadium_no = stadium_options[
-        selected_stadium
-    ]
+    stadium_no = stadium_options[selected_stadium]
+
 
 with col2:
 
@@ -70,7 +98,7 @@ with col2:
 
 
 # =========================================================
-# 予想開始
+# 予想ボタン
 # =========================================================
 
 if st.button(
@@ -85,24 +113,16 @@ if st.button(
 
     try:
 
-        raw = data.get_data(
-            target_date
-        )
+        raw = data.get_data(target_date)
 
     except Exception as e:
 
-        st.error(
-            "開催日のデータを取得できませんでした。"
-        )
-
-        st.code(
-            str(e)
-        )
-
+        st.error("開催日のデータを取得できませんでした。")
+        st.code(str(e))
         st.stop()
 
     # -----------------------------------------------------
-    # 指定場・指定Rを取得
+    # 指定した場・Rを取得
     # -----------------------------------------------------
 
     try:
@@ -116,45 +136,39 @@ if st.button(
     except Exception as e:
 
         st.error(
-            "指定したレースのデータが見つかりません。"
+            f"{stadium_name(stadium_no)} {race_no}R "
+            "のデータを取得できませんでした。"
         )
 
-        st.warning(
-            f"{data.stadium_name(stadium_no)} "
-            f"{race_no}R"
-        )
-
-        st.code(
-            str(e)
-        )
-
+        st.code(str(e))
         st.stop()
 
     # -----------------------------------------------------
-    # 最終検証
+    # レース整合性チェック
     # -----------------------------------------------------
 
-    valid, message = data.validate_race(
-        race,
-        stadium_no,
-        race_no,
-        target_date,
-    )
+    try:
+
+        valid, message = data.validate_race(
+            race,
+            stadium_no,
+            race_no,
+            target_date,
+        )
+
+    except Exception as e:
+
+        valid = False
+        message = str(e)
 
     if not valid:
 
-        st.error(
-            "レースデータの整合性チェックに失敗しました。"
-        )
-
-        st.code(
-            message
-        )
-
+        st.error("レースデータの整合性チェックに失敗しました。")
+        st.code(message)
         st.stop()
 
     # -----------------------------------------------------
-    # 6選手をDataFrame化
+    # 6選手取得
     # -----------------------------------------------------
 
     try:
@@ -168,60 +182,45 @@ if st.button(
 
     except Exception as e:
 
-        st.error(
-            "出走選手データの作成に失敗しました。"
-        )
-
-        st.code(
-            str(e)
-        )
-
+        st.error("出走選手データの取得に失敗しました。")
+        st.code(str(e))
         st.stop()
-
-    # -----------------------------------------------------
-    # 6艇最終チェック
-    # -----------------------------------------------------
 
     if len(df) != 6:
 
         st.error(
-            f"出走選手が6人ではありません。取得={len(df)}"
+            f"出走選手が6人ではありません。取得数={len(df)}"
         )
-
         st.stop()
 
     # =====================================================
-    # 選択レース確認
+    # レース確認
     # =====================================================
 
     st.success(
         f"✅ {target_date} "
-        f"{data.stadium_name(stadium_no)} "
-        f"{race_no}R を正しく取得しました"
+        f"{stadium_name(stadium_no)} "
+        f"{race_no}R を取得しました"
     )
 
-    # -----------------------------------------------------
-    # 取得確認
-    # -----------------------------------------------------
+    c1, c2, c3 = st.columns(3)
 
-    check_col1, check_col2, check_col3 = st.columns(3)
-
-    with check_col1:
+    with c1:
         st.metric(
-            "場",
-            data.stadium_name(stadium_no),
+            "開催場",
+            stadium_name(stadium_no),
         )
 
-    with check_col2:
+    with c2:
         st.metric(
             "レース",
             f"{race_no}R",
         )
 
-    with check_col3:
+    with c3:
         st.metric(
-            "出走艇数",
-            f"{len(df)}艇",
+            "出走艇",
+            "6艇",
         )
 
     # =====================================================
@@ -251,14 +250,9 @@ if st.button(
             "枠": "艇",
             "選手名": "選手",
             "展示進入": "進入",
-            "全国勝率": "全国勝率",
             "全国2連率": "全国2連率%",
-            "当地勝率": "当地勝率",
             "当地2連率": "当地2連率%",
             "モーター2連率": "モーター2連率%",
-            "平均ST": "平均ST",
-            "展示ST": "展示ST",
-            "展示タイム": "展示タイム",
         }
     )
 
@@ -277,13 +271,8 @@ if st.button(
     ):
 
         try:
-
-            history = data.history14(
-                target_date
-            )
-
+            history = data.history14(target_date)
         except Exception:
-
             history = pd.DataFrame()
 
     # =====================================================
@@ -299,14 +288,8 @@ if st.button(
 
     except Exception as e:
 
-        st.error(
-            "AI予想の計算中にエラーが発生しました。"
-        )
-
-        st.code(
-            str(e)
-        )
-
+        st.error("AI予想の計算中にエラーが発生しました。")
+        st.code(str(e))
         st.stop()
 
     # =====================================================
@@ -319,9 +302,10 @@ if st.button(
 
     st.markdown(
         f"""
-        ## 🚤 {best["買い目"]}
-        ### AI確率 {best["確率"]:.2f}%
-        """
+## 🚤 {best["買い目"]}
+
+### AI確率 {best["確率"]:.2f}%
+"""
     )
 
     # =====================================================
@@ -332,22 +316,18 @@ if st.button(
 
     top5 = result.head(5).copy()
 
-    top5["確率"] = top5[
-        "確率"
-    ].map(
+    top5["確率"] = top5["確率"].map(
         lambda x: f"{x:.2f}%"
     )
 
-    top5 = top5[
-        [
-            "順位",
-            "買い目",
-            "確率",
-        ]
-    ]
-
     st.dataframe(
-        top5,
+        top5[
+            [
+                "順位",
+                "買い目",
+                "確率",
+            ]
+        ],
         use_container_width=True,
         hide_index=True,
     )
@@ -401,13 +381,9 @@ if st.button(
         ]
     ].copy()
 
-    chart_df = chart_df.set_index(
-        "枠"
-    )
+    chart_df = chart_df.set_index("枠")
 
-    st.bar_chart(
-        chart_df
-    )
+    st.bar_chart(chart_df)
 
     # =====================================================
     # データ取得確認
@@ -422,45 +398,28 @@ if st.button(
                 "値": str(target_date),
             },
             {
-                "項目": "場",
-                "値": (
-                    f"{stadium_no:02d} "
-                    f"{data.stadium_name(stadium_no)}"
-                ),
+                "項目": "選択場",
+                "値": f"{stadium_no:02d} {stadium_name(stadium_no)}",
             },
             {
-                "項目": "レース",
+                "項目": "選択R",
                 "値": f"{race_no}R",
             },
             {
                 "項目": "API場番号",
-                "値": str(
-                    race.get(
-                        "stadium_number"
-                    )
-                ),
+                "値": str(race.get("stadium_number")),
             },
             {
                 "項目": "APIレース番号",
-                "値": str(
-                    race.get(
-                        "race_number"
-                    )
-                ),
+                "値": str(race.get("race_number")),
             },
             {
                 "項目": "API開催日",
-                "値": str(
-                    race.get(
-                        "date"
-                    )
-                ),
+                "値": str(race.get("date")),
             },
             {
                 "項目": "選手数",
-                "値": str(
-                    len(df)
-                ),
+                "値": str(len(df)),
             },
         ]
     )
@@ -470,10 +429,6 @@ if st.button(
         use_container_width=True,
         hide_index=True,
     )
-
-    # =====================================================
-    # 注意
-    # =====================================================
 
     st.caption(
         "※ AI確率は予測モデルによる参考値です。"

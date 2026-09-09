@@ -14,6 +14,7 @@ st.set_page_config(
     page_title="やっちゃんの競艇AI予想PRO",
     page_icon="🚤",
     layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -25,9 +26,9 @@ st.markdown(
     """
     <style>
 
-    /* ================================================
-       全体
-    ================================================ */
+    /* =====================================================
+       BASE
+    ===================================================== */
 
     .stApp {
         background: #f4f6f9;
@@ -36,8 +37,8 @@ st.markdown(
 
     .block-container {
         max-width: 720px;
-        padding-top: 1.5rem;
-        padding-bottom: 4rem;
+        padding-top: 5.8rem !important;
+        padding-bottom: 4rem !important;
     }
 
     html,
@@ -51,62 +52,56 @@ st.markdown(
             sans-serif;
     }
 
-    /* 通常テキストを黒系に */
-    .stMarkdown,
-    .stCaption,
-    .stText,
     p,
-    label {
+    label,
+    .stMarkdown,
+    .stCaption {
         color: #111827;
     }
 
 
-    /* ================================================
-       タイトル
-    ================================================ */
+    /* =====================================================
+       TITLE
+       ===================================================== */
 
     .pro-title {
         text-align: center;
-        font-size: 30px;
+        font-size: 28px;
         font-weight: 900;
-        letter-spacing: 0.02em;
-        color: #111827;
-        margin-top: 10px;
-        margin-bottom: 6px;
-        line-height: 1.3;
+        letter-spacing: 0.01em;
+        color: #111827 !important;
+        line-height: 1.35;
+        margin: 0 0 7px 0;
+        white-space: nowrap;
     }
 
     .pro-subtitle {
         text-align: center;
-        font-size: 13px;
-        font-weight: 600;
-        color: #6b7280;
+        font-size: 12px;
+        font-weight: 700;
+        color: #64748b !important;
         margin-bottom: 28px;
+        letter-spacing: 0.05em;
     }
 
 
-    /* ================================================
-       ラベル
-    ================================================ */
+    /* =====================================================
+       SELECT
+       ===================================================== */
 
     .select-label {
         font-size: 13px;
-        font-weight: 800;
-        color: #374151;
-        margin-bottom: 5px;
+        font-weight: 900;
+        color: #374151 !important;
+        margin: 0 0 5px 2px;
     }
-
-
-    /* ================================================
-       Selectbox
-    ================================================ */
 
     div[data-baseweb="select"] > div {
         background: #ffffff !important;
         border: 1px solid #d7dce4 !important;
-        border-radius: 12px !important;
-        color: #111827 !important;
+        border-radius: 13px !important;
         min-height: 50px;
+        box-shadow: none !important;
     }
 
     div[data-baseweb="select"] span {
@@ -118,38 +113,37 @@ st.markdown(
     }
 
 
-    /* ================================================
-       AI予想ボタン
-    ================================================ */
+    /* =====================================================
+       BUTTON
+       ===================================================== */
 
     div.stButton > button {
         width: 100%;
         min-height: 54px;
-        border-radius: 14px;
-        border: none;
-        background: #2563eb;
+        border: none !important;
+        border-radius: 14px !important;
+        background: #2563eb !important;
         color: #ffffff !important;
-        font-size: 17px;
-        font-weight: 800;
-        box-shadow:
-            0 7px 18px rgba(37, 99, 235, 0.22);
-        transition: 0.15s;
+        font-size: 17px !important;
+        font-weight: 900 !important;
+        box-shadow: 0 7px 18px rgba(37, 99, 235, 0.22);
+        transition: 0.15s ease;
     }
 
     div.stButton > button p {
         color: #ffffff !important;
+        font-weight: 900 !important;
     }
 
     div.stButton > button:hover {
-        background: #1d4ed8;
-        color: #ffffff !important;
+        background: #1d4ed8 !important;
         transform: translateY(-1px);
     }
 
 
-    /* ================================================
-       区切り
-    ================================================ */
+    /* =====================================================
+       DIVIDER
+       ===================================================== */
 
     .divider {
         height: 1px;
@@ -158,34 +152,32 @@ st.markdown(
     }
 
 
-    /* ================================================
-       レースカード
-    ================================================ */
+    /* =====================================================
+       RACE CARD
+       ===================================================== */
 
     .race-card {
         background: #ffffff;
         border: 1px solid #e5e7eb;
         border-radius: 18px;
         padding: 20px 22px;
-        box-shadow:
-            0 5px 18px rgba(15, 23, 42, 0.06);
-        margin-bottom: 20px;
+        box-shadow: 0 5px 18px rgba(15, 23, 42, 0.06);
+        margin-bottom: 18px;
     }
 
     .race-title {
         font-size: 22px;
         font-weight: 900;
-        color: #111827;
-        margin-bottom: 15px;
+        color: #111827 !important;
+        margin-bottom: 13px;
     }
 
     .racer-row {
         display: flex;
         align-items: center;
-        padding: 10px 0;
+        min-height: 49px;
         border-bottom: 1px solid #edf0f4;
         font-size: 15px;
-        color: #374151;
     }
 
     .racer-row:last-child {
@@ -193,102 +185,100 @@ st.markdown(
     }
 
     .boat-number {
-        width: 32px;
-        height: 32px;
+        width: 31px;
+        height: 31px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         border-radius: 8px;
         background: #eef2f7;
-        color: #111827;
+        color: #111827 !important;
         font-weight: 900;
         margin-right: 12px;
         flex-shrink: 0;
     }
 
     .racer-name {
+        color: #111827 !important;
         font-weight: 700;
-        color: #111827;
     }
 
 
-    /* ================================================
-       予想カード
-    ================================================ */
+    /* =====================================================
+       PREDICTION
+       ===================================================== */
 
     .prediction-card {
         background: #ffffff;
         border: 1px solid #e5e7eb;
-        border-radius: 18px;
-        padding: 18px 22px;
-        margin-bottom: 12px;
-        box-shadow:
-            0 4px 15px rgba(15, 23, 42, 0.05);
+        border-radius: 17px;
+        padding: 17px 21px;
+        margin-bottom: 11px;
+        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05);
     }
 
     .prediction-label {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 900;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
     }
 
     .prediction-value {
         font-size: 27px;
         font-weight: 900;
-        letter-spacing: 0.06em;
-        color: #111827;
+        letter-spacing: 0.08em;
+        color: #111827 !important;
     }
 
     .main-label {
-        color: #2563eb;
+        color: #2563eb !important;
     }
 
     .counter-label {
-        color: #f97316;
+        color: #f97316 !important;
     }
 
     .hole-label {
-        color: #dc2626;
+        color: #dc2626 !important;
     }
 
 
-    /* ================================================
-       自信度
-    ================================================ */
+    /* =====================================================
+       CONFIDENCE
+       ===================================================== */
 
     .confidence-card {
         background: #111827;
         border-radius: 18px;
         padding: 20px;
         text-align: center;
-        color: #ffffff;
-        margin-top: 18px;
+        margin-top: 17px;
     }
 
     .confidence-title {
-        font-size: 13px;
-        color: #cbd5e1;
-        margin-bottom: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #cbd5e1 !important;
+        margin-bottom: 5px;
     }
 
     .confidence-stars {
-        font-size: 25px;
+        font-size: 24px;
         letter-spacing: 0.08em;
-        color: #ffffff;
+        color: #ffffff !important;
     }
 
 
-    /* ================================================
-       バックテスト Expander
-    ================================================ */
+    /* =====================================================
+       BACKTEST
+       ===================================================== */
 
     [data-testid="stExpander"] {
         background: #ffffff !important;
         border: 1px solid #dfe4eb !important;
         border-radius: 16px !important;
         overflow: hidden;
-        box-shadow:
-            0 4px 15px rgba(15, 23, 42, 0.05);
+        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05);
     }
 
     [data-testid="stExpander"] details {
@@ -299,8 +289,8 @@ st.markdown(
         background: #111827 !important;
         color: #ffffff !important;
         padding: 17px 18px !important;
-        font-weight: 800 !important;
-        font-size: 16px !important;
+        font-weight: 900 !important;
+        font-size: 15px !important;
     }
 
     [data-testid="stExpander"] summary p {
@@ -321,52 +311,47 @@ st.markdown(
         color: #374151 !important;
     }
 
-
-    /* ================================================
-       バックテスト見出し
-    ================================================ */
-
     .backtest-title {
         font-size: 20px;
         font-weight: 900;
         color: #111827 !important;
-        margin-bottom: 6px;
+        margin-bottom: 5px;
     }
 
 
-    /* ================================================
-       Radio
-    ================================================ */
+    /* =====================================================
+       RADIO
+       ===================================================== */
 
     div[role="radiogroup"] {
         background: #f8fafc;
         border: 1px solid #e5e7eb;
         border-radius: 14px;
-        padding: 12px 14px;
+        padding: 10px 12px;
     }
 
-    div[role="radiogroup"] label {
+    div[role="radiogroup"] label,
+    div[role="radiogroup"] label p {
         color: #111827 !important;
     }
 
     div[role="radiogroup"] label p {
-        color: #111827 !important;
-        font-weight: 700;
+        font-weight: 800 !important;
     }
 
 
-    /* ================================================
-       Info
-    ================================================ */
+    /* =====================================================
+       INFO / ALERT
+       ===================================================== */
 
     div[data-testid="stAlert"] {
-        border-radius: 12px;
+        border-radius: 12px !important;
     }
 
 
-    /* ================================================
-       Metric
-    ================================================ */
+    /* =====================================================
+       METRIC
+       ===================================================== */
 
     [data-testid="stMetric"] {
         background: #ffffff;
@@ -376,18 +361,18 @@ st.markdown(
     }
 
     [data-testid="stMetricLabel"] {
-        color: #6b7280 !important;
+        color: #64748b !important;
     }
 
     [data-testid="stMetricValue"] {
         color: #111827 !important;
-        font-weight: 900;
+        font-weight: 900 !important;
     }
 
 
-    /* ================================================
-       DataFrame
-    ================================================ */
+    /* =====================================================
+       TABLE
+       ===================================================== */
 
     [data-testid="stDataFrame"] {
         border-radius: 12px;
@@ -395,9 +380,9 @@ st.markdown(
     }
 
 
-    /* ================================================
-       Download
-    ================================================ */
+    /* =====================================================
+       DOWNLOAD
+       ===================================================== */
 
     .stDownloadButton button {
         background: #ffffff !important;
@@ -410,30 +395,35 @@ st.markdown(
     }
 
 
-    /* ================================================
-       Mobile
-    ================================================ */
+    /* =====================================================
+       MOBILE
+       ===================================================== */
 
     @media (max-width: 600px) {
 
         .block-container {
-            padding-left: 14px;
-            padding-right: 14px;
-            padding-top: 1rem;
+            padding-left: 14px !important;
+            padding-right: 14px !important;
+            padding-top: 5.3rem !important;
         }
 
         .pro-title {
-            font-size: 24px;
+            font-size: 21px;
+            letter-spacing: 0;
         }
 
         .pro-subtitle {
-            font-size: 12px;
+            font-size: 11px;
             margin-bottom: 22px;
         }
 
         .race-card,
         .prediction-card {
             padding: 16px;
+        }
+
+        .race-title {
+            font-size: 20px;
         }
 
         .prediction-value {
@@ -445,7 +435,7 @@ st.markdown(
         }
 
         div[role="radiogroup"] {
-            padding: 10px;
+            padding: 9px;
         }
     }
 
@@ -456,7 +446,7 @@ st.markdown(
 
 
 # =========================================================
-# タイトル
+# TITLE
 # =========================================================
 
 st.markdown(
@@ -465,13 +455,13 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="pro-subtitle">データ分析型・競艇AI予想システム</div>',
+    '<div class="pro-subtitle">DATA ANALYSIS × RACE PREDICTION</div>',
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# 場・レース選択
+# SELECT
 # =========================================================
 
 col1, col2 = st.columns([2.2, 1])
@@ -489,7 +479,6 @@ with col1:
         label_visibility="collapsed",
     )
 
-
 with col2:
 
     st.markdown(
@@ -505,7 +494,6 @@ with col2:
     )
 
 
-# 場名 → 場番号
 stadium_no = next(
     (
         number
@@ -517,28 +505,21 @@ stadium_no = next(
 
 
 # =========================================================
-# AI予想
+# PREDICT
 # =========================================================
 
-predict_button = st.button(
+if st.button(
     "🚤 AI予想する",
     use_container_width=True,
-)
-
-
-if predict_button:
+):
 
     target_date = date.today().isoformat()
 
-    with st.spinner(
-        "AIがレースを分析しています..."
-    ):
+    with st.spinner("AIがレースを分析しています..."):
 
         try:
 
-            raw = data.get_data(
-                target_date
-            )
+            raw = data.get_data(target_date)
 
             race = data.get_race(
                 raw,
@@ -546,50 +527,31 @@ if predict_button:
                 race_no,
             )
 
-            if not race:
-
-                st.error(
-                    f"{stadium_name_selected} {race_no}R のデータが見つかりません。"
-                )
-                st.stop()
-
             if not data.validate_race(
                 race,
+                target_date,
                 stadium_no,
                 race_no,
             ):
-
-                st.error(
-                    "レースデータの確認に失敗しました。"
-                )
+                st.error("レースデータの確認に失敗しました。")
                 st.stop()
 
             race_rows = data.get_race_rows(
-                race
+                race,
+                stadium_no,
+                race_no,
             )
 
-            if not race_rows or len(race_rows) != 6:
-
-                st.error(
-                    "6艇分の選手データを取得できませんでした。"
-                )
+            if race_rows is None or len(race_rows) != 6:
+                st.error("6艇分の選手データを取得できませんでした。")
                 st.stop()
 
-            history = data.history14(
-                target_date
-            )
+            history = data.history14(target_date)
 
             prediction = tri_ai(
                 race_rows,
                 history,
             )
-
-            if not prediction:
-
-                st.error(
-                    "AI予想を作成できませんでした。"
-                )
-                st.stop()
 
         except Exception as e:
 
@@ -602,7 +564,7 @@ if predict_button:
 
 
     # =====================================================
-    # レース情報
+    # RACE
     # =====================================================
 
     st.markdown(
@@ -616,36 +578,27 @@ if predict_button:
     )
 
     st.markdown(
-        f'''
-        <div class="race-title">
-            {stadium_name_selected} {race_no}R
-        </div>
-        ''',
+        f'<div class="race-title">{stadium_name_selected} {race_no}R</div>',
         unsafe_allow_html=True,
     )
 
     for i, racer in enumerate(
-        race_rows,
-        start=1
+        race_rows.to_dict("records"),
+        start=1,
     ):
 
         racer_name = (
             racer.get("選手名")
-            or racer.get("name")
             or "選手情報なし"
         )
 
         st.markdown(
-            f'''
+            f"""
             <div class="racer-row">
-                <span class="boat-number">
-                    {i}
-                </span>
-                <span class="racer-name">
-                    {racer_name}
-                </span>
+                <span class="boat-number">{i}</span>
+                <span class="racer-name">{racer_name}</span>
             </div>
-            ''',
+            """,
             unsafe_allow_html=True,
         )
 
@@ -656,140 +609,67 @@ if predict_button:
 
 
     # =====================================================
-    # 予想
+    # PREDICTIONS
     # =====================================================
 
-    main = prediction.get("main")
-    counter = prediction.get("counter")
-    hole = prediction.get("hole")
+    prediction_items = [
+        ("🎯 本命", prediction.get("main"), "main-label"),
+        ("🔥 対抗", prediction.get("counter"), "counter-label"),
+        ("💥 穴", prediction.get("hole"), "hole-label"),
+    ]
 
+    for label, combo, css_class in prediction_items:
 
-    if main:
+        if not combo:
+            continue
 
-        main_text = "-".join(
-            map(str, main)
-        )
-
-        st.markdown(
-            f'''
-            <div class="prediction-card">
-                <div class="prediction-label main-label">
-                    🎯 本命
-                </div>
-
-                <div class="prediction-value">
-                    {main_text}
-                </div>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-
-
-    if counter:
-
-        counter_text = "-".join(
-            map(str, counter)
-        )
+        text = "-".join(map(str, combo))
 
         st.markdown(
-            f'''
+            f"""
             <div class="prediction-card">
-                <div class="prediction-label counter-label">
-                    🔥 対抗
+                <div class="prediction-label {css_class}">
+                    {label}
                 </div>
-
                 <div class="prediction-value">
-                    {counter_text}
+                    {text}
                 </div>
             </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-
-
-    if hole:
-
-        hole_text = "-".join(
-            map(str, hole)
-        )
-
-        st.markdown(
-            f'''
-            <div class="prediction-card">
-                <div class="prediction-label hole-label">
-                    💥 穴
-                </div>
-
-                <div class="prediction-value">
-                    {hole_text}
-                </div>
-            </div>
-            ''',
+            """,
             unsafe_allow_html=True,
         )
 
 
     # =====================================================
-    # 自信度
+    # CONFIDENCE
     # =====================================================
 
     boat_probs = prediction.get(
         "boat_probs",
-        []
+        {},
     )
 
-    confidence = "★★★☆☆"
-
-    try:
-
-        if boat_probs:
-
-            top_prob = max(
-                float(x)
-                for x in boat_probs
-            )
-
-            if top_prob >= 0.45:
-                confidence = "★★★★★"
-
-            elif top_prob >= 0.38:
-                confidence = "★★★★☆"
-
-            elif top_prob >= 0.32:
-                confidence = "★★★☆☆"
-
-            elif top_prob >= 0.26:
-                confidence = "★★☆☆☆"
-
-            else:
-                confidence = "★☆☆☆☆"
-
-    except Exception:
-
-        confidence = "★★★☆☆"
-
+    confidence = backtest.confidence_from_probs(
+        boat_probs
+    )
 
     st.markdown(
-        f'''
+        f"""
         <div class="confidence-card">
-
             <div class="confidence-title">
                 AI自信度
             </div>
-
             <div class="confidence-stars">
                 {confidence}
             </div>
-
         </div>
-        ''',
+        """,
         unsafe_allow_html=True,
     )
 
 
 # =========================================================
-# AIバックテスト
+# BACKTEST
 # =========================================================
 
 st.markdown(
@@ -797,22 +677,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 with st.expander(
-    "📊 AIの実力を検証する"
+    "📊 AIの実力を検証する",
 ):
-
-    st.markdown(
-        '''
-        <div class="backtest-title">
-            📊 AI実力テスト
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        "日付を指定せず、直近のレース数だけ選んでAIを検証できます。"
-    )
 
     backtest.render_backtest()

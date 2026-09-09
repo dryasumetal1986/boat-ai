@@ -1,5 +1,6 @@
 import streamlit as st
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import data
 from ai import tri_ai
@@ -19,6 +20,15 @@ st.set_page_config(
 
 
 # =========================================================
+# 日本時間
+# =========================================================
+
+JST = ZoneInfo("Asia/Tokyo")
+today = datetime.now(JST).date()
+target_date = today.isoformat()
+
+
+# =========================================================
 # CSS
 # =========================================================
 
@@ -26,9 +36,9 @@ st.markdown(
     """
     <style>
 
-    /* =====================================================
-       BASE
-    ===================================================== */
+    /* ---------------------------------
+       全体
+    --------------------------------- */
 
     .stApp {
         background: #f4f6f9;
@@ -36,406 +46,301 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 720px;
+        max-width: 720px !important;
         padding-top: 5.8rem !important;
         padding-bottom: 4rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
     }
 
-    html,
-    body,
-    [class*="css"] {
-        font-family:
-            "Noto Sans JP",
-            "Hiragino Kaku Gothic ProN",
-            "Yu Gothic",
-            "Meiryo",
-            sans-serif;
+    /* Streamlit上部バーとの重なり対策 */
+    header[data-testid="stHeader"] {
+        background: #0d1117;
     }
 
-    p,
-    label,
-    .stMarkdown,
-    .stCaption {
-        color: #111827;
-    }
-
-
-    /* =====================================================
-       TITLE
-       ===================================================== */
+    /* ---------------------------------
+       タイトル
+    --------------------------------- */
 
     .pro-title {
         text-align: center;
-        font-size: 28px;
+        font-size: 29px;
         font-weight: 900;
-        letter-spacing: 0.01em;
-        color: #111827 !important;
-        line-height: 1.35;
-        margin: 0 0 7px 0;
+        letter-spacing: -0.5px;
+        color: #111827;
+        margin: 0.2rem 0 0.35rem 0;
         white-space: nowrap;
     }
 
     .pro-subtitle {
         text-align: center;
-        font-size: 12px;
-        font-weight: 700;
-        color: #64748b !important;
-        margin-bottom: 28px;
-        letter-spacing: 0.05em;
-    }
-
-
-    /* =====================================================
-       SELECT
-       ===================================================== */
-
-    .select-label {
+        color: #6b7280;
         font-size: 13px;
-        font-weight: 900;
-        color: #374151 !important;
-        margin: 0 0 5px 2px;
+        font-weight: 600;
+        margin-bottom: 1rem;
     }
 
-    div[data-baseweb="select"] > div {
-        background: #ffffff !important;
-        border: 1px solid #d7dce4 !important;
-        border-radius: 13px !important;
-        min-height: 50px;
-        box-shadow: none !important;
+    .today-badge {
+        width: fit-content;
+        margin: 0 auto 1.2rem auto;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: #e8f1ff;
+        border: 1px solid #c9dcff;
+        color: #1558c0;
+        font-weight: 800;
+        font-size: 14px;
     }
 
-    div[data-baseweb="select"] span {
-        color: #111827 !important;
-    }
+    /* ---------------------------------
+       カード
+    --------------------------------- */
 
-    div[data-baseweb="select"] svg {
-        fill: #111827 !important;
-    }
-
-
-    /* =====================================================
-       BUTTON
-       ===================================================== */
-
-    div.stButton > button {
-        width: 100%;
-        min-height: 54px;
-        border: none !important;
-        border-radius: 14px !important;
-        background: #2563eb !important;
-        color: #ffffff !important;
-        font-size: 17px !important;
-        font-weight: 900 !important;
-        box-shadow: 0 7px 18px rgba(37, 99, 235, 0.22);
-        transition: 0.15s ease;
-    }
-
-    div.stButton > button p {
-        color: #ffffff !important;
-        font-weight: 900 !important;
-    }
-
-    div.stButton > button:hover {
-        background: #1d4ed8 !important;
-        transform: translateY(-1px);
-    }
-
-
-    /* =====================================================
-       DIVIDER
-       ===================================================== */
-
-    .divider {
-        height: 1px;
-        background: #d9dee7;
-        margin: 28px 0;
-    }
-
-
-    /* =====================================================
-       RACE CARD
-       ===================================================== */
-
-    .race-card {
+    .pro-card {
         background: #ffffff;
         border: 1px solid #e5e7eb;
-        border-radius: 18px;
-        padding: 20px 22px;
-        box-shadow: 0 5px 18px rgba(15, 23, 42, 0.06);
-        margin-bottom: 18px;
+        border-radius: 20px;
+        padding: 20px;
+        margin: 14px 0;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
     }
 
-    .race-title {
-        font-size: 22px;
+    .section-label {
+        font-size: 13px;
+        font-weight: 800;
+        color: #64748b;
+        margin-bottom: 5px;
+    }
+
+    /* ---------------------------------
+       予想結果
+    --------------------------------- */
+
+    .result-card {
+        background: #ffffff;
+        border-radius: 20px;
+        border: 1px solid #e5e7eb;
+        padding: 20px;
+        margin-top: 18px;
+        box-shadow: 0 8px 25px rgba(15, 23, 42, 0.06);
+    }
+
+    .result-title {
+        font-size: 20px;
         font-weight: 900;
-        color: #111827 !important;
-        margin-bottom: 13px;
+        color: #111827;
+        margin-bottom: 14px;
     }
 
-    .racer-row {
+    .prediction-row {
         display: flex;
         align-items: center;
-        min-height: 49px;
-        border-bottom: 1px solid #edf0f4;
-        font-size: 15px;
+        gap: 12px;
+        padding: 14px 0;
+        border-bottom: 1px solid #edf0f3;
     }
 
-    .racer-row:last-child {
+    .prediction-row:last-child {
         border-bottom: none;
     }
 
-    .boat-number {
-        width: 31px;
-        height: 31px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 8px;
-        background: #eef2f7;
-        color: #111827 !important;
-        font-weight: 900;
-        margin-right: 12px;
-        flex-shrink: 0;
-    }
-
-    .racer-name {
-        color: #111827 !important;
-        font-weight: 700;
-    }
-
-
-    /* =====================================================
-       PREDICTION
-       ===================================================== */
-
-    .prediction-card {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 17px;
-        padding: 17px 21px;
-        margin-bottom: 11px;
-        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05);
-    }
-
     .prediction-label {
-        font-size: 13px;
+        width: 70px;
         font-weight: 900;
-        margin-bottom: 4px;
+        font-size: 14px;
     }
 
-    .prediction-value {
-        font-size: 27px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        color: #111827 !important;
+    .prediction-main {
+        color: #1558c0;
     }
 
-    .main-label {
-        color: #2563eb !important;
+    .prediction-counter {
+        color: #334155;
     }
 
-    .counter-label {
-        color: #f97316 !important;
+    .prediction-hole {
+        color: #dc2626;
     }
 
-    .hole-label {
-        color: #dc2626 !important;
+    .prediction-number {
+        font-size: 23px;
+        font-weight: 950;
+        letter-spacing: 2px;
+        color: #111827;
     }
 
-
-    /* =====================================================
-       CONFIDENCE
-       ===================================================== */
+    /* ---------------------------------
+       信頼度
+    --------------------------------- */
 
     .confidence-card {
         background: #111827;
-        border-radius: 18px;
-        padding: 20px;
+        color: #ffffff;
+        border-radius: 20px;
+        padding: 18px 20px;
+        margin-top: 16px;
         text-align: center;
-        margin-top: 17px;
     }
 
     .confidence-title {
-        font-size: 12px;
+        font-size: 13px;
+        color: #cbd5e1;
         font-weight: 700;
-        color: #cbd5e1 !important;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
     }
 
     .confidence-stars {
         font-size: 24px;
-        letter-spacing: 0.08em;
-        color: #ffffff !important;
-    }
-
-
-    /* =====================================================
-       BACKTEST
-       ===================================================== */
-
-    [data-testid="stExpander"] {
-        background: #ffffff !important;
-        border: 1px solid #dfe4eb !important;
-        border-radius: 16px !important;
-        overflow: hidden;
-        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05);
-    }
-
-    [data-testid="stExpander"] details {
-        background: #ffffff !important;
-    }
-
-    [data-testid="stExpander"] summary {
-        background: #111827 !important;
-        color: #ffffff !important;
-        padding: 17px 18px !important;
-        font-weight: 900 !important;
-        font-size: 15px !important;
-    }
-
-    [data-testid="stExpander"] summary p {
-        color: #ffffff !important;
-    }
-
-    [data-testid="stExpander"] summary svg {
-        fill: #ffffff !important;
-    }
-
-    [data-testid="stExpanderDetails"] {
-        background: #ffffff !important;
-        color: #111827 !important;
-        padding: 20px !important;
-    }
-
-    [data-testid="stExpanderDetails"] p {
-        color: #374151 !important;
-    }
-
-    .backtest-title {
-        font-size: 20px;
+        letter-spacing: 3px;
         font-weight: 900;
-        color: #111827 !important;
-        margin-bottom: 5px;
     }
 
+    /* ---------------------------------
+       ボート一覧
+    --------------------------------- */
 
-    /* =====================================================
-       RADIO
-       ===================================================== */
-
-    div[role="radiogroup"] {
-        background: #f8fafc;
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 10px 12px;
+    .race-header {
+        font-size: 21px;
+        font-weight: 900;
+        color: #111827;
+        margin-bottom: 10px;
     }
 
-    div[role="radiogroup"] label,
-    div[role="radiogroup"] label p {
-        color: #111827 !important;
+    .boat-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid #eef0f2;
     }
 
-    div[role="radiogroup"] label p {
-        font-weight: 800 !important;
+    .boat-row:last-child {
+        border-bottom: none;
     }
 
-
-    /* =====================================================
-       INFO / ALERT
-       ===================================================== */
-
-    div[data-testid="stAlert"] {
-        border-radius: 12px !important;
+    .boat-number {
+        width: 34px;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9px;
+        background: #111827;
+        color: #ffffff;
+        font-size: 15px;
+        font-weight: 900;
     }
 
+    .boat-name {
+        font-size: 15px;
+        font-weight: 750;
+        color: #1f2937;
+    }
 
-    /* =====================================================
-       METRIC
-       ===================================================== */
+    /* ---------------------------------
+       Expander
+    --------------------------------- */
 
-    [data-testid="stMetric"] {
+    div[data-testid="stExpander"] {
+        border: 1px solid #dfe4ea;
+        border-radius: 20px;
+        overflow: hidden;
+        margin-top: 24px;
+        background: #ffffff;
+    }
+
+    div[data-testid="stExpander"] summary {
+        background: #111827;
+        color: #ffffff !important;
+        font-weight: 800;
+    }
+
+    div[data-testid="stExpander"] summary p {
+        color: #ffffff !important;
+    }
+
+    /* ---------------------------------
+       ボタン
+    --------------------------------- */
+
+    div.stButton > button {
+        width: 100%;
+        min-height: 58px;
+        border-radius: 17px;
+        border: none;
+        background: #2457d6;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 900;
+        box-shadow: 0 10px 22px rgba(36, 87, 214, 0.22);
+    }
+
+    div.stButton > button:hover {
+        background: #1d4ed8;
+        color: #ffffff;
+    }
+
+    /* ---------------------------------
+       Selectbox
+    --------------------------------- */
+
+    div[data-baseweb="select"] > div {
+        border-radius: 13px;
+        border-color: #d7dce3;
+        min-height: 48px;
+        background: #ffffff;
+    }
+
+    /* ---------------------------------
+       Metric
+    --------------------------------- */
+
+    div[data-testid="stMetric"] {
         background: #ffffff;
         border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 14px;
+        border-radius: 16px;
+        padding: 12px;
     }
 
-    [data-testid="stMetricLabel"] {
-        color: #64748b !important;
-    }
-
-    [data-testid="stMetricValue"] {
-        color: #111827 !important;
-        font-weight: 900 !important;
-    }
-
-
-    /* =====================================================
-       TABLE
-       ===================================================== */
-
-    [data-testid="stDataFrame"] {
-        border-radius: 12px;
-        overflow: hidden;
-    }
-
-
-    /* =====================================================
-       DOWNLOAD
-       ===================================================== */
-
-    .stDownloadButton button {
-        background: #ffffff !important;
-        border: 1px solid #cbd5e1 !important;
-        color: #111827 !important;
-    }
-
-    .stDownloadButton button p {
-        color: #111827 !important;
-    }
-
-
-    /* =====================================================
-       MOBILE
-       ===================================================== */
+    /* ---------------------------------
+       Mobile
+    --------------------------------- */
 
     @media (max-width: 600px) {
 
         .block-container {
-            padding-left: 14px !important;
-            padding-right: 14px !important;
-            padding-top: 5.3rem !important;
+            padding-top: 5.2rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
         }
 
         .pro-title {
             font-size: 21px;
-            letter-spacing: 0;
+            letter-spacing: -0.8px;
         }
 
         .pro-subtitle {
-            font-size: 11px;
-            margin-bottom: 22px;
+            font-size: 12px;
         }
 
-        .race-card,
-        .prediction-card {
+        .today-badge {
+            font-size: 13px;
+            padding: 7px 13px;
+        }
+
+        .pro-card,
+        .result-card {
             padding: 16px;
+            border-radius: 17px;
         }
 
-        .race-title {
-            font-size: 20px;
+        .prediction-label {
+            width: 58px;
+            font-size: 13px;
         }
 
-        .prediction-value {
-            font-size: 24px;
-        }
-
-        [data-testid="stExpanderDetails"] {
-            padding: 16px !important;
-        }
-
-        div[role="radiogroup"] {
-            padding: 9px;
+        .prediction-number {
+            font-size: 21px;
         }
     }
 
@@ -446,7 +351,7 @@ st.markdown(
 
 
 # =========================================================
-# TITLE
+# ヘッダー
 # =========================================================
 
 st.markdown(
@@ -455,193 +360,301 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="pro-subtitle">DATA ANALYSIS × RACE PREDICTION</div>',
+    '<div class="pro-subtitle">データ分析 × AIによる3連単予想</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f'<div class="today-badge">📅 {today.strftime("%Y年%m月%d日")}　本日開催</div>',
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# SELECT
+# 当日データ取得
 # =========================================================
 
-col1, col2 = st.columns([2.2, 1])
+raw_today = data.get_data(target_date)
+
+
+# =========================================================
+# 会場・レース選択
+# =========================================================
+
+st.markdown(
+    '<div class="pro-card">',
+    unsafe_allow_html=True,
+)
+
+col1, col2 = st.columns(2)
 
 with col1:
-
     st.markdown(
-        '<div class="select-label">場</div>',
+        '<div class="section-label">開催場</div>',
         unsafe_allow_html=True,
     )
 
-    stadium_name_selected = st.selectbox(
-        "場",
-        list(data.STADIUMS.values()),
+    stadium_no = st.selectbox(
+        "開催場",
+        options=list(data.STADIUMS.keys()),
+        format_func=lambda x: data.stadium_name(x),
         label_visibility="collapsed",
     )
 
 with col2:
-
     st.markdown(
-        '<div class="select-label">R</div>',
+        '<div class="section-label">レース</div>',
         unsafe_allow_html=True,
     )
 
     race_no = st.selectbox(
-        "R",
-        range(1, 13),
+        "レース",
+        options=list(range(1, 13)),
         format_func=lambda x: f"{x}R",
         label_visibility="collapsed",
     )
 
-
-stadium_no = next(
-    (
-        number
-        for number, name in data.STADIUMS.items()
-        if name == stadium_name_selected
-    ),
-    None,
+st.markdown(
+    "</div>",
+    unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# PREDICT
+# 選択レースの状態確認
 # =========================================================
 
-if st.button(
+selected_race = None
+race_rows = None
+
+if raw_today:
+    selected_race = data.get_race(
+        raw_today,
+        stadium_no,
+        race_no,
+    )
+
+    if selected_race:
+        race_rows = data.get_race_rows(
+            selected_race,
+            stadium_no,
+            race_no,
+        )
+
+
+# =========================================================
+# AI予想ボタン
+# =========================================================
+
+predict_clicked = st.button(
     "🚤 AI予想する",
     use_container_width=True,
-):
-
-    target_date = date.today().isoformat()
-
-    with st.spinner("AIがレースを分析しています..."):
-
-        try:
-
-            raw = data.get_data(target_date)
-
-            race = data.get_race(
-                raw,
-                stadium_no,
-                race_no,
-            )
-
-            if not data.validate_race(
-                race,
-                target_date,
-                stadium_no,
-                race_no,
-            ):
-                st.error("レースデータの確認に失敗しました。")
-                st.stop()
-
-            race_rows = data.get_race_rows(
-                race,
-                stadium_no,
-                race_no,
-            )
-
-            if race_rows is None or len(race_rows) != 6:
-                st.error("6艇分の選手データを取得できませんでした。")
-                st.stop()
-
-            history = data.history14(target_date)
-
-            prediction = tri_ai(
-                race_rows,
-                history,
-            )
-
-        except Exception as e:
-
-            st.error(
-                "データ取得またはAI予想中にエラーが発生しました。"
-            )
-
-            st.exception(e)
-            st.stop()
+)
 
 
-    # =====================================================
-    # RACE
-    # =====================================================
+# =========================================================
+# AI予想
+# =========================================================
 
-    st.markdown(
-        '<div class="divider"></div>',
-        unsafe_allow_html=True,
-    )
+if predict_clicked:
 
-    st.markdown(
-        '<div class="race-card">',
-        unsafe_allow_html=True,
-    )
+    # -----------------------------------------
+    # 今日のデータがない
+    # -----------------------------------------
 
-    st.markdown(
-        f'<div class="race-title">{stadium_name_selected} {race_no}R</div>',
-        unsafe_allow_html=True,
-    )
+    if raw_today is None:
+        st.error(
+            f"⚠️ {today.strftime('%Y年%m月%d日')}の開催データを取得できませんでした。"
+        )
 
-    for i, racer in enumerate(
-        race_rows.to_dict("records"),
-        start=1,
+        st.info(
+            "開催前、またはデータ更新前の可能性があります。"
+        )
+
+        st.stop()
+
+    # -----------------------------------------
+    # レースがない
+    # -----------------------------------------
+
+    if selected_race is None:
+        st.error(
+            f"⚠️ 本日の{data.stadium_name(stadium_no)} "
+            f"{race_no}Rのデータがありません。"
+        )
+
+        st.info(
+            "そのレースが開催されていない、またはまだ番組データが公開されていない可能性があります。"
+        )
+
+        st.stop()
+
+    # -----------------------------------------
+    # 6艇揃っているか
+    # -----------------------------------------
+
+    if not data.validate_race(
+        selected_race,
+        target_date,
+        stadium_no,
+        race_no,
     ):
-
-        racer_name = (
-            racer.get("選手名")
-            or "選手情報なし"
+        st.error(
+            "⚠️ このレースの出走データがまだ揃っていません。"
         )
+
+        st.info(
+            "番組データが更新されるまで少し待ってから再度お試しください。"
+        )
+
+        st.stop()
+
+    if race_rows is None or race_rows.empty:
+        st.error(
+            "⚠️ AI予想に必要な選手データを取得できませんでした。"
+        )
+        st.stop()
+
+    # -----------------------------------------
+    # 過去データ
+    # -----------------------------------------
+
+    with st.spinner("AIが過去データを分析しています…"):
+
+        history = data.history14(
+            target_date
+        )
+
+        prediction = tri_ai(
+            race_rows,
+            history,
+        )
+
+    if not isinstance(prediction, dict):
+        st.error(
+            "⚠️ AI予想データの生成に失敗しました。"
+        )
+        st.stop()
+
+    # =====================================================
+    # レース情報
+    # =====================================================
+
+    st.markdown(
+        '<div class="result-card">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="race-header">
+            {data.stadium_name(stadium_no)} {race_no}R
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # -----------------------------------------
+    # 出走選手
+    # -----------------------------------------
+
+    for _, row in race_rows.iterrows():
+
+        lane = int(row["艇番"])
+        name = str(row["選手名"])
 
         st.markdown(
             f"""
-            <div class="racer-row">
-                <span class="boat-number">{i}</span>
-                <span class="racer-name">{racer_name}</span>
+            <div class="boat-row">
+                <div class="boat-number">{lane}</div>
+                <div class="boat-name">{name}選手</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     st.markdown(
-        '</div>',
+        "</div>",
         unsafe_allow_html=True,
     )
 
-
     # =====================================================
-    # PREDICTIONS
+    # 予想
     # =====================================================
 
-    prediction_items = [
-        ("🎯 本命", prediction.get("main"), "main-label"),
-        ("🔥 対抗", prediction.get("counter"), "counter-label"),
-        ("💥 穴", prediction.get("hole"), "hole-label"),
-    ]
+    main = prediction.get(
+        "main",
+        [],
+    )
 
-    for label, combo, css_class in prediction_items:
+    counter = prediction.get(
+        "counter",
+        [],
+    )
 
+    hole = prediction.get(
+        "hole",
+        [],
+    )
+
+    def combo_text(combo):
         if not combo:
-            continue
+            return "—"
 
-        text = "-".join(map(str, combo))
-
-        st.markdown(
-            f"""
-            <div class="prediction-card">
-                <div class="prediction-label {css_class}">
-                    {label}
-                </div>
-                <div class="prediction-value">
-                    {text}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        return "-".join(
+            str(int(x))
+            for x in combo
         )
 
+    st.markdown(
+        '<div class="result-card">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="result-title">🎯 AI予想</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="prediction-row">
+            <div class="prediction-label prediction-main">
+                🎯 本命
+            </div>
+            <div class="prediction-number">
+                {combo_text(main)}
+            </div>
+        </div>
+
+        <div class="prediction-row">
+            <div class="prediction-label prediction-counter">
+                🔥 対抗
+            </div>
+            <div class="prediction-number">
+                {combo_text(counter)}
+            </div>
+        </div>
+
+        <div class="prediction-row">
+            <div class="prediction-label prediction-hole">
+                💥 穴
+            </div>
+            <div class="prediction-number">
+                {combo_text(hole)}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     # =====================================================
-    # CONFIDENCE
+    # AI自信度
     # =====================================================
 
     boat_probs = prediction.get(
@@ -649,9 +662,35 @@ if st.button(
         {},
     )
 
-    confidence = backtest.confidence_from_probs(
-        boat_probs
-    )
+    if isinstance(boat_probs, dict):
+
+        values = sorted(
+            [
+                float(v)
+                for v in boat_probs.values()
+            ],
+            reverse=True,
+        )
+
+        if values:
+            confidence = values[0]
+
+            # 1着確率から5段階評価
+            if confidence >= 0.42:
+                stars = "★★★★★"
+            elif confidence >= 0.34:
+                stars = "★★★★☆"
+            elif confidence >= 0.27:
+                stars = "★★★☆☆"
+            elif confidence >= 0.20:
+                stars = "★★☆☆☆"
+            else:
+                stars = "★☆☆☆☆"
+        else:
+            stars = "★★★☆☆"
+
+    else:
+        stars = "★★★☆☆"
 
     st.markdown(
         f"""
@@ -660,7 +699,7 @@ if st.button(
                 AI自信度
             </div>
             <div class="confidence-stars">
-                {confidence}
+                {stars}
             </div>
         </div>
         """,
@@ -669,16 +708,12 @@ if st.button(
 
 
 # =========================================================
-# BACKTEST
+# AI実力テスト
 # =========================================================
-
-st.markdown(
-    '<div class="divider"></div>',
-    unsafe_allow_html=True,
-)
 
 with st.expander(
     "📊 AIの実力を検証する",
+    expanded=False,
 ):
 
     backtest.render_backtest()

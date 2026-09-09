@@ -1,25 +1,23 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import date, timedelta
 
 import data
 from ai import tri_ai
 
 
-JST = timezone(timedelta(hours=9))
+START_DATE = date(2026, 1, 1)
 
 
 # =========================
-# 現在選択されている開催場
+# 開催場番号
 # =========================
 def get_stadium_no():
-    keys = [
+    for key in [
         "stadium_no",
         "selected_stadium_no",
         "backtest_stadium_no",
-    ]
-
-    for key in keys:
+    ]:
         value = st.session_state.get(key)
 
         if value is not None:
@@ -28,7 +26,6 @@ def get_stadium_no():
             except Exception:
                 pass
 
-    # 場名で保存されている場合
     name = st.session_state.get("stadium")
 
     if isinstance(name, str):
@@ -36,12 +33,11 @@ def get_stadium_no():
             if name == stadium_name:
                 return int(no)
 
-    # 見つからない場合は桐生
     return 1
 
 
 # =========================
-# 過去14日データ
+# 過去14日
 # =========================
 @st.cache_data(ttl=300)
 def get_history(stadium_no, race_date):
@@ -58,6 +54,7 @@ def get_history(stadium_no, race_date):
 # 3連単配当
 # =========================
 def get_trifecta_payout(race):
+
     try:
         result = data.get_result(race)
     except Exception:
@@ -66,17 +63,18 @@ def get_trifecta_payout(race):
     if not isinstance(result, dict):
         return 0
 
-    payouts = result.get("payouts", {})
+    payouts = result.get("payouts")
 
     if not isinstance(payouts, dict):
         return 0
 
-    trifecta = payouts.get("trifecta", [])
+    trifecta = payouts.get("trifecta")
 
     if not isinstance(trifecta, list):
         return 0
 
     for item in trifecta:
+
         if not isinstance(item, dict):
             continue
 
@@ -98,6 +96,7 @@ def get_trifecta_payout(race):
 # 実着順
 # =========================
 def get_actual_order(race):
+
     try:
         order = data.get_result_order(race)
 
@@ -111,9 +110,10 @@ def get_actual_order(race):
 
 
 # =========================
-# AI 6点買い
+# 3連単6点
 # =========================
 def make_bets(ai):
+
     try:
         main = int(ai.get("main", 0))
         counter = int(ai.get("counter", 0))
@@ -141,14 +141,14 @@ def make_bets(ai):
 
 
 # =========================
-# バックテスト本体
+# バックテスト
 # =========================
 def run_backtest(stadium_no, target_count):
 
-    today = datetime.now(JST).date()
+    # date型で完全統一
+    today = date.today()
 
     check_date = today - timedelta(days=1)
-    start_date = datetime(2026, 1, 1)
 
     records = []
 
@@ -156,11 +156,13 @@ def run_backtest(stadium_no, target_count):
     status = st.empty()
 
     while (
-        check_date >= start_date
+        check_date >= START_DATE
         and len(records) < target_count
     ):
 
-        stadium = data.stadium_name(stadium_no)
+        stadium = data.stadium_name(
+            stadium_no
+        )
 
         try:
             races = data.all_races_for_date(
@@ -186,7 +188,8 @@ def run_backtest(stadium_no, target_count):
             )
 
             try:
-                # 確定結果があるか確認
+
+                # 確定結果
                 result = data.get_result(race)
 
                 if not result:
@@ -198,10 +201,13 @@ def run_backtest(stadium_no, target_count):
                 if len(actual) < 3:
                     continue
 
-                # 出走データ
+                # 出走表
                 rows = data.get_race_rows(race)
 
-                if rows is None or len(rows) == 0:
+                if rows is None:
+                    continue
+
+                if len(rows) == 0:
                     continue
 
                 # 過去成績
@@ -210,7 +216,7 @@ def run_backtest(stadium_no, target_count):
                     check_date
                 )
 
-                # AI予想
+                # AI
                 ai = tri_ai(
                     rows,
                     history,
@@ -220,7 +226,6 @@ def run_backtest(stadium_no, target_count):
                 # 6点
                 bets = make_bets(ai)
 
-                # 本命・対抗・穴が成立しない場合は除外
                 if len(bets) != 6:
                     continue
 
@@ -251,14 +256,17 @@ def run_backtest(stadium_no, target_count):
 
                 exact_hit = (
                     actual ==
-                    (main, counter, hole)
+                    (
+                        main,
+                        counter,
+                        hole
+                    )
                 )
 
                 bet_hit = (
                     actual in bets
                 )
 
-                # 配当
                 payout = 0
 
                 if bet_hit:
@@ -267,40 +275,44 @@ def run_backtest(stadium_no, target_count):
                     )
 
                 # =====================
-                # 保存
+                # 記録
                 # =====================
 
                 records.append({
+
                     "日付": check_date,
+
                     "場番号": stadium_no,
+
                     "場": stadium,
+
                     "R": race_no,
 
                     "本命": main,
+
                     "対抗": counter,
+
                     "穴": hole,
 
                     "実着1": actual[0],
+
                     "実着2": actual[1],
+
                     "実着3": actual[2],
 
                     "本命1着": main_win,
+
                     "本命3連対": main_top3,
 
-                    "AI上位3艇3連対":
-                        ai_top3,
+                    "AI上位3艇3連対": ai_top3,
 
-                    "3連単完全的中":
-                        exact_hit,
+                    "3連単完全的中": exact_hit,
 
-                    "買い目的中":
-                        bet_hit,
+                    "買い目的中": bet_hit,
 
-                    # 成立したレースは必ず6点
                     "買い目数": 6,
 
-                    "3連単配当":
-                        payout,
+                    "3連単配当": payout,
 
                     "3連単的中":
                         bet_hit and payout > 0,
@@ -309,7 +321,6 @@ def run_backtest(stadium_no, target_count):
             except Exception:
                 continue
 
-            # 進捗
             progress.progress(
                 min(
                     len(records) /
@@ -318,7 +329,11 @@ def run_backtest(stadium_no, target_count):
                 )
             )
 
-        check_date -= timedelta(days=1)
+        # 1日前へ
+        check_date = (
+            check_date -
+            timedelta(days=1)
+        )
 
     progress.progress(1.0)
 
@@ -330,7 +345,7 @@ def run_backtest(stadium_no, target_count):
 
 
 # =========================
-# 指標計算
+# 指標
 # =========================
 def calculate_metrics(df):
 
@@ -362,18 +377,22 @@ def calculate_metrics(df):
 
     # 1点100円
     investment = (
-        df["買い目数"].sum() * 100
+        int(df["買い目数"].sum())
+        * 100
     )
 
-    payout = (
+    payout = int(
         df["3連単配当"].sum()
     )
 
-    roi = (
-        payout / investment * 100
-        if investment > 0
-        else 0
-    )
+    roi = 0
+
+    if investment > 0:
+        roi = (
+            payout /
+            investment *
+            100
+        )
 
     return {
         "main_win": main_win,
@@ -408,19 +427,21 @@ def ai_rating(roi):
 
 
 # =========================
-# バックテスト画面
-# app.pyから render_backtest()
-# で呼び出せる
+# 画面
+# app.pyの
+# render_backtest()
+# に対応
 # =========================
 def render_backtest(stadium_no=None):
 
-    st.subheader("📊 AIバックテスト")
+    st.subheader(
+        "📊 AIバックテスト"
+    )
 
     st.caption(
         "2026-01-01以降の確定レースを自動で遡って検証します。"
     )
 
-    # 開催場
     if stadium_no is None:
         stadium_no = get_stadium_no()
 
@@ -445,11 +466,15 @@ def render_backtest(stadium_no=None):
         key="backtest_start_button"
     ):
 
-        # 古い結果を削除
+        # 古い結果を消す
         st.session_state.pop(
             "backtest_df",
             None
         )
+
+        st.session_state[
+            "backtest_target"
+        ] = count
 
         df = run_backtest(
             stadium_no,
@@ -459,7 +484,7 @@ def render_backtest(stadium_no=None):
         if df.empty:
 
             st.error(
-                "検証できる確定レースが見つかりませんでした。"
+                "検証できる確定レースがありませんでした。"
             )
 
         else:
@@ -468,14 +493,9 @@ def render_backtest(stadium_no=None):
                 "backtest_df"
             ] = df
 
-            st.session_state[
-                "backtest_target"
-            ] = count
-
     # =========================
-    # 結果表示
+    # 結果
     # =========================
-
     df = st.session_state.get(
         "backtest_df"
     )
@@ -501,9 +521,8 @@ def render_backtest(stadium_no=None):
     )
 
     # =========================
-    # 指標
+    # 結果
     # =========================
-
     m = calculate_metrics(df)
 
     st.subheader(
@@ -563,7 +582,6 @@ def render_backtest(stadium_no=None):
     # =========================
     # 詳細
     # =========================
-
     with st.expander(
         "🔎 バックテスト詳細を見る"
     ):
@@ -572,4 +590,4 @@ def render_backtest(stadium_no=None):
             df,
             use_container_width=True,
             hide_index=True
-    )
+                )

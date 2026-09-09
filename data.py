@@ -3,919 +3,527 @@ from datetime import date, timedelta
 
 import requests
 import streamlit as st
+import pandas as pd
 from bs4 import BeautifulSoup
 
 
 API = "https://boatraceopenapi.github.io/api/v1"
 
 
-def make_session():
-    session = requests.Session()
-
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/140.0 Safari/537.36"
-        ),
-        "Accept-Language": (
-            "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7"
-        ),
-    })
-
-    return session
+def session():
+    s = requests.Session()
+    s.headers["User-Agent"] = "Mozilla/5.0"
+    return s
 
 
-@st.cache_data(ttl=180)
-def get_data(d):
-    url = f"{API}/{d:%Y/%Y%m%d}.json"
-
-    session = make_session()
-
-    response = session.get(
-        url,
-        timeout=30,
-    )
-
-    response.raise_for_status()
-
-    return response.json()
+def val(d, keys, default=0):
+    if not isinstance(d, dict):
+        return default
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k]
+    return default
 
 
-def racers(value):
-    if isinstance(value, list):
-        return value
+def num(x, default=0):
+    try:
+        return float(
+            str(x)
+            .replace(",", "")
+            .replace("%", "")
+            .strip()
+        )
+    except:
+        return default
 
-    if isinstance(value, dict):
-        return list(value.values())
 
+def racers(x):
+    if isinstance(x, list):
+        return x
+    if isinstance(x, dict):
+        for k in ["racers", "racer", "entries", "entry", "data"]:
+            if isinstance(x.get(k), list):
+                return x[k]
+        return list(x.values())
     return []
 
 
+# =========================================================
+# レースデータ
+# =========================================================
+
+@st.cache_data(ttl=180)
+def get_data(d):
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
+
+    url = f"{API}/{d.year}/{d:%Y%m%d}.json"
+    r = session().get(url, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
 def get_race(data, sno, rno):
-    stadiums = (
-        data
-        .get("programs", {})
-        .get("stadiums", {})
-    )
+    programs = data.get("programs", {})
 
-    stadium = stadiums.get(str(sno))
+    if isinstance(programs, dict):
+        stadiums = list(programs.values())
+    else:
+        stadiums = programs
 
-    if not stadium:
-        return None
+    for stadium in stadiums:
+        if str(val(
+            stadium,
+            ["stadiumNumber", "stadium", "number"]
+        )) != str(sno):
+            continue
 
-    races = stadium.get("races", {})
+        races = stadium.get("races", [])
+        if isinstance(races, dict):
+            races = list(races.values())
 
-    return races.get(str(rno))
+        for race in races:
+            if str(val(
+                race,
+                ["raceNumber", "race_no", "number"]
+            )) == str(rno):
+                return race
 
+    return None
+
+
+# =========================================================
+# 学習用過去データ
+# =========================================================
 
 @st.cache_data(ttl=1800)
 def history14(td):
+
+    if isinstance(td, str):
+        td = date.fromisoformat(td)
+
     rows = []
 
-    for i in range(1, 15):
-
-        d = td - timedelta(days=i)
+    for n in range(1, 15):
+        d = td - timedelta(days=n)
 
         if d < date(2026, 1, 1):
             continue
 
         try:
             data = get_data(d)
-        except Exception:
+        except:
             continue
 
+        programs = data.get("programs", {})
         stadiums = (
-            data
-            .get("programs", {})
-            .get("stadiums", {})
+            list(programs.values())
+            if isinstance(programs, dict)
+            else programs
         )
 
-        for sno, stadium in stadiums.items():
+        for stadium in stadiums:
 
-            races = stadium.get("races", {})
+            sno = num(val(
+                stadium,
+                ["stadiumNumber", "stadium", "number"]
+            ))
 
-            for rno, race in races.items():
+            races = stadium.get("races", [])
+            if isinstance(races, dict):
+                races = list(races.values())
 
-                result = race.get("result", {})
+            for race in races:
 
-                result_racers = result.get(
-                    "racers",
-                    {},
+                rno = num(val(
+                    race,
+                    ["raceNumber", "race_no", "number"]
+                ))
+
+                entries = racers(
+                    race.get("racers")
+                    or race.get("entries")
+                    or race.get("entry")
+                    or []
                 )
 
-                places = {}
-
-                for x in racers(result_racers):
-
-                    place = str(
-                        x.get(
-                            "place_number",
-                            "",
-                        )
-                    )
-
-                    if place in ("1", "2", "3"):
-
-                        places[place] = str(
-                            x.get(
-                                "number",
-                                "",
-                            )
-                        )
-
-                if "1" not in places:
-                    continue
-
-                race_racers = race.get(
-                    "racers",
-                    {},
+                result = race.get("result") or {}
+                result_entries = racers(
+                    result.get("racers")
+                    or result.get("entries")
+                    or []
                 )
 
-                if not isinstance(
-                    race_racers,
-                    dict,
-                ):
-                    continue
+                # 選手番号→着順
+                finish = {}
 
-                for lane in range(1, 7):
-
-                    racer = race_racers.get(
-                        str(lane),
-                        {},
-                    )
-
-                    if not racer:
-                        continue
-
-                    number = str(
-                        racer.get(
+                for x in result_entries:
+                    no = val(
+                        x,
+                        [
+                            "racerNumber",
+                            "playerNumber",
                             "number",
-                            "",
-                        )
+                            "選手番号"
+                        ],
+                        None
+                    )
+                    place = val(
+                        x,
+                        [
+                            "place",
+                            "rank",
+                            "arrival",
+                            "着順"
+                        ],
+                        None
                     )
 
-                    if not number:
+                    try:
+                        finish[int(float(no))] = int(float(place))
+                    except:
+                        pass
+
+                for i, r in enumerate(entries):
+
+                    lane = num(val(
+                        r,
+                        [
+                            "entryNumber",
+                            "boatNumber",
+                            "courseNumber",
+                            "枠",
+                            "lane"
+                        ],
+                        i + 1
+                    ))
+
+                    no = val(
+                        r,
+                        [
+                            "racerNumber",
+                            "playerNumber",
+                            "number",
+                            "選手番号"
+                        ],
+                        None
+                    )
+
+                    if no is None:
                         continue
+
+                    try:
+                        no = int(float(no))
+                    except:
+                        continue
+
+                    # 展示データ
+                    p = r.get("preview") or race.get("preview") or {}
+
+                    if isinstance(p, list):
+                        p = next(
+                            (
+                                x for x in p
+                                if int(num(val(
+                                    x,
+                                    [
+                                        "racerNumber",
+                                        "playerNumber",
+                                        "number"
+                                    ],
+                                    -1
+                                ))) == no
+                            ),
+                            {}
+                        )
+
+                    place = finish.get(no, 99)
 
                     rows.append({
                         "日付": d,
-                        "場": int(sno),
-                        "レース": int(rno),
+                        "場": sno,
+                        "レース": rno,
                         "枠": lane,
-                        "選手番号": number,
-                        "1着": int(
-                            number == places.get("1")
-                        ),
-                        "2着": int(
-                            number == places.get("2")
-                        ),
-                        "3着": int(
-                            number == places.get("3")
-                        ),
+                        "展示進入": num(val(
+                            p,
+                            ["courseNumber", "entryNumber", "course"],
+                            lane
+                        )),
+                        "選手番号": no,
+
+                        "全国勝率": num(val(
+                            r,
+                            [
+                                "nationwideWinRate",
+                                "nationalWinRate",
+                                "winRate",
+                                "全国勝率"
+                            ]
+                        )),
+
+                        "全国2連率": num(val(
+                            r,
+                            [
+                                "nationwide2Rate",
+                                "national2Rate",
+                                "secondRate",
+                                "全国2連率"
+                            ]
+                        )),
+
+                        "当地勝率": num(val(
+                            r,
+                            [
+                                "localWinRate",
+                                "localRate",
+                                "当地勝率"
+                            ]
+                        )),
+
+                        "モーター2連率": num(val(
+                            r,
+                            [
+                                "motor2Rate",
+                                "motorSecondRate",
+                                "モーター2連率"
+                            ]
+                        )),
+
+                        "平均ST": num(val(
+                            r,
+                            [
+                                "averageST",
+                                "avgST",
+                                "averageStartTiming",
+                                "平均ST"
+                            ]
+                        )),
+
+                        "展示ST": num(val(
+                            p,
+                            [
+                                "startTiming",
+                                "exhibitionST",
+                                "st",
+                                "展示ST"
+                            ]
+                        )),
+
+                        "展示タイム": num(val(
+                            p,
+                            [
+                                "exhibitionTime",
+                                "time",
+                                "展示タイム"
+                            ]
+                        )),
+
+                        "1着": int(place == 1),
+                        "2着": int(place == 2),
+                        "3着": int(place == 3),
                     })
 
     return rows
 
 
-def normalize_combination(value):
-    if value is None:
-        return ""
-
-    text = str(value).strip()
-
-    text = (
-        text
-        .replace("→", "-")
-        .replace("－", "-")
-        .replace("—", "-")
-        .replace("–", "-")
-        .replace("=", "-")
-        .replace("＝", "-")
-        .replace(" ", "")
-        .replace("　", "")
-    )
-
-    match = re.search(
-        r"([1-6])[^1-6]*([1-6])[^1-6]*([1-6])",
-        text,
-    )
-
-    if match:
-
-        return (
-            f"{match.group(1)}-"
-            f"{match.group(2)}-"
-            f"{match.group(3)}"
-        )
-
-    digits = re.sub(
-        r"[^1-6]",
-        "",
-        text,
-    )
-
-    if len(digits) == 3:
-
-        return (
-            f"{digits[0]}-"
-            f"{digits[1]}-"
-            f"{digits[2]}"
-        )
-
-    return ""
-
-
-def parse_payout_amount(value):
-    if value is None:
-        return 0
-
-    if isinstance(value, bool):
-        return 0
-
-    try:
-
-        if isinstance(value, (int, float)):
-
-            return int(value)
-
-        text = (
-            str(value)
-            .strip()
-            .replace(",", "")
-            .replace("円", "")
-            .replace("¥", "")
-            .replace("￥", "")
-            .replace("　", "")
-            .replace(" ", "")
-        )
-
-        match = re.search(
-            r"\d+",
-            text,
-        )
-
-        if not match:
-            return 0
-
-        return int(
-            match.group()
-        )
-
-    except Exception:
-
-        return 0
-
-
-def find_trifecta_payout(result, actual):
-    actual = normalize_combination(actual)
-
-    if not actual:
-        return 0
-
-    payouts = result.get(
-        "payouts",
-        {},
-    )
-
-    if not isinstance(
-        payouts,
-        dict,
-    ):
-        return 0
-
-    trifecta = payouts.get(
-        "trifecta",
-        [],
-    )
-
-    if isinstance(
-        trifecta,
-        dict,
-    ):
-
-        trifecta = list(
-            trifecta.values()
-        )
-
-    if not isinstance(
-        trifecta,
-        list,
-    ):
-        trifecta = [trifecta]
-
-    for item in trifecta:
-
-        if not isinstance(
-            item,
-            dict,
-        ):
-            continue
-
-        combination = normalize_combination(
-            item.get(
-                "combination",
-                "",
-            )
-        )
-
-        if combination != actual:
-            continue
-
-        amount = parse_payout_amount(
-            item.get(
-                "amount",
-                0,
-            )
-        )
-
-        if amount > 0:
-            return amount
-
-    return 0
-
+# =========================================================
+# 過去レース確認
+# =========================================================
 
 @st.cache_data(ttl=1800)
 def backtest_races(start_date, days=14):
 
+    if isinstance(start_date, str):
+        start_date = date.fromisoformat(start_date)
+
     rows = []
 
-    for i in range(days):
+    for n in range(1, days + 1):
 
-        d = start_date - timedelta(days=i)
+        d = start_date - timedelta(days=n)
 
         if d < date(2026, 1, 1):
             continue
 
         try:
             data = get_data(d)
-        except Exception:
+        except:
             continue
 
+        programs = data.get("programs", {})
         stadiums = (
-            data
-            .get("programs", {})
-            .get("stadiums", {})
+            list(programs.values())
+            if isinstance(programs, dict)
+            else programs
         )
 
-        for sno, stadium in stadiums.items():
+        for stadium in stadiums:
 
-            races = stadium.get(
-                "races",
-                {},
+            sno = val(
+                stadium,
+                ["stadiumNumber", "stadium", "number"],
+                0
             )
 
-            for rno, race in races.items():
+            races = stadium.get("races", [])
+            if isinstance(races, dict):
+                races = list(races.values())
 
-                result = race.get(
-                    "result",
-                    {},
+            for race in races:
+
+                rno = val(
+                    race,
+                    ["raceNumber", "race_no", "number"],
+                    0
                 )
 
-                result_racers = result.get(
-                    "racers",
-                    {},
-                )
+                result = race.get("result") or {}
+                rr = racers(result.get("racers", []))
 
-                result_list = racers(
-                    result_racers
-                )
+                finish = {}
 
-                if len(result_list) < 3:
-                    continue
-
-                finishers = {}
-
-                for x in result_list:
-
-                    place = str(
-                        x.get(
-                            "place_number",
-                            "",
-                        )
+                for x in rr:
+                    place = val(
+                        x,
+                        ["place", "rank", "arrival", "着順"],
+                        None
+                    )
+                    lane = val(
+                        x,
+                        [
+                            "entryNumber",
+                            "boatNumber",
+                            "courseNumber",
+                            "枠",
+                            "lane"
+                        ],
+                        None
                     )
 
-                    if place not in (
-                        "1",
-                        "2",
-                        "3",
-                    ):
-                        continue
+                    try:
+                        finish[int(float(place))] = int(float(lane))
+                    except:
+                        pass
 
-                    course = str(
-                        x.get(
-                            "course_number",
-                            "",
-                        )
+                actual = None
+
+                if all(x in finish for x in [1, 2, 3]):
+                    actual = (
+                        f"{finish[1]}-"
+                        f"{finish[2]}-"
+                        f"{finish[3]}"
                     )
-
-                    number = str(
-                        x.get(
-                            "number",
-                            "",
-                        )
-                    )
-
-                    name = str(
-                        x.get(
-                            "name",
-                            "",
-                        )
-                    )
-
-                    if course not in (
-                        "1",
-                        "2",
-                        "3",
-                        "4",
-                        "5",
-                        "6",
-                    ):
-                        continue
-
-                    finishers[place] = {
-                        "course": course,
-                        "number": number,
-                        "name": name,
-                    }
-
-                if not all(
-                    p in finishers
-                    for p in (
-                        "1",
-                        "2",
-                        "3",
-                    )
-                ):
-                    continue
-
-                actual = (
-                    f"{finishers['1']['course']}-"
-                    f"{finishers['2']['course']}-"
-                    f"{finishers['3']['course']}"
-                )
-
-                payout = find_trifecta_payout(
-                    result,
-                    actual,
-                )
 
                 rows.append({
                     "日付": d,
-
-                    "場": int(sno),
-
-                    "レース": int(rno),
-
-                    "1着コース":
-                        finishers["1"]["course"],
-
-                    "1着選手":
-                        finishers["1"]["name"],
-
-                    "1着選手番号":
-                        finishers["1"]["number"],
-
-                    "2着コース":
-                        finishers["2"]["course"],
-
-                    "2着選手":
-                        finishers["2"]["name"],
-
-                    "2着選手番号":
-                        finishers["2"]["number"],
-
-                    "3着コース":
-                        finishers["3"]["course"],
-
-                    "3着選手":
-                        finishers["3"]["name"],
-
-                    "3着選手番号":
-                        finishers["3"]["number"],
-
-                    "実際の3連単":
-                        actual,
-
-                    "払戻金":
-                        payout,
+                    "場": sno,
+                    "レース": rno,
+                    "実際の3連単": actual,
+                    "払戻金": None,
                 })
 
     return rows
 
 
-def odds_url(td, sno, rno):
+# =========================================================
+# オッズ
+# =========================================================
+
+def odds_url(sno, rno, d):
+
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
 
     return (
-        "https://www.boatrace.jp/"
-        "owpc/pc/race/odds3t"
-        f"?rno={rno}"
-        f"&jcd={sno:02d}"
-        f"&hd={td:%Y%m%d}"
+        "https://www.boatrace.jp/owpc/pc/race/odds3tf"
+        f"?rno={rno}&jcd={int(sno):02d}&hd={d:%Y%m%d}"
     )
 
 
-def parse_odds(value):
-
-    if value is None:
-        return None
-
-    text = (
-        str(value)
-        .strip()
-        .replace(",", "")
-    )
-
-    if not re.search(
-        r"\d",
-        text,
-    ):
-        return None
-
-    match = re.search(
-        r"\d+(?:\.\d+)?",
-        text,
-    )
-
-    if not match:
-        return None
+def parse_odds(x):
 
     try:
         return float(
-            match.group()
+            str(x)
+            .replace("倍", "")
+            .replace(",", "")
+            .strip()
         )
-    except Exception:
+    except:
         return None
 
 
-def _cell_classes(cell):
-    return cell.get(
-        "class",
-        [],
-    )
+@st.cache_data(ttl=180)
+def get_odds(sno, rno, d):
 
-
-def _is_odds_cell(cell):
-    return (
-        "oddsPoint"
-        in _cell_classes(cell)
-    )
-
-
-def _expand_table(table):
-
-    rows = table.find_all("tr")
-
-    grid = []
-
-    occupied = {}
-
-    for r, tr in enumerate(rows):
-
-        row = []
-
-        cells = tr.find_all(
-            ["th", "td"],
-            recursive=False,
+    try:
+        r = session().get(
+            odds_url(sno, rno, d),
+            timeout=20
+        )
+        r.raise_for_status()
+    except:
+        return pd.DataFrame(
+            columns=["3連単", "オッズ"]
         )
 
-        col = 0
-
-        for cell in cells:
-
-            while (
-                r,
-                col,
-            ) in occupied:
-
-                row.append(
-                    occupied[
-                        (r, col)
-                    ]
-                )
-
-                col += 1
-
-            try:
-                rowspan = int(
-                    cell.get(
-                        "rowspan",
-                        "1",
-                    )
-                )
-            except Exception:
-                rowspan = 1
-
-            try:
-                colspan = int(
-                    cell.get(
-                        "colspan",
-                        "1",
-                    )
-                )
-            except Exception:
-                colspan = 1
-
-            for c in range(
-                colspan
-            ):
-
-                row.append(cell)
-
-                if rowspan > 1:
-
-                    for rr in range(
-                        1,
-                        rowspan,
-                    ):
-
-                        occupied[
-                            (
-                                r + rr,
-                                col + c,
-                            )
-                        ] = cell
-
-                col += 1
-
-        while (
-            r,
-            col,
-        ) in occupied:
-
-            row.append(
-                occupied[
-                    (r, col)
-                ]
-            )
-
-            col += 1
-
-        grid.append(row)
-
-    return grid
-
-
-def _find_odds_table(soup):
-
-    tables = soup.find_all(
-        "table"
+    soup = BeautifulSoup(
+        r.text,
+        "html.parser"
     )
 
-    for table in tables:
+    rows = []
 
-        odds_cells = table.find_all(
-            "td",
-            class_="oddsPoint",
-        )
-
-        if len(
-            odds_cells
-        ) != 120:
-            continue
+    for table in soup.find_all("table"):
 
         text = table.get_text(
             " ",
-            strip=True,
+            strip=True
         )
 
-        if "3連単" in text:
-            return table
-
-    div_tables = soup.find_all(
-        "div",
-        class_="table1",
-    )
-
-    for table in div_tables:
-
-        odds_cells = table.find_all(
-            "td",
-            class_="oddsPoint",
-        )
-
-        if len(
-            odds_cells
-        ) == 120:
-
-            return table
-
-    return None
-
-
-def _parse_official_odds_table(table):
-
-    grid = _expand_table(table)
-
-    if not grid:
-        return {}
-
-    data_rows = []
-
-    for row in grid:
-
-        if len(row) < 18:
+        if "3連単" not in text:
             continue
 
-        valid = True
+        for tr in table.find_all("tr"):
 
-        for block in range(6):
-
-            base = block * 3
-
-            second_cell = row[base]
-            third_cell = row[base + 1]
-            odds_cell = row[base + 2]
-
-            if (
-                second_cell is None
-                or third_cell is None
-                or odds_cell is None
-            ):
-
-                valid = False
-                break
-
-            if not _is_odds_cell(
-                odds_cell
-            ):
-
-                valid = False
-                break
-
-            odd = parse_odds(
-                odds_cell.get_text(
-                    " ",
-                    strip=True,
-                )
+            s = tr.get_text(
+                " ",
+                strip=True
             )
 
-            if odd is None:
-
-                valid = False
-                break
-
-        if valid:
-            data_rows.append(row)
-
-    if len(
-        data_rows
-    ) != 20:
-
-        return {}
-
-    result = {}
-
-    for row in data_rows:
-
-        for block in range(6):
-
-            first = block + 1
-
-            base = block * 3
-
-            second_cell = row[base]
-            third_cell = row[base + 1]
-            odds_cell = row[base + 2]
-
-            second_text = (
-                second_cell.get_text(
-                    " ",
-                    strip=True,
-                )
+            m = re.search(
+                r"([1-6])\s*-\s*([1-6])\s*-\s*([1-6])",
+                s
             )
 
-            third_text = (
-                third_cell.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            odds_text = (
-                odds_cell.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            second_match = re.search(
-                r"(?<!\d)([1-6])(?!\d)",
-                second_text,
-            )
-
-            third_match = re.search(
-                r"(?<!\d)([1-6])(?!\d)",
-                third_text,
-            )
-
-            odd = parse_odds(
-                odds_text
-            )
-
-            if (
-                second_match is None
-                or third_match is None
-                or odd is None
-            ):
+            if not m:
                 continue
 
-            second = int(
-                second_match.group(1)
+            nums = "-".join(m.groups())
+            values = re.findall(
+                r"\d+\.\d+",
+                s
             )
 
-            third = int(
-                third_match.group(1)
-            )
-
-            if len({
-                first,
-                second,
-                third,
-            }) != 3:
-
+            if not values:
                 continue
 
-            combination = (
-                f"{first}-"
-                f"{second}-"
-                f"{third}"
-            )
+            odds = parse_odds(values[-1])
 
-            result[
-                combination
-            ] = odd
+            if odds is not None:
+                rows.append({
+                    "3連単": nums,
+                    "オッズ": odds
+                })
 
-    if len(result) != 120:
-        return {}
+        if rows:
+            break
 
-    return result
-
-
-@st.cache_data(ttl=20)
-def get_odds(td, sno, rno):
-
-    url = odds_url(
-        td,
-        sno,
-        rno,
-    )
-
-    session = make_session()
-
-    try:
-
-        response = session.get(
-            url,
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-    except Exception:
-
-        return {}
-
-    html = response.text
-
-    if (
-        "データがありません"
-        in html
-        or "中止"
-        in html
-    ):
-
-        return {}
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    table = _find_odds_table(
-        soup
-    )
-
-    if table is None:
-        return {}
-
-    result = (
-        _parse_official_odds_table(
-            table
-        )
-    )
-
-    if len(result) != 120:
-        return {}
-
-    return result
+    return pd.DataFrame(rows)
 
 
 def clear_odds_cache():
-
     try:
         get_odds.clear()
-    except Exception:
+    except:
         pass

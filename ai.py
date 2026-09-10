@@ -41,7 +41,7 @@ def _norm(series, higher=True):
 
 def _prepare(df):
     """
-    AI計算用データを作成。
+    AI計算用データを作成する。
     """
 
     x = (
@@ -76,7 +76,7 @@ def _prepare(df):
         x["local_top_3_percent"]
     )
 
-    # モーター・ボート
+    # モーター
     x["motor2"] = _norm(
         x["motor_top_2_percent"]
     )
@@ -85,6 +85,7 @@ def _prepare(df):
         x["motor_top_3_percent"]
     )
 
+    # ボート
     x["boat2"] = _norm(
         x["boat_top_2_percent"]
     )
@@ -94,7 +95,6 @@ def _prepare(df):
     )
 
     # 平均ST
-    # STは小さいほど評価
     x["st"] = _norm(
         x["average_start_timing"],
         higher=False
@@ -136,7 +136,7 @@ def _prepare(df):
         x["boat"]
     )
 
-    # 1コースを最も高く評価
+    # 1コースを高評価
     x["course"] = (
         1.0
         - (course - 1.0) / 10.0
@@ -145,7 +145,10 @@ def _prepare(df):
         1.0
     )
 
+    # ------------------------------------------------
     # 1着評価
+    # ------------------------------------------------
+
     x["first_score"] = (
         0.24 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -158,7 +161,10 @@ def _prepare(df):
         + 0.06 * x["course"]
     )
 
+    # ------------------------------------------------
     # 2着評価
+    # ------------------------------------------------
+
     x["second_score"] = (
         0.18 * x["top2_n"]
         + 0.14 * x["top2_l"]
@@ -170,7 +176,10 @@ def _prepare(df):
         + 0.10 * x["st"]
     )
 
+    # ------------------------------------------------
     # 3着評価
+    # ------------------------------------------------
+
     x["third_score"] = (
         0.18 * x["top3_n"]
         + 0.14 * x["top3_l"]
@@ -187,13 +196,16 @@ def _prepare(df):
 
 def _softmax(values, temperature=0.10):
     """
-    スコアを確率へ変換。
+    スコアを確率に変換する。
     """
 
     values = np.asarray(
         values,
         dtype=float
     )
+
+    if len(values) == 0:
+        return np.array([])
 
     temperature = max(
         float(temperature),
@@ -222,10 +234,10 @@ def _softmax(values, temperature=0.10):
 
 def combo_text(combo):
     """
-    3連単の組み合わせを表示用文字列に変換。
+    3連単を表示用文字列に変換。
 
     例:
-    (1, 2, 3) → "1-2-3"
+    (1, 2, 3) -> "1-2-3"
     """
 
     if combo is None:
@@ -237,16 +249,9 @@ def combo_text(combo):
     )
 
 
-def predict(df):
+def _validate_df(df):
     """
-    6艇の出走表から3連単3点を予想する。
-
-    本線・対抗・穴の3点だけを返す。
-
-    重要:
-    comboは必ず1〜6号艇の数字。
-    選手登録番号、モーター番号、
-    ボート番号は使用しない。
+    入力データを安全確認する。
     """
 
     if not isinstance(
@@ -308,9 +313,33 @@ def predict(df):
             "艇番が1〜6になっていません。"
         )
 
+
+def predict(df):
+    """
+    6艇の出走表から3連単3点を予想する。
+
+    今回の改善点:
+
+    1. 最有力軸と本線1着を一致させる
+    2. 本線・対抗は軸を中心に組み立てる
+    3. 穴は別1着展開を優先する
+    4. 3点が同じような組み合わせになりすぎないようにする
+    5. comboは必ず1〜6号艇
+    6. combo_textとの互換性を維持
+    """
+
+    # ------------------------------------------------
+    # 入力確認
+    # ------------------------------------------------
+
+    _validate_df(df)
+
+    # ------------------------------------------------
+    # AI用データ
+    # ------------------------------------------------
+
     x = _prepare(df)
 
-    # 念のため最後にも確認
     if set(
         x["boat"].astype(int)
     ) != set(BOATS):
@@ -339,7 +368,73 @@ def predict(df):
         )
     )
 
-    # 全120通りの3連単を評価
+    # ------------------------------------------------
+    # まず1着候補を決める
+    # ------------------------------------------------
+
+    first_prob_values = _softmax(
+        [
+            first_score[b]
+            for b in BOATS
+        ],
+        temperature=0.10
+    )
+
+    first_ranking = sorted(
+        zip(
+            BOATS,
+            first_prob_values
+        ),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    # 最有力軸
+    axis = int(
+        first_ranking[0][0]
+    )
+
+    # 1着候補2位
+    second_first_boat = int(
+        first_ranking[1][0]
+    )
+
+    # 1着候補3位
+    third_first_boat = int(
+        first_ranking[2][0]
+    )
+
+    # ------------------------------------------------
+    # 1着軸の信頼度関連
+    # ------------------------------------------------
+
+    axis_top3 = sum(
+        prob
+        for _, prob
+        in first_ranking[:3]
+    )
+
+    margin = (
+        first_ranking[0][1]
+        - first_ranking[1][1]
+    )
+
+    # 表示上の信頼度。
+    # 95%を超えないようにする。
+    confidence = min(
+        95.0,
+        max(
+            55.0,
+            62.0 + margin * 220.0
+        )
+    )
+
+    # ------------------------------------------------
+    # 全120通りの3連単スコア
+    #
+    # ここでは確率計算用に全組み合わせを評価する。
+    # ------------------------------------------------
+
     combinations = []
 
     for a, b, c in itertools.permutations(
@@ -353,15 +448,34 @@ def predict(df):
             + 0.58 * third_score[c]
         )
 
-        # 1コースの基本的な優位性
+        # 1コースの優位性
         if a == 1:
             score += 0.055
+
         elif a == 2:
             score += 0.025
 
-        # 2着1号艇も少し評価
+        # 2着1号艇
         if b == 1:
             score += 0.020
+
+        # ------------------------------------------------
+        # 軸との整合性
+        #
+        # ここでは「軸だから必ず1着」という意味ではなく、
+        # 最有力軸を本線の1着候補として優先するための補正。
+        # ------------------------------------------------
+
+        if a == axis:
+            score += 0.065
+
+        # 軸が2着の場合も少し残す
+        if b == axis:
+            score += 0.018
+
+        # 軸が3着の場合も少し残す
+        if c == axis:
+            score += 0.008
 
         combinations.append(
             (
@@ -369,6 +483,10 @@ def predict(df):
                 float(score)
             )
         )
+
+    # ------------------------------------------------
+    # 全組み合わせの確率
+    # ------------------------------------------------
 
     raw_scores = np.array(
         [
@@ -403,121 +521,194 @@ def predict(df):
         reverse=True
     )
 
-    # 本線
-    main = ranked[0]
+    # ------------------------------------------------
+    # 軸を中心に2着・3着候補を評価
+    # ------------------------------------------------
 
+    same_axis_candidates = [
+        item
+        for item in ranked
+        if item[0][0] == axis
+    ]
+
+    # 念のため空にならないようにする
+    if not same_axis_candidates:
+        same_axis_candidates = ranked
+
+    # ------------------------------------------------
+    # 本線
+    #
+    # 軸を1着固定。
+    # 2着・3着は総合評価の高いもの。
+    # ------------------------------------------------
+
+    main = same_axis_candidates[0]
+
+    # ------------------------------------------------
     # 対抗
+    #
+    # 本線と1着は同じ軸。
+    # ただし2着・3着の組み合わせを変える。
+    # ------------------------------------------------
+
     counter = None
 
-    for item in ranked[1:]:
-        if item[0] != main[0]:
-            counter = item
-            break
-
-    if counter is None:
-        counter = ranked[1]
-
-    # 穴
-    # 本線・対抗とは違う1着艇を優先
-    hole = None
-
-    for item in ranked[1:]:
+    for item in same_axis_candidates[1:]:
 
         if item[0] == main[0]:
             continue
 
-        if item[0] == counter[0]:
-            continue
+        # 本線と少なくとも2着か3着が違う
+        if (
+            item[0][1] != main[0][1]
+            or item[0][2] != main[0][2]
+        ):
+            counter = item
+            break
 
-        hole = item
-        break
+    if counter is None:
+
+        for item in same_axis_candidates:
+
+            if item[0] != main[0]:
+                counter = item
+                break
+
+    if counter is None:
+        counter = main
+
+    # ------------------------------------------------
+    # 穴
+    #
+    # ここは別展開。
+    # 1着候補2位・3位を優先する。
+    #
+    # 「軸が絶対1着」ではないことを考慮し、
+    # 穴だけは軸以外の1着を許可する。
+    # ------------------------------------------------
+
+    hole = None
+
+    alternative_first_boats = [
+        second_first_boat,
+        third_first_boat,
+    ]
+
+    for alternative_boat in alternative_first_boats:
+
+        candidates = [
+            item
+            for item in ranked
+            if item[0][0] == alternative_boat
+        ]
+
+        for item in candidates:
+
+            combo = item[0]
+
+            # 本線・対抗と同一なら除外
+            if combo == main[0]:
+                continue
+
+            if combo == counter[0]:
+                continue
+
+            hole = item
+            break
+
+        if hole is not None:
+            break
+
+    # ------------------------------------------------
+    # 穴候補が取れない場合の安全処理
+    # ------------------------------------------------
 
     if hole is None:
 
-        for item in ranked[1:]:
+        for item in ranked:
+
+            if item[0] == main[0]:
+                continue
+
+            if item[0] == counter[0]:
+                continue
+
+            if item[0][0] == axis:
+                continue
+
+            hole = item
+            break
+
+    if hole is None:
+
+        for item in ranked:
 
             if item[0] != main[0]:
+
                 hole = item
                 break
 
     if hole is None:
         hole = ranked[2]
 
+    # ------------------------------------------------
+    # 3点
+    # ------------------------------------------------
+
     tickets = [
         {
             "label": "本線",
-            "combo": tuple(main[0]),
-            "prob": float(main[1]),
+            "combo": tuple(
+                int(x)
+                for x in main[0]
+            ),
+            "prob": float(
+                main[1]
+            ),
         },
         {
             "label": "対抗",
-            "combo": tuple(counter[0]),
-            "prob": float(counter[1]),
+            "combo": tuple(
+                int(x)
+                for x in counter[0]
+            ),
+            "prob": float(
+                counter[1]
+            ),
         },
         {
             "label": "穴",
-            "combo": tuple(hole[0]),
-            "prob": float(hole[1]),
+            "combo": tuple(
+                int(x)
+                for x in hole[0]
+            ),
+            "prob": float(
+                hole[1]
+            ),
         },
     ]
 
-    # 最有力軸
-    first_prob_values = _softmax(
-        [
-            first_score[b]
-            for b in BOATS
-        ],
-        temperature=0.10
-    )
-
-    first_ranking = sorted(
-        zip(
-            BOATS,
-            first_prob_values
-        ),
-        key=lambda item: item[1],
-        reverse=True
-    )
-
-    axis = int(
-        first_ranking[0][0]
-    )
-
-    axis_top3 = sum(
-        prob
-        for _, prob
-        in first_ranking[:3]
-    )
-
-    margin = (
-        first_ranking[0][1]
-        - first_ranking[1][1]
-    )
-
-    # 信頼度
-    confidence = min(
-        95.0,
-        max(
-            55.0,
-            62.0 + margin * 220.0
-        )
-    )
-
+    # ------------------------------------------------
     # 最終安全確認
+    # ------------------------------------------------
+
     for ticket in tickets:
 
         combo = ticket["combo"]
 
+        # 3連単であること
         if len(combo) != 3:
             raise ValueError(
                 "3連単の組み合わせが不正です。"
             )
 
+        # 同じ艇が重複していないこと
         if len(set(combo)) != 3:
             raise ValueError(
                 "3連単の艇番が重複しています。"
             )
 
+        # 1〜6号艇だけであること
         if not all(
             1 <= int(boat) <= 6
             for boat in combo
@@ -526,17 +717,61 @@ def predict(df):
                 "予想に1〜6以外の艇番が含まれています。"
             )
 
+    # 本線は必ず軸1着
+    if tickets[0]["combo"][0] != axis:
+        raise ValueError(
+            "本線の1着艇とAI最有力軸が一致していません。"
+        )
+
+    # 3点が完全に同一になっていないこと
+    combo_set = {
+        ticket["combo"]
+        for ticket in tickets
+    }
+
+    if len(combo_set) < 3:
+        # 万一同一組み合わせが発生した場合は
+        # ランキングから別候補を探す
+        for item in ranked:
+
+            candidate = tuple(
+                int(x)
+                for x in item[0]
+            )
+
+            if candidate in combo_set:
+                continue
+
+            if len(combo_set) >= 3:
+                break
+
+            tickets[-1]["combo"] = candidate
+            tickets[-1]["prob"] = float(
+                item[1]
+            )
+            combo_set.add(candidate)
+
+    # ------------------------------------------------
+    # 結果
+    # ------------------------------------------------
+
     return {
         "tickets": tickets,
+
         "ranking": ranked,
+
         "confidence": round(
             confidence,
             1
         ),
+
         "axis": axis,
+
         "axis_top3": float(
             axis_top3
         ),
+
         "all_combos": ranked,
+
         "df": x,
-        }
+    }

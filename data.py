@@ -44,19 +44,24 @@ HEADERS = {
 
 def _get(url):
     try:
+
         r = requests.get(
             url,
             headers=HEADERS,
             timeout=15,
         )
+
         r.raise_for_status()
+
         return r.text
+
     except Exception:
         return ""
 
 
 def _num(text):
     try:
+
         return float(
             str(text)
             .replace(",", "")
@@ -64,26 +69,35 @@ def _num(text):
             .replace("%", "")
             .strip()
         )
+
     except Exception:
         return 0.0
 
 
-def _boat_name(soup, boat):
+def _boat_name(
+    soup,
+    boat,
+):
     patterns = [
         f".boatColor{boat}",
         f".is-fs12.boatColor{boat}",
     ]
 
     for selector in patterns:
-        node = soup.select_one(selector)
+
+        node = soup.select_one(
+            selector
+        )
 
         if node:
+
             text = node.get_text(
                 " ",
                 strip=True,
             )
 
             if text:
+
                 text = re.sub(
                     r"\s+",
                     " ",
@@ -101,12 +115,26 @@ def get_race(
     venue,
     race_no,
 ):
-    venue_id = VENUES.get(venue)
+    """
+    公式BOATRACEから
+    レース情報を取得。
+
+    現在は安全性を優先し、
+    選手名＋基本コース情報を
+    AIへ渡す。
+    """
+
+    venue_id = VENUES.get(
+        venue
+    )
 
     if not venue_id:
         return None
 
-    hd = date.replace("-", "")
+    hd = date.replace(
+        "-",
+        "",
+    )
 
     url = (
         "https://www.boatrace.jp/"
@@ -129,21 +157,43 @@ def get_race(
     boats = []
 
     for boat in range(1, 7):
+
+        # --------------------------------
+        # 基本コーススコア
+        # --------------------------------
+        #
+        # 1号艇を最も高く、
+        # 内枠をやや有利にする。
+        #
+
+        course_scores = {
+            1: 7.0,
+            2: 5.2,
+            3: 4.6,
+            4: 4.0,
+            5: 3.5,
+            6: 3.0,
+        }
+
         boats.append(
             {
                 "boat": boat,
+
                 "name": _boat_name(
                     soup,
                     boat,
                 ),
+
+                # --------------------------------
+                # 将来拡張用の成績項目
+                # --------------------------------
+
                 "win_rate": 0.0,
                 "local_rate": 0.0,
                 "motor_rate": 0.0,
-                "course_score": (
-                    7.0
-                    if boat == 1
-                    else 4.0
-                ),
+
+                "course_score":
+                    course_scores[boat],
             }
         )
 
@@ -162,15 +212,21 @@ def get_race_result(
     race_no,
 ):
     """
-    公式BOATRACEのレース結果を取得。
-    戻り値:
-        {
-            "actual": (1, 2, 3),
-            "trifecta_payout": 12340
-        }
+    公式BOATRACEの
+    レース結果を取得。
+
+    actual:
+        (1, 2, 3)
+
+    trifecta_payout:
+        3連単払戻金額
+        例 12340
     """
 
-    hd = date.replace("-", "")
+    hd = date.replace(
+        "-",
+        "",
+    )
 
     url = (
         "https://www.boatrace.jp/"
@@ -190,16 +246,12 @@ def get_race_result(
         "html.parser",
     )
 
-    # -------------------------
+    # =================================
     # 着順
-    # -------------------------
+    # =================================
 
     actual = []
 
-    # 公式結果ページでは
-    # 着順欄に艇番が入っている。
-    #
-    # まず result系class を優先。
     selectors = [
         ".is-fs14",
         ".is-fs12",
@@ -209,11 +261,13 @@ def get_race_result(
     candidates = []
 
     for selector in selectors:
+
         candidates.extend(
             soup.select(selector)
         )
 
     for node in candidates:
+
         text = node.get_text(
             " ",
             strip=True,
@@ -223,6 +277,7 @@ def get_race_result(
             r"[1-6]",
             text,
         ):
+
             value = int(text)
 
             if value not in actual:
@@ -231,19 +286,22 @@ def get_race_result(
             if len(actual) == 3:
                 break
 
-    # HTML構造によって上記で取れない場合の
-    # フォールバック
+    # --------------------------------
+    # fallback
+    # --------------------------------
+
     if len(actual) < 3:
+
         text = soup.get_text(
             " ",
             strip=True,
         )
 
-        # 「1 2 3」のような並びを探す
         for m in re.finditer(
             r"\b([1-6])\b",
             text,
         ):
+
             value = int(
                 m.group(1)
             )
@@ -257,16 +315,20 @@ def get_race_result(
     if len(actual) < 3:
         return None
 
-    actual = tuple(actual[:3])
+    actual = tuple(
+        actual[:3]
+    )
 
-    # -------------------------
+    # =================================
     # 3連単払戻
-    # -------------------------
+    # =================================
 
     payout = 0
 
-    # まず払戻表を探す
-    for row in soup.find_all("tr"):
+    for row in soup.find_all(
+        "tr"
+    ):
+
         text = row.get_text(
             " ",
             strip=True,
@@ -275,8 +337,6 @@ def get_race_result(
         if "3連単" not in text:
             continue
 
-        # 例:
-        # 3連単 1-2-3 1,230円
         m = re.search(
             r"([1-6])\s*[-－]\s*"
             r"([1-6])\s*[-－]\s*"
@@ -295,19 +355,26 @@ def get_race_result(
         )
 
         if combo == actual:
+
             payout = int(
                 m.group(4).replace(
                     ",",
                     "",
                 )
             )
+
             break
 
-    # 別構造のフォールバック
+    # --------------------------------
+    # fallback payout
+    # --------------------------------
+
     if payout <= 0:
+
         for node in soup.select(
             ".is-payout1"
         ):
+
             text = node.get_text(
                 " ",
                 strip=True,
@@ -319,12 +386,14 @@ def get_race_result(
             )
 
             if m:
+
                 payout = int(
                     m.group(1).replace(
                         ",",
                         "",
                     )
                 )
+
                 break
 
     return {
@@ -341,14 +410,20 @@ def get_trifecta_odds(
     """
     公式3連単オッズを取得。
 
-    取得できた組み合わせを
-    {(1,2,3): 23.9, ...}
-    の形で返す。
+    戻り値:
+
+        {
+            (1,2,3): 23.9,
+            ...
+        }
 
     最大120通り。
     """
 
-    hd = date.replace("-", "")
+    hd = date.replace(
+        "-",
+        "",
+    )
 
     url = (
         "https://www.boatrace.jp/"
@@ -370,13 +445,14 @@ def get_trifecta_odds(
 
     odds = {}
 
-    # --------------------------------
-    # oddsPoint の親構造から取得
-    # --------------------------------
+    # =================================
+    # oddsPoint
+    # =================================
 
     for point in soup.select(
         "[class*='oddsPoint']"
     ):
+
         text = point.get_text(
             " ",
             strip=True,
@@ -397,10 +473,10 @@ def get_trifecta_odds(
         if odd <= 0:
             continue
 
-        # 親要素を数段確認
         parent = point
 
         for _ in range(4):
+
             if not parent:
                 break
 
@@ -417,16 +493,17 @@ def get_trifecta_odds(
                 ),
             )
 
-            # 重複を除いた艇番
             unique = []
 
             for n in nums:
+
                 n = int(n)
 
                 if n not in unique:
                     unique.append(n)
 
             if len(unique) >= 3:
+
                 combo = tuple(
                     unique[-3:]
                 )
@@ -435,33 +512,36 @@ def get_trifecta_odds(
                     len(set(combo)) == 3
                     and combo not in odds
                 ):
+
                     odds[combo] = odd
                     break
 
-    # --------------------------------
+    # =================================
     # テーブル解析
-    # --------------------------------
+    # =================================
 
     for table in soup.find_all(
         "table"
     ):
+
         first_boat = None
 
         for tr in table.find_all(
             "tr"
         ):
+
             row_text = tr.get_text(
                 " ",
                 strip=True,
             )
 
-            # 行頭の艇番
             m = re.match(
                 r"^\s*([1-6])(?:\s|$)",
                 row_text,
             )
 
             if m:
+
                 first_boat = int(
                     m.group(1)
                 )
@@ -474,6 +554,7 @@ def get_trifecta_odds(
             for cell in tr.find_all(
                 ["td", "th"]
             ):
+
                 text = cell.get_text(
                     " ",
                     strip=True,
@@ -482,12 +563,8 @@ def get_trifecta_odds(
                 if text:
                     cells.append(text)
 
-            # --------------------------------
-            # セルの中から
-            # 組み合わせ＋オッズを探す
-            # --------------------------------
-
             for cell in cells:
+
                 m = re.search(
                     r"([1-6])\s*[-－]\s*"
                     r"([1-6])\s*[-－]\s*"
@@ -496,21 +573,23 @@ def get_trifecta_odds(
                     cell,
                 )
 
-                if m:
-                    combo = (
-                        int(m.group(1)),
-                        int(m.group(2)),
-                        int(m.group(3)),
-                    )
+                if not m:
+                    continue
 
-                    odd = float(
-                        m.group(4)
-                    )
+                combo = (
+                    int(m.group(1)),
+                    int(m.group(2)),
+                    int(m.group(3)),
+                )
 
-                    if (
-                        len(set(combo)) == 3
-                        and odd > 0
-                    ):
-                        odds[combo] = odd
+                odd = float(
+                    m.group(4)
+                )
+
+                if (
+                    len(set(combo)) == 3
+                    and odd > 0
+                ):
+                    odds[combo] = odd
 
     return odds

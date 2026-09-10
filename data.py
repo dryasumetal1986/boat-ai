@@ -4,7 +4,10 @@ import streamlit as st
 from bs4 import BeautifulSoup
 
 
-API_BASE = "https://boatraceopenapi.github.io/api/v1"
+API_BASE = (
+    "https://boatraceopenapi.github.io/api/v1"
+)
+
 ODDS_URL = (
     "https://www.boatrace.jp/owpc/pc/race/odds3t"
     "?hd={date}&jcd={stadium:02d}&rno={race}"
@@ -40,8 +43,13 @@ STADIUMS = {
 
 
 def get_stadium_name(number):
+    try:
+        number = int(number)
+    except Exception:
+        return "不明"
+
     return STADIUMS.get(
-        int(number),
+        number,
         f"{number}場",
     )
 
@@ -52,6 +60,8 @@ def get_stadium_name(number):
 )
 def get_data(target_date):
     """
+    API v1から指定日のデータを取得。
+
     target_date:
         YYYYMMDD
     """
@@ -85,7 +95,12 @@ def get_data(target_date):
         if response.status_code != 200:
             return {}
 
-        return response.json()
+        data = response.json()
+
+        if not isinstance(data, dict):
+            return {}
+
+        return data
 
     except Exception:
         return {}
@@ -212,7 +227,9 @@ def all_races_for_date(raw):
 def _normalize_racers(racers):
     """
     API v1は
+
         {"1": {...}, "2": {...}}
+
     の辞書形式。
 
     念のためリスト形式にも対応。
@@ -223,10 +240,7 @@ def _normalize_racers(racers):
 
     result = []
 
-    if isinstance(
-        racers,
-        dict,
-    ):
+    if isinstance(racers, dict):
         iterable = racers.items()
     else:
         iterable = enumerate(
@@ -309,10 +323,7 @@ def get_actual_order(race):
 
     normalized = []
 
-    if isinstance(
-        racers,
-        dict,
-    ):
+    if isinstance(racers, dict):
         iterable = racers.items()
     else:
         iterable = enumerate(
@@ -375,9 +386,10 @@ def get_race_date(
     race,
     fallback="",
 ):
-    value = race.get(
-        "date"
-    )
+    if not race:
+        return fallback
+
+    value = race.get("date")
 
     if value:
         return str(value)
@@ -386,27 +398,35 @@ def get_race_date(
 
 
 def _parse_odds(text):
-    if not text:
+    if text is None:
         return None
 
     text = (
-        text.strip()
+        str(text)
+        .strip()
         .replace(",", "")
         .replace("倍", "")
+        .replace(" ", "")
     )
 
-    if text in [
+    if text in (
         "",
         "---",
         "－",
         "-",
         "欠場",
         "発売なし",
-    ]:
+    ):
         return None
 
     try:
-        return float(text)
+        value = float(text)
+
+        if value <= 0:
+            return None
+
+        return value
+
     except Exception:
         return None
 
@@ -423,25 +443,41 @@ def get_trifecta_odds(
     """
     BOATRACE公式3連単オッズ。
 
-    公式表は120個の数字を単純に
-    zipしてはいけない。
+    公式ページのHTMLから、
 
-    1着ごとに
-        2着 / 3着 / オッズ
-    が6組並ぶため、
-    HTMLの表構造から
-        (1着, 2着, 3着)
-    を復元する。
+        1着
+        2着
+        3着
+        オッズ
+
+    の対応関係を復元する。
+
+    戻り値:
+        {
+            (1, 2, 3): 12.3,
+            (1, 2, 4): 18.7,
+            ...
+        }
+
+    最大120通り。
     """
+
+    target_date = str(
+        target_date
+    )
+
+    stadium_number = int(
+        stadium_number
+    )
+
+    race_number = int(
+        race_number
+    )
 
     url = ODDS_URL.format(
         date=target_date,
-        stadium=int(
-            stadium_number
-        ),
-        race=int(
-            race_number
-        ),
+        stadium=stadium_number,
+        race=race_number,
     )
 
     try:
@@ -467,13 +503,17 @@ def get_trifecta_odds(
 
         odds = {}
 
+        # 公式3連単オッズ表では、
+        # 1つの行に6組の
+        # 「2着・3着・オッズ」
+        # が並ぶ。
         for tr in soup.select("tr"):
 
-            nodes = tr.select(
+            odds_nodes = tr.select(
                 "td.oddsPoint"
             )
 
-            if len(nodes) != 6:
+            if len(odds_nodes) != 6:
                 continue
 
             cells = tr.find_all("td")
@@ -489,14 +529,16 @@ def get_trifecta_odds(
                 for cell in cells
             ]
 
+            # 6組 × 3セル
             for first in range(1, 7):
 
                 base = (
                     first - 1
                 ) * 3
 
-                if base + 2 >= len(
-                    texts
+                if (
+                    base + 2
+                    >= len(texts)
                 ):
                     continue
 
@@ -523,6 +565,7 @@ def get_trifecta_odds(
                 except Exception:
                     continue
 
+                # 同一艇は3連単として無効
                 if len(
                     {
                         first,

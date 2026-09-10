@@ -1,5 +1,4 @@
 import streamlit as st
-
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -8,611 +7,260 @@ import backtest
 import data
 
 
-# =========================================================
-# 基本設定
-# =========================================================
+# =========================
+# 設定
+# =========================
 
 st.set_page_config(
     page_title="🚤 やっちゃんの競艇AI予想PRO",
     page_icon="🚤",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
-
-# =========================================================
-# CSS
-# =========================================================
-
-st.markdown(
-    """
-    <style>
-
-    .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 3rem;
-        max-width: 1200px;
-    }
-
-    h1 {
-        font-size: 1.8rem !important;
-    }
-
-    h2 {
-        font-size: 1.35rem !important;
-    }
-
-    h3 {
-        font-size: 1.15rem !important;
-    }
-
-    .metric-card {
-        border: 1px solid rgba(128,128,128,0.25);
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 10px;
-        text-align: center;
-    }
-
-    .boat-card {
-        border: 1px solid rgba(128,128,128,0.25);
-        border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 8px;
-    }
-
-    .result-card {
-        border: 1px solid rgba(128,128,128,0.22);
-        border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 10px;
-    }
-
-    .small-text {
-        font-size: 0.82rem;
-        opacity: 0.75;
-    }
-
-    .big-number {
-        font-size: 1.5rem;
-        font-weight: 700;
-    }
-
-    @media (max-width: 640px) {
-
-        .block-container {
-            padding-left: 0.7rem;
-            padding-right: 0.7rem;
-            padding-top: 0.7rem;
-        }
-
-        h1 {
-            font-size: 1.45rem !important;
-        }
-
-        h2 {
-            font-size: 1.2rem !important;
-        }
-
-        .metric-card {
-            padding: 10px;
-        }
-
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<style>
+.block-container{padding-top:1rem;max-width:1100px}
+.card{border:1px solid #ddd;border-radius:12px;padding:12px;margin:6px 0}
+.big{font-size:1.4rem;font-weight:bold}
+@media(max-width:640px){
+.block-container{padding:8px}
+}
+</style>
+""", unsafe_allow_html=True)
 
 
-# =========================================================
-# Session State
-# =========================================================
+# =========================
+# Session
+# =========================
 
-if "prediction" not in st.session_state:
-    st.session_state.prediction = None
-
-if "prediction_meta" not in st.session_state:
-    st.session_state.prediction_meta = None
-
-if "backtest_result" not in st.session_state:
-    st.session_state.backtest_result = None
-
-if "backtest_page" not in st.session_state:
-    st.session_state.backtest_page = 0
-
-if "backtest_page_size" not in st.session_state:
-    st.session_state.backtest_page_size = 10
-
-if "scroll_to_backtest" not in st.session_state:
-    st.session_state.scroll_to_backtest = False
+for key, default in {
+    "prediction": None,
+    "prediction_meta": None,
+    "backtest_result": None,
+    "backtest_page": 0,
+    "scroll_backtest": False,
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
-# =========================================================
+# =========================
 # 日付
-# =========================================================
+# =========================
 
-JST = ZoneInfo(
-    "Asia/Tokyo"
-)
+now = datetime.now(ZoneInfo("Asia/Tokyo"))
+today = now.strftime("%Y%m%d")
 
-now_jst = datetime.now(JST)
-
-today_jst = now_jst.strftime(
-    "%Y%m%d"
-)
-
-today_display = now_jst.strftime(
-    "%Y/%m/%d"
-)
-
-
-# =========================================================
-# タイトル
-# =========================================================
-
-st.title(
-    "🚤 やっちゃんの競艇AI予想PRO"
-)
-
+st.title("🚤 やっちゃんの競艇AI予想PRO")
 st.caption(
-    f"AI予想・公式3連単オッズ・EV分析・バックテスト | {today_display}"
+    f"AI予想・公式3連単オッズ・EV分析・バックテスト｜"
+    f"{now:%Y/%m/%d}"
 )
 
 
-# =========================================================
+# =========================
 # レース選択
-# =========================================================
+# =========================
 
-st.subheader(
-    "🎯 レース選択"
-)
+raw = data.get_data(today)
+rows = data.get_race_rows(raw)
 
-raw_today = data.get_data(
-    today_jst
-)
-
-race_rows = data.get_race_rows(
-    raw_today
-)
-
-stadium_options = [
-    (
-        row["stadium_number"],
-        row["stadium"],
-    )
-    for row in race_rows
-]
-
-# 重複除去
-stadium_options = list(
-    dict.fromkeys(
-        stadium_options
-    )
-)
-
-if not stadium_options:
-
-    st.warning(
-        "本日のレースデータを取得できませんでした。"
-    )
-
+if not rows:
+    st.warning("本日のレースデータを取得できませんでした。")
     st.stop()
 
+stadiums = list(dict.fromkeys(
+    (x["stadium_number"], x["stadium"]) for x in rows
+))
 
-col1, col2 = st.columns(
-    2
-)
+c1, c2 = st.columns(2)
 
-with col1:
-
-    stadium_label = st.selectbox(
+with c1:
+    stadium_text = st.selectbox(
         "競艇場",
-        options=[
-            f"{number}: {name}"
-            for number, name
-            in stadium_options
-        ],
+        [f"{n}: {name}" for n, name in stadiums],
     )
 
-stadium_number = int(
-    stadium_label.split(":")[0]
+stadium_no = int(stadium_text.split(":")[0])
+stadium_name = data.get_stadium_name(stadium_no)
+
+race_numbers = sorted(
+    x["race_number"]
+    for x in rows
+    if x["stadium_number"] == stadium_no
 )
 
-stadium_name = data.get_stadium_name(
-    stadium_number
-)
-
-stadium_races = [
-    row["race_number"]
-    for row in race_rows
-    if row["stadium_number"]
-    == stadium_number
-]
-
-stadium_races.sort()
-
-
-with col2:
-
-    race_number = st.selectbox(
+with c2:
+    race_no = st.selectbox(
         "レース",
-        options=stadium_races,
+        race_numbers,
         format_func=lambda x: f"{x}R",
     )
 
 
-# =========================================================
-# AI予想ボタン
-# =========================================================
+# =========================
+# AI予想
+# =========================
 
 if st.button(
     "🤖 AI予想を実行",
     type="primary",
     use_container_width=True,
 ):
-
-    with st.spinner(
-        "レース情報・公式オッズを取得してAI分析中..."
-    ):
+    with st.spinner("AI分析中..."):
 
         race = data.get_race(
-            raw_today,
-            stadium_number,
-            race_number,
+            raw,
+            stadium_no,
+            race_no,
         )
 
-        racers = data.get_race_racers(
-            race
-        )
+        racers = data.get_race_racers(race)
 
         odds = data.get_trifecta_odds(
-            today_jst,
-            stadium_number,
-            race_number,
+            today,
+            stadium_no,
+            race_no,
         )
 
-        prediction = ai.tri_ai(
+        st.session_state.prediction = ai.tri_ai(
             racers,
             odds=odds,
         )
 
-        st.session_state.prediction = (
-            prediction
+        st.session_state.prediction_meta = (
+            stadium_name,
+            race_no,
         )
 
-        st.session_state.prediction_meta = {
-            "stadium_number": stadium_number,
-            "stadium_name": stadium_name,
-            "race_number": race_number,
-        }
 
+# =========================
+# AI結果
+# =========================
 
-# =========================================================
-# AI予想表示
-# =========================================================
+p = st.session_state.prediction
 
-prediction = st.session_state.prediction
-prediction_meta = (
-    st.session_state.prediction_meta
-)
-
-if prediction:
+if p:
 
     st.divider()
+    st.subheader("🤖 AI予想")
 
-    st.subheader(
-        "🤖 AI予想"
-    )
+    main = p["main"]
+    counter = p["counter"]
+    hole = p["hole"]
 
-    main = prediction.get(
-        "main"
-    )
+    name, race_no = st.session_state.prediction_meta
 
-    counter = prediction.get(
-        "counter"
-    )
+    st.caption(f"📍 {name} {race_no}R")
 
-    hole = prediction.get(
-        "hole"
-    )
+    a, b, c = st.columns(3)
 
-    confidence = prediction.get(
-        "confidence",
-        0.55,
-    )
+    for col, label, boat in [
+        (a, "🔥 本命", main),
+        (b, "⚡ 対抗", counter),
+        (c, "💥 穴", hole),
+    ]:
+        with col:
+            st.markdown(
+                f'<div class="card">{label}'
+                f'<div class="big">{boat}号艇</div></div>',
+                unsafe_allow_html=True,
+            )
 
-    confidence_percent = (
-        confidence * 100
-    )
-
-    stars = (
-        "⭐"
-        * max(
-            1,
-            min(
-                5,
-                int(
-                    round(
-                        confidence_percent
-                        / 20
-                    )
-                ),
-            ),
-        )
-    )
-
-    if prediction_meta:
-
-        st.caption(
-            f"📍 {prediction_meta['stadium_name']} "
-            f"{prediction_meta['race_number']}R"
-        )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown(
-            f"""
-            <div class="boat-card">
-                <div>🔥 本命</div>
-                <div class="big-number">
-                    {main}号艇
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with c2:
-        st.markdown(
-            f"""
-            <div class="boat-card">
-                <div>⚡ 対抗</div>
-                <div class="big-number">
-                    {counter}号艇
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with c3:
-        st.markdown(
-            f"""
-            <div class="boat-card">
-                <div>💥 穴</div>
-                <div class="big-number">
-                    {hole}号艇
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    confidence = p["confidence"] * 100
+    stars = "⭐" * max(1, min(5, round(confidence / 20)))
 
     st.write(
-        f"AI信頼度 {stars} "
-        f"（{confidence_percent:.1f}%）"
+        f"AI信頼度 {stars}（{confidence:.1f}%）"
     )
 
 
-    # =====================================================
-    # 6艇1着確率
-    # =====================================================
+    # =====================
+    # 1着確率
+    # =====================
 
-    st.subheader(
-        "📊 6艇1着確率"
-    )
+    st.subheader("📊 6艇1着確率")
 
-    probabilities = prediction.get(
-        "probabilities",
-        {},
-    )
-
-    ranking = prediction.get(
-        "ranking",
-        [],
-    )
-
-    for boat in ranking:
-
-        probability = probabilities.get(
-            boat,
-            0.0,
-        )
+    for boat in p["ranking"]:
+        prob = p["probabilities"][boat]
 
         st.progress(
-            min(
-                1.0,
-                probability,
-            ),
-            text=(
-                f"{boat}号艇　"
-                f"{probability * 100:.3f}%"
-            ),
+            min(1.0, prob),
+            text=f"{boat}号艇　{prob * 100:.3f}%",
         )
 
 
-    # =====================================================
-    # 3連単EV
-    # =====================================================
+    # =====================
+    # EV
+    # =====================
 
     st.divider()
+    st.subheader("💰 3連単EV分析")
 
-    st.subheader(
-        "💰 3連単EV分析"
-    )
+    candidates = p["trifecta_candidates"]
 
-    candidates = prediction.get(
-        "trifecta_candidates",
-        [],
-    )
-
-    odds_available = prediction.get(
-        "odds_available",
-        False,
-    )
-
-    if not odds_available:
-
-        st.warning(
-            "公式3連単オッズを取得できませんでした。"
-        )
-
+    if not p["odds_available"]:
+        st.warning("公式3連単オッズを取得できませんでした。")
     else:
 
         st.success(
             f"公式3連単オッズ取得済み："
-            f"{len(prediction.get('odds', {}))}/120通り"
+            f"{len(p['odds'])}/120通り"
         )
 
         st.caption(
             "EV = AI確率 × 公式オッズ − 1"
-            "｜市場確率 = 1 ÷ 公式オッズ"
+            "｜市場確率 = 1 ÷ オッズ"
         )
 
-        for item in candidates[:8]:
+        for x in candidates[:8]:
 
-            combo = item[
-                "combination"
-            ]
-
-            odd = item[
-                "odds"
-            ]
-
-            probability = item[
-                "probability"
-            ]
-
-            market_probability = item[
-                "market_probability"
-            ]
-
-            ev_rate = item[
-                "ev_rate"
-            ]
-
-            edge = item[
-                "edge"
-            ]
-
-            combo_text = "-".join(
-                str(x)
-                for x in combo
+            combo = "-".join(
+                map(str, x["combination"])
             )
 
-            if odd is None:
-                continue
-
-            if ev_rate is None:
-                ev_text = "—"
-            else:
-                ev_text = (
-                    f"{ev_rate:+.1f}%"
-                )
-
-            if edge is None:
-                edge_text = "—"
-            else:
-                edge_text = (
-                    f"{edge * 100:+.3f}%"
-                )
-
-            market_text = (
-                f"{market_probability * 100:.3f}%"
-                if market_probability
-                is not None
-                else "—"
-            )
+            odd = x["odds"]
+            prob = x["probability"] * 100
+            market = x["market_probability"] * 100
+            ev = x["ev_rate"]
+            edge = x["edge"] * 100
 
             st.markdown(
                 f"""
-                <div class="result-card">
-                    <b>🎯 {combo_text}</b><br>
-                    オッズ：<b>{odd:g}倍</b><br>
-                    AI確率：
-                    <b>{probability * 100:.3f}%</b><br>
-                    市場確率：
-                    {market_text}<br>
-                    EV：
-                    <b>{ev_text}</b><br>
-                    Edge：
-                    {edge_text}
+                <div class="card">
+                <b>🎯 {combo}</b><br>
+                オッズ：<b>{odd:g}倍</b>　
+                AI確率：<b>{prob:.3f}%</b><br>
+                市場確率：{market:.3f}%　
+                EV：<b>{ev:+.1f}%</b>　
+                Edge：{edge:+.3f}%
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
 
-    # =====================================================
-    # AI検証指標
-    # =====================================================
-
-    st.divider()
-
-    st.subheader(
-        "📈 AI評価"
-    )
-
-    st.caption(
-        "バックテストと同じ判定基準で表示します。"
-    )
-
-    top3 = ranking[:3]
-
-    top3_text = (
-        "・".join(
-            f"{x}号艇"
-            for x in top3
-        )
-    )
-
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="small-text">
-                AI上位3艇
-            </div>
-            <div class="big-number">
-                {top3_text}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# =========================================================
+# =========================
 # バックテスト
-# =========================================================
+# =========================
 
 st.divider()
 
 st.markdown(
-    '<div id="backtest-results-anchor"></div>',
+    '<div id="backtest-results"></div>',
     unsafe_allow_html=True,
 )
 
-st.subheader(
-    "📋 検証結果"
-)
+st.subheader("📋 検証結果")
 
 st.caption(
-    "当日を除外し、前日までの完了レースを "
+    "当日を除外し、前日までの完了レースを"
     "2026/01/01まで遡って検証します。"
 )
 
 count = st.selectbox(
     "検証レース数",
-    options=[
-        100,
-        300,
-        500,
-        1000,
-    ],
-    index=0,
+    [100, 300, 500, 1000],
 )
 
 if st.button(
@@ -620,401 +268,216 @@ if st.button(
     use_container_width=True,
 ):
 
-    st.session_state.backtest_result = None
-    st.session_state.backtest_page = 0
-
     progress = st.progress(
-        0.0,
-        text="検証データを取得中..."
+        0,
+        text="検証中..."
     )
 
-    def update_progress(value):
+    def update(v):
         progress.progress(
-            float(value),
-            text=(
-                f"検証中... "
-                f"{value * 100:.0f}%"
-            ),
+            float(v),
+            text=f"検証中... {v * 100:.0f}%",
         )
 
-    result = backtest.run_backtest(
-        today_jst,
-        count,
-        progress_callback=update_progress,
-    )
-
-    progress.progress(
-        1.0,
-        text="検証完了"
-    )
-
     st.session_state.backtest_result = (
-        result
+        backtest.run_backtest(
+            today,
+            count,
+            progress_callback=update,
+        )
     )
 
     st.session_state.backtest_page = 0
-
-    st.session_state.scroll_to_backtest = True
+    st.session_state.scroll_backtest = True
 
     st.rerun()
 
 
-# =========================================================
+# =========================
 # バックテスト結果
-# =========================================================
+# =========================
 
-result = st.session_state.backtest_result
+r = st.session_state.backtest_result
 
-if result:
+if r and r["total"]:
 
-    total = result.get(
-        "total",
-        0,
+    # ---------------------
+    # 指標
+    # ---------------------
+
+    m1, m2 = st.columns(2)
+
+    m1.metric(
+        "本命1着率",
+        f"{r['main_win_rate']:.1f}%",
     )
 
-    if total == 0:
+    m2.metric(
+        "本命3連対率",
+        f"{r['main_top3_rate']:.1f}%",
+    )
 
-        st.warning(
-            "検証可能な完了レースがありませんでした。"
-        )
+    m3, m4 = st.columns(2)
 
-    else:
+    m3.metric(
+        "AI上位3艇 全艇3連対率",
+        f"{r['top3_all_top3_rate']:.1f}%",
+    )
 
-        # -------------------------------------------------
-        # 指標
-        # -------------------------------------------------
+    m4.metric(
+        "AI3連単完全的中率",
+        f"{r['trifecta_hit_rate']:.1f}%",
+    )
 
-        col1, col2 = st.columns(2)
+    m5, m6 = st.columns(2)
 
-        with col1:
+    m5.metric(
+        "回収率",
+        f"{r['recovery']:.1f}%",
+    )
 
-            st.metric(
-                "本命1着率",
-                f"{result['main_win_rate']:.1f}%",
+    m6.metric(
+        "検証レース数",
+        f"{r['total']}R",
+    )
+
+    st.write(
+        f"💰 投資額：{r['investment']:,}円　"
+        f"払戻：{r['payout']:,}円"
+    )
+
+    st.caption(
+        f"1レース{backtest.BET_AMOUNT}円｜"
+        "AI本命・対抗・穴の3連単1点｜当日除外"
+    )
+
+
+    # ---------------------
+    # 一覧
+    # ---------------------
+
+    results = r["results"]
+
+    page_size = 10
+    pages = max(
+        1,
+        (len(results) + page_size - 1)
+        // page_size,
+    )
+
+    page = min(
+        st.session_state.backtest_page,
+        pages - 1,
+    )
+
+    start = page * page_size
+    end = min(
+        start + page_size,
+        len(results),
+    )
+
+    st.markdown(
+        f"**{start + 1}～{end}件 / {len(results)}件**"
+    )
+
+    for x in results[start:end]:
+
+        date = x["date"]
+
+        if len(date) == 8:
+            date = (
+                f"{date[:4]}/{date[4:6]}/{date[6:]}"
             )
 
-        with col2:
-
-            st.metric(
-                "本命3連対率",
-                f"{result['main_top3_rate']:.1f}%",
-            )
-
-        col3, col4 = st.columns(2)
-
-        with col3:
-
-            st.metric(
-                "AI上位3艇 全艇3連対率",
-                f"{result['top3_all_top3_rate']:.1f}%",
-            )
-
-        with col4:
-
-            st.metric(
-                "AI3連単完全的中率",
-                f"{result['trifecta_hit_rate']:.1f}%",
-            )
-
-        col5, col6 = st.columns(2)
-
-        with col5:
-
-            st.metric(
-                "回収率",
-                f"{result['recovery']:.1f}%",
-            )
-
-        with col6:
-
-            st.metric(
-                "検証レース数",
-                f"{total}R",
-            )
-
-        st.write("")
-
-        col7, col8 = st.columns(2)
-
-        with col7:
-
-            st.metric(
-                "投資額",
-                f"{result['investment']:,}円",
-            )
-
-        with col8:
-
-            st.metric(
-                "払戻",
-                f"{result['payout']:,}円",
-            )
-
-
-        # -------------------------------------------------
-        # 検証条件
-        # -------------------------------------------------
-
-        st.caption(
-            f"1レース {backtest.BET_AMOUNT}円投資 "
-            f"｜ AI本命・対抗・穴の3連単1点"
-            f"｜ 当日除外"
-            f"｜ 前日から2026/01/01まで"
+        actual = "-".join(
+            map(str, x["actual"])
         )
 
-
-        # -------------------------------------------------
-        # ページング
-        # -------------------------------------------------
-
-        results = result.get(
-            "results",
-            [],
+        hit = (
+            "🎯 3連単完全的中"
+            if x["trifecta_hit"]
+            else "❌ 3連単不的中"
         )
-
-        page_size = (
-            st.session_state.backtest_page_size
-        )
-
-        total_pages = max(
-            1,
-            (
-                len(results)
-                + page_size
-                - 1
-            )
-            // page_size,
-        )
-
-        current_page = min(
-            st.session_state.backtest_page,
-            total_pages - 1,
-        )
-
-        st.session_state.backtest_page = (
-            current_page
-        )
-
-        start = (
-            current_page
-            * page_size
-        )
-
-        end = min(
-            start + page_size,
-            len(results),
-        )
-
-        page_results = results[
-            start:end
-        ]
 
         st.markdown(
-            f"**{start + 1}～{end}件 / "
-            f"{len(results)}件**"
+            f"""
+            <div class="card">
+            <b>{date} {x['stadium']} {x['race']}R</b><br>
+            🤖 AI：
+            🔥{x['main']}号艇　
+            ⚡{x['counter']}号艇　
+            💥{x['hole']}号艇<br>
+            🏁 結果：<b>{actual}</b><br>
+            {hit}　
+            📊 AI上位3艇：<b>{x['ai_top3_hit_count']}/3艇</b>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        # -------------------------------------------------
-        # 検証レース一覧
-        # -------------------------------------------------
 
-        for item in page_results:
+    # ---------------------
+    # ページ移動
+    # ---------------------
 
-            date_text = item[
-                "date"
-            ]
+    p1, p2, p3 = st.columns(3)
 
-            if len(date_text) == 8:
-                date_text = (
-                    f"{date_text[:4]}/"
-                    f"{date_text[4:6]}/"
-                    f"{date_text[6:8]}"
-                )
+    with p1:
+        if st.button(
+            "◀ 前へ",
+            disabled=page == 0,
+            use_container_width=True,
+        ):
+            st.session_state.backtest_page -= 1
+            st.session_state.scroll_backtest = True
+            st.rerun()
 
-            stadium = item[
-                "stadium"
-            ]
-
-            race_number = item[
-                "race"
-            ]
-
-            main = item[
-                "main"
-            ]
-
-            counter = item[
-                "counter"
-            ]
-
-            hole = item[
-                "hole"
-            ]
-
-            actual = item[
-                "actual"
-            ]
-
-            actual_text = "-".join(
-                str(x)
-                for x in actual
-            )
-
-            ai_top3_hit_count = item.get(
-                "ai_top3_hit_count",
-                0,
-            )
-
-            trifecta_hit = item.get(
-                "trifecta_hit",
-                False,
-            )
-
-            if trifecta_hit:
-                trifecta_text = (
-                    "🎯 3連単完全的中"
-                )
-            else:
-                trifecta_text = (
-                    "❌ 3連単不的中"
-                )
-
-            st.markdown(
-                f"""
-                <div class="result-card">
-
-                    <b>
-                        {date_text}
-                        {stadium}
-                        {race_number}R
-                    </b>
-
-                    <br><br>
-
-                    🤖 AI：
-                    <b>
-                        🔥{main}号艇
-                        ⚡{counter}号艇
-                        💥{hole}号艇
-                    </b>
-
-                    <br>
-
-                    🏁 結果：
-                    <b>{actual_text}</b>
-
-                    <br>
-
-                    {trifecta_text}
-
-                    <br>
-
-                    📊 AI上位3艇：
-                    <b>{ai_top3_hit_count}/3艇</b>
-                    が3連対
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-
-        # -------------------------------------------------
-        # ページ操作
-        # -------------------------------------------------
-
-        st.write("")
-
-        prev_col, page_col, next_col = st.columns(
-            [1, 1, 1]
+    with p2:
+        st.markdown(
+            f"<div style='text-align:center;padding:8px'>"
+            f"{page + 1} / {pages}</div>",
+            unsafe_allow_html=True,
         )
 
-        with prev_col:
-
-            if st.button(
-                "◀ 前へ",
-                disabled=current_page <= 0,
-                use_container_width=True,
-            ):
-
-                st.session_state.backtest_page = (
-                    current_page - 1
-                )
-
-                st.session_state.scroll_to_backtest = True
-
-                st.rerun()
-
-        with page_col:
-
-            st.markdown(
-                f"""
-                <div style="
-                    text-align:center;
-                    padding-top:8px;
-                ">
-                    {current_page + 1}
-                    / {total_pages}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with next_col:
-
-            if st.button(
-                "次へ ▶",
-                disabled=(
-                    current_page
-                    >= total_pages - 1
-                ),
-                use_container_width=True,
-            ):
-
-                st.session_state.backtest_page = (
-                    current_page + 1
-                )
-
-                st.session_state.scroll_to_backtest = True
-
-                st.rerun()
+    with p3:
+        if st.button(
+            "次へ ▶",
+            disabled=page >= pages - 1,
+            use_container_width=True,
+        ):
+            st.session_state.backtest_page += 1
+            st.session_state.scroll_backtest = True
+            st.rerun()
 
 
-        # -------------------------------------------------
-        # 自動スクロール
-        # -------------------------------------------------
+    # ---------------------
+    # 自動スクロール
+    # ---------------------
 
-        if st.session_state.scroll_to_backtest:
+    if st.session_state.scroll_backtest:
 
-            st.session_state.scroll_to_backtest = False
+        st.session_state.scroll_backtest = False
 
-            st.components.v1.html(
-                """
-                <script>
-                (function() {
+        st.components.v1.html(
+            """
+            <script>
+            let n = 0;
+            const timer = setInterval(() => {
+                const el =
+                    window.parent.document
+                    .getElementById("backtest-results");
 
-                    function scrollToResults() {
+                if (el) {
+                    el.scrollIntoView({
+                        behavior:"smooth",
+                        block:"start"
+                    });
+                    clearInterval(timer);
+                }
 
-                        try {
-
-                            const parentDoc =
-                                window.parent.document;
-
-                            const target =
-                                parentDoc.getElementById(
-                                    "backtest-results-anchor"
-                                );
-
-                            if (target) {
-
-                                target.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "start"
-                                });
-
-                                return true;
-                            }
-
-                        } catch (e) {}
-
-                  
+                if (++n > 20) clearInterval(timer);
+            }, 100);
+            </script>
+            """,
+            height=1,
+        )

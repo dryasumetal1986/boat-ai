@@ -60,21 +60,78 @@ def get_trifecta_payout(race, actual_order):
 
 
 # =========================================================
+# AIランキングを取得
+# スコアを優先して上位3艇を作る
+# =========================================================
+def get_ai_top3(ai_result):
+    scores = ai_result.get("scores", {})
+
+    if isinstance(scores, pd.Series):
+        scores = scores.to_dict()
+
+    if isinstance(scores, list):
+        converted = {}
+
+        for i, value in enumerate(scores):
+            try:
+                converted[i + 1] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+        scores = converted
+
+    if not isinstance(scores, dict):
+        scores = {}
+
+    ranking = []
+
+    for boat, score in scores.items():
+        try:
+            boat_no = int(boat)
+            score_value = float(score)
+        except (TypeError, ValueError):
+            continue
+
+        if 1 <= boat_no <= 6:
+            ranking.append(
+                (
+                    boat_no,
+                    score_value,
+                )
+            )
+
+    ranking.sort(
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    return [
+        boat
+        for boat, _ in ranking[:3]
+    ]
+
+
+# =========================================================
 # AIランキングを正規化
+# 表示用
 # =========================================================
 def normalize_ranking(result):
     ranking = result.get("ranking", [])
 
     if isinstance(ranking, pd.DataFrame):
-        ranking = ranking.to_dict("records")
+        ranking = ranking.to_dict(
+            "records"
+        )
 
     if not isinstance(ranking, list):
-        return []
+        ranking = []
 
     output = []
 
     for item in ranking:
+
         if isinstance(item, dict):
+
             boat = (
                 item.get("艇")
                 or item.get("艇番")
@@ -87,53 +144,159 @@ def normalize_ranking(result):
 
             try:
                 boat = int(boat)
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
             if 1 <= boat <= 6:
                 output.append(boat)
 
         else:
+
             try:
                 boat = int(item)
 
                 if 1 <= boat <= 6:
                     output.append(boat)
 
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 pass
 
-    return list(dict.fromkeys(output))
+    return list(
+        dict.fromkeys(output)
+    )
+
+
+# =========================================================
+# 本命・対抗・穴を別艇にする
+# =========================================================
+def normalize_picks(
+    main,
+    counter,
+    hole,
+    ai_top3,
+):
+    used = []
+
+    # 本命
+    if main in range(1, 7):
+        used.append(main)
+
+    # 対抗
+    if (
+        counter in range(1, 7)
+        and counter not in used
+    ):
+        used.append(counter)
+
+    else:
+        for boat in ai_top3:
+            if boat not in used:
+                counter = boat
+                used.append(boat)
+                break
+
+    # 穴
+    if (
+        hole in range(1, 7)
+        and hole not in used
+    ):
+        used.append(hole)
+
+    else:
+        for boat in ai_top3:
+            if boat not in used:
+                hole = boat
+                used.append(boat)
+                break
+
+    # 万一まだ重複する場合
+    for boat in range(1, 7):
+        if boat not in used:
+            if hole in used:
+                hole = boat
+            elif counter in used:
+                counter = boat
+
+            break
+
+    return (
+        int(main),
+        int(counter),
+        int(hole),
+    )
 
 
 # =========================================================
 # AI買い目
 # 本命・対抗・穴の6通り
 # =========================================================
-def make_ai_bets(main, counter, hole):
+def make_ai_bets(
+    main,
+    counter,
+    hole,
+):
     candidates = [
-        (main, counter, hole),
-        (main, hole, counter),
-        (counter, main, hole),
-        (counter, hole, main),
-        (hole, main, counter),
-        (hole, counter, main),
+        (
+            main,
+            counter,
+            hole,
+        ),
+        (
+            main,
+            hole,
+            counter,
+        ),
+        (
+            counter,
+            main,
+            hole,
+        ),
+        (
+            counter,
+            hole,
+            main,
+        ),
+        (
+            hole,
+            main,
+            counter,
+        ),
+        (
+            hole,
+            counter,
+            main,
+        ),
     ]
 
-    return list(dict.fromkeys(candidates))
+    return list(
+        dict.fromkeys(candidates)
+    )
 
 
 # =========================================================
 # 1レース分析
 # =========================================================
-def analyze_race(stadium_no, race_no, race):
+def analyze_race(
+    stadium_no,
+    race_no,
+    race,
+):
     rows = data.get_race_rows(race)
 
     # DataFrame / list 両対応
     if rows is None:
         return None
 
-    if isinstance(rows, pd.DataFrame):
+    if isinstance(
+        rows,
+        pd.DataFrame,
+    ):
         if rows.empty:
             return None
     else:
@@ -164,34 +327,95 @@ def analyze_race(stadium_no, race_no, race):
     except Exception:
         return None
 
-    main = ai_result.get("main")
-    counter = ai_result.get("counter")
-    hole = ai_result.get("hole")
-
+    # -----------------------------------------------------
+    # 本命・対抗・穴
+    # -----------------------------------------------------
     try:
-        main = int(main)
-        counter = int(counter)
-        hole = int(hole)
+        main = int(
+            ai_result.get("main")
+        )
 
-    except (TypeError, ValueError):
+        counter = int(
+            ai_result.get("counter")
+        )
+
+        hole = int(
+            ai_result.get("hole")
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
         return None
 
-    actual_order = get_actual_order(race)
+    # -----------------------------------------------------
+    # AIスコアから上位3艇を取得
+    # -----------------------------------------------------
+    ai_top3 = get_ai_top3(
+        ai_result
+    )
+
+    # スコアが取得できない場合のみ
+    # rankingを補助的に使用
+    if len(ai_top3) < 3:
+        ranking = normalize_ranking(
+            ai_result
+        )
+
+        for boat in ranking:
+            if boat not in ai_top3:
+                ai_top3.append(boat)
+
+            if len(ai_top3) >= 3:
+                break
+
+    # -----------------------------------------------------
+    # 本命・対抗・穴を別艇にする
+    # -----------------------------------------------------
+    main, counter, hole = (
+        normalize_picks(
+            main,
+            counter,
+            hole,
+            ai_top3,
+        )
+    )
+
+    # -----------------------------------------------------
+    # 実着順
+    # -----------------------------------------------------
+    actual_order = get_actual_order(
+        race
+    )
 
     if len(actual_order) < 3:
         return None
 
+    # -----------------------------------------------------
+    # 払戻
+    # -----------------------------------------------------
     payout = get_trifecta_payout(
         race,
         actual_order,
     )
 
-    ranking = normalize_ranking(
-        ai_result
+    # -----------------------------------------------------
+    # AI上位3艇が実際の3着以内に
+    # 1艇でも入っているか
+    # -----------------------------------------------------
+    actual_top3 = set(
+        actual_order[:3]
     )
 
-    top3 = ranking[:3]
+    ai_top3_hit = any(
+        boat in actual_top3
+        for boat in ai_top3
+    )
 
+    # -----------------------------------------------------
+    # AI買い目
+    # -----------------------------------------------------
     ai_bets = make_ai_bets(
         main,
         counter,
@@ -206,21 +430,22 @@ def analyze_race(stadium_no, race_no, race):
         actual_trifecta in ai_bets
     )
 
+    # -----------------------------------------------------
+    # 本命成績
+    # -----------------------------------------------------
     main_win = (
         actual_order[0] == main
     )
 
     main_top3 = (
-        main in actual_order[:3]
-    )
-
-    ai_top3_hit = any(
-        boat in actual_order[:3]
-        for boat in top3
+        main in actual_top3
     )
 
     return {
-        "日付": race.get("date", ""),
+        "日付": race.get(
+            "date",
+            "",
+        ),
         "場": data.stadium_name(
             stadium_no
         ),
@@ -246,9 +471,11 @@ def analyze_race(stadium_no, race_no, race):
 # 指定日の全開催レース取得
 # =========================================================
 def get_completed_races_for_date(
-    target_date
+    target_date,
 ):
-    raw = data.get_data(target_date)
+    raw = data.get_data(
+        target_date
+    )
 
     if not raw:
         return []
@@ -364,7 +591,9 @@ def calculate_metrics(df):
 
     # 1レース6点買い × 100円
     investment = (
-        race_count * 6 * 100
+        race_count
+        * 6
+        * 100
     )
 
     payout = int(
@@ -381,11 +610,13 @@ def calculate_metrics(df):
     )
 
     main_win_rate = (
-        df["本命1着"].mean() * 100
+        df["本命1着"].mean()
+        * 100
     )
 
     main_top3_rate = (
-        df["本命3連対"].mean() * 100
+        df["本命3連対"].mean()
+        * 100
     )
 
     ai_top3_rate = (
@@ -394,7 +625,8 @@ def calculate_metrics(df):
     )
 
     ai_hit_rate = (
-        df["AI買い的中"].mean() * 100
+        df["AI買い的中"].mean()
+        * 100
     )
 
     perfect_rate = ai_hit_rate
@@ -422,8 +654,11 @@ def show_result_cards(df):
     total_pages = max(
         1,
         (
-            len(df) + PAGE_SIZE - 1
-        ) // PAGE_SIZE,
+            len(df)
+            + PAGE_SIZE
+            - 1
+        )
+        // PAGE_SIZE,
     )
 
     if (
@@ -446,7 +681,10 @@ def show_result_cards(df):
         ),
     )
 
-    start = page * PAGE_SIZE
+    start = (
+        page
+        * PAGE_SIZE
+    )
 
     end = min(
         start + PAGE_SIZE,
@@ -480,15 +718,24 @@ def show_result_cards(df):
     for _, row in page_df.iterrows():
 
         date_text = str(
-            row.get("日付", "")
+            row.get(
+                "日付",
+                "",
+            )
         )
 
         stadium = str(
-            row.get("場", "")
+            row.get(
+                "場",
+                "",
+            )
         )
 
         race_no = str(
-            row.get("R", "")
+            row.get(
+                "R",
+                "",
+            )
         )
 
         main = row.get(
@@ -580,7 +827,9 @@ def show_result_cards(df):
 
             if st.button(
                 "◀ 前へ",
-                disabled=(page <= 0),
+                disabled=(
+                    page <= 0
+                ),
                 use_container_width=True,
                 key="backtest_prev",
             ):
@@ -600,8 +849,8 @@ def show_result_cards(df):
             if st.button(
                 "次へ ▶",
                 disabled=(
-                    page >=
-                    total_pages - 1
+                    page
+                    >= total_pages - 1
                 ),
                 use_container_width=True,
                 key="backtest_next",
@@ -661,7 +910,7 @@ def show_result_cards(df):
 # バックテスト画面
 # =========================================================
 def render_backtest(
-    stadium_no=None
+    stadium_no=None,
 ):
     st.divider()
 
@@ -754,60 +1003,4 @@ def render_backtest(
         return
 
     st.write(
-        f"**{len(df)} / "
-        f"{len(df)} レース**"
-    )
-
-    # =====================================================
-    # 指標
-    # =====================================================
-    metrics = calculate_metrics(
-        df
-    )
-
-    st.metric(
-        "💰 回収率",
-        f"{metrics['roi']:.1f}%",
-    )
-
-    st.metric(
-        "🎯 本命1着率",
-        f"{metrics['main_win_rate']:.1f}%",
-    )
-
-    st.metric(
-        "🎯 本命3連対率",
-        f"{metrics['main_top3_rate']:.1f}%",
-    )
-
-    st.metric(
-        "🔥 AI買い的中率",
-        f"{metrics['ai_hit_rate']:.1f}%",
-    )
-
-    st.write(
-        f"投資金額 "
-        f"**{metrics['investment']:,}円**"
-    )
-
-    st.write(
-        f"払戻金額 "
-        f"**{metrics['payout']:,}円**"
-    )
-
-    st.write(
-        f"AI上位3艇3連対 "
-        f"**{metrics['ai_top3_rate']:.1f}%**"
-    )
-
-    st.write(
-        f"3連単完全的中率 "
-        f"**{metrics['perfect_rate']:.1f}%**"
-    )
-
-    # =====================================================
-    # 検証結果
-    # =====================================================
-    show_result_cards(
-        df
-    )
+   

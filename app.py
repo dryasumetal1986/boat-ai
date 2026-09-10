@@ -7,6 +7,10 @@ from ai import predict_race, value_candidates
 from backtest import run_backtest, TARGET_RACES
 
 
+# =========================
+# 基本設定
+# =========================
+
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想PRO",
     page_icon="🚤",
@@ -21,35 +25,55 @@ def today_jst():
     return datetime.now(JST).date()
 
 
-def scroll_results():
+# =========================
+# 自動スクロール
+# =========================
+
+def scroll_to_results():
+
     components.html(
         """
         <script>
-        function go(){
+        function scrollToResults(){
+
             try{
-                const e = window.parent.document.getElementById(
-                    "backtest-results-anchor"
-                );
-                if(e){
-                    e.scrollIntoView({
-                        behavior:"smooth",
-                        block:"start"
+
+                const parentDoc =
+                    window.parent.document;
+
+                const target =
+                    parentDoc.getElementById(
+                        "backtest-results-anchor"
+                    );
+
+                if(target){
+
+                    target.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start"
                     });
+
+                    return true;
                 }
-            }catch(x){}
+
+            }catch(e){}
+
+            return false;
         }
 
-        setTimeout(go,250);
-        setTimeout(go,800);
+        setTimeout(scrollToResults, 100);
+        setTimeout(scrollToResults, 400);
+        setTimeout(scrollToResults, 800);
+        setTimeout(scrollToResults, 1500);
         </script>
         """,
         height=1,
     )
 
 
-# -------------------------
-# 初期化
-# -------------------------
+# =========================
+# Session State
+# =========================
 
 if "prediction" not in st.session_state:
     st.session_state.prediction = None
@@ -60,27 +84,36 @@ if "backtest" not in st.session_state:
 if "bt_page" not in st.session_state:
     st.session_state.bt_page = 1
 
-if "scroll" not in st.session_state:
-    st.session_state.scroll = False
+if "scroll_results" not in st.session_state:
+    st.session_state.scroll_results = False
 
 
-# -------------------------
+# =========================
 # タイトル
-# -------------------------
+# =========================
 
-st.title("🚤 やっちゃんの競艇AI予想PRO")
+st.title(
+    "🚤 やっちゃんの競艇AI予想PRO"
+)
 
-st.caption("AI予想 × 実オッズ × 期待値分析")
+st.caption(
+    "AI予想 × 実オッズ × 期待値分析"
+)
 
 
-# -------------------------
-# レース選択
-# -------------------------
+# =========================
+# 開催場
+# =========================
 
 venue = st.selectbox(
     "開催場",
     list(VENUES.keys()),
 )
+
+
+# =========================
+# レース
+# =========================
 
 race_no = st.selectbox(
     "レース",
@@ -89,9 +122,9 @@ race_no = st.selectbox(
 )
 
 
-# -------------------------
+# =========================
 # AI予想開始
-# -------------------------
+# =========================
 
 if st.button(
     "🚀 AI予想開始",
@@ -100,52 +133,98 @@ if st.button(
 
     date_str = today_jst().isoformat()
 
-    race = get_race(
-        date_str,
-        venue,
-        race_no,
-    )
+    # ローディング表示
+    with st.status(
+        "🤖 AI予想を開始しています…",
+        expanded=True,
+    ) as status:
 
-    if not race:
-
-        st.error(
-            "当日のレース情報を取得できませんでした。"
+        st.write(
+            "📡 レース情報を取得中…"
         )
 
-    elif len(race.get("boats", [])) != 6:
-
-        st.error(
-            "6艇の選手データを取得できませんでした。"
-        )
-
-    else:
-
-        prediction = predict_race(race)
-
-        odds = get_trifecta_odds(
+        race = get_race(
             date_str,
-            race["venue_id"],
+            venue,
             race_no,
         )
 
-        candidates = value_candidates(
-            prediction,
-            odds,
-            min_prob=0.01,
-            limit=8,
-        )
+        if not race:
 
-        st.session_state.prediction = {
-            "race": race,
-            "pred": prediction,
-            "odds": odds,
-            "candidates": candidates,
-        }
+            status.update(
+                label="❌ レース情報を取得できませんでした",
+                state="error",
+                expanded=True,
+            )
+
+            st.error(
+                "当日のレース情報を取得できませんでした。"
+            )
+
+        elif len(race.get("boats", [])) != 6:
+
+            status.update(
+                label="❌ 6艇のデータを取得できませんでした",
+                state="error",
+                expanded=True,
+            )
+
+            st.error(
+                "6艇の選手データを取得できませんでした。"
+            )
+
+        else:
+
+            st.write(
+                "🤖 6艇のAI評価を計算中…"
+            )
+
+            prediction = predict_race(
+                race
+            )
+
+            st.write(
+                "💰 公式3連単オッズを取得中…"
+            )
+
+            odds = get_trifecta_odds(
+                date_str,
+                race["venue_id"],
+                race_no,
+            )
+
+            st.write(
+                f"📊 オッズ {len(odds)}/120通りを確認中…"
+            )
+
+            st.write(
+                "📈 期待値を計算中…"
+            )
+
+            candidates = value_candidates(
+                prediction,
+                odds,
+                min_prob=0.01,
+                limit=8,
+            )
+
+            st.session_state.prediction = {
+                "race": race,
+                "pred": prediction,
+                "odds": odds,
+                "candidates": candidates,
+            }
+
+            status.update(
+                label="✅ AI予想が完了しました！",
+                state="complete",
+                expanded=False,
+            )
 
 
-# -------------------------
+# =========================
 # AI予想結果
-# -------------------------
+# =========================
 
 result = st.session_state.prediction
 
@@ -186,9 +265,9 @@ if result:
     )
 
 
-    # -------------------------
+    # =========================
     # EV
-    # -------------------------
+    # =========================
 
     st.markdown(
         "### 💰 期待値の高い三連単"
@@ -202,12 +281,17 @@ if result:
         "AI確率1.0%以上の買い目だけをEV評価"
     )
 
-
-    if len(odds) < 100:
+    if len(odds) < 120:
 
         st.warning(
             f"公式オッズ取得 "
             f"{len(odds)}/120通り"
+        )
+
+    else:
+
+        st.success(
+            "公式オッズ 120/120通り取得"
         )
 
 
@@ -241,9 +325,9 @@ if result:
         )
 
 
-    # -------------------------
+    # =========================
     # 6艇AI評価
-    # -------------------------
+    # =========================
 
     st.markdown(
         "### 🚤 6艇AI評価"
@@ -275,9 +359,9 @@ if result:
         )
 
 
-    # -------------------------
+    # =========================
     # AI確率ランキング
-    # -------------------------
+    # =========================
 
     st.markdown(
         "### 📊 AI確率ランキング"
@@ -299,16 +383,16 @@ if result:
         )
 
 
-# -------------------------
+# =========================
 # 区切り
-# -------------------------
+# =========================
 
 st.divider()
 
 
-# -------------------------
+# =========================
 # バックテスト
-# -------------------------
+# =========================
 
 st.subheader(
     "📊 AI予想バックテスト"
@@ -327,28 +411,62 @@ target = st.selectbox(
 )
 
 
+# =========================
+# バックテスト開始
+# =========================
+
 if st.button(
     "🔍 バックテスト開始",
     use_container_width=True,
 ):
 
-    with st.spinner(
-        "全国24場を遡って検証中…"
-    ):
+    with st.status(
+        "📊 バックテストを開始しています…",
+        expanded=True,
+    ) as status:
 
-        st.session_state.backtest = (
-            run_backtest(
-                target,
-                today_jst(),
-            )
+        st.write(
+            "📡 全国24場のデータを検索中…"
         )
 
-    st.session_state.bt_page = 1
+        st.write(
+            "📅 前日から過去へ遡ってレースを確認中…"
+        )
+
+        st.write(
+            f"🤖 {target}レースをAI予想中…"
+        )
+
+        st.write(
+            "📈 的中率・回収率を集計中…"
+        )
+
+        backtest_result = run_backtest(
+            target,
+            today_jst(),
+        )
+
+        st.session_state.backtest = (
+            backtest_result
+        )
+
+        st.session_state.bt_page = 1
+
+        st.session_state.scroll_results = False
+
+        status.update(
+            label=(
+                f"✅ バックテスト完了！ "
+                f"{backtest_result['count']}レースを検証"
+            ),
+            state="complete",
+            expanded=False,
+        )
 
 
-# -------------------------
+# =========================
 # バックテスト結果
-# -------------------------
+# =========================
 
 bt = st.session_state.backtest
 
@@ -397,23 +515,33 @@ if bt:
     )
 
 
-    # -------------------------
-    # 検証結果のスクロール位置
-    # -------------------------
+    # =========================
+    # スクロール用アンカー
+    # =========================
 
     st.markdown(
-        '<div id="backtest-results-anchor"></div>',
+        """
+        <div
+            id="backtest-results-anchor"
+            style="
+                height:1px;
+                margin:0;
+                padding:0;
+            ">
+        </div>
+        """,
         unsafe_allow_html=True,
     )
+
 
     st.subheader(
         "📋 検証結果"
     )
 
 
-    # -------------------------
-    # ページ設定
-    # -------------------------
+    # =========================
+    # ページ計算
+    # =========================
 
     rows = bt["rows"]
 
@@ -433,6 +561,7 @@ if bt:
         total_pages,
     )
 
+
     start = (
         (page - 1)
         * per_page
@@ -443,9 +572,9 @@ if bt:
     page_rows = rows[start:end]
 
 
-    # -------------------------
-    # 検証結果表示
-    # -------------------------
+    # =========================
+    # 検証結果
+    # =========================
 
     for row in page_rows:
 
@@ -462,7 +591,9 @@ if bt:
 
         if row["box_hit"]:
 
-            box_text = "　/　AI3艇BOX的中"
+            box_text = (
+                "　/　AI3艇BOX的中"
+            )
 
         else:
 
@@ -482,9 +613,9 @@ if bt:
         )
 
 
-    # -------------------------
-    # ページ切り替え
-    # -------------------------
+    # =========================
+    # ページボタン
+    # =========================
 
     st.write("")
 
@@ -494,6 +625,7 @@ if bt:
     )
 
 
+    # 前へ
     with col1:
 
         if page > 1:
@@ -501,17 +633,19 @@ if bt:
             if st.button(
                 "◀ 前へ",
                 use_container_width=True,
+                key="backtest_prev",
             ):
 
                 st.session_state.bt_page = (
                     page - 1
                 )
 
-                st.session_state.scroll = True
+                st.session_state.scroll_results = True
 
                 st.rerun()
 
 
+    # ページ番号
     with col2:
 
         st.markdown(
@@ -528,6 +662,7 @@ if bt:
         )
 
 
+    # 次へ
     with col3:
 
         if page < total_pages:
@@ -535,24 +670,24 @@ if bt:
             if st.button(
                 "次へ ▶",
                 use_container_width=True,
+                key="backtest_next",
             ):
 
                 st.session_state.bt_page = (
                     page + 1
                 )
 
-                st.session_state.scroll = True
+                st.session_state.scroll_results = True
 
                 st.rerun()
 
 
-    # -------------------------
-    # ページ切り替え後に
-    # 検証結果まで自動スクロール
-    # -------------------------
+    # =========================
+    # ページ変更後スクロール
+    # =========================
 
-    if st.session_state.scroll:
+    if st.session_state.scroll_results:
 
-        st.session_state.scroll = False
+        st.session_state.scroll_results = False
 
-        scroll_results()
+        scroll_to_results()

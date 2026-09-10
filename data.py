@@ -1,6 +1,4 @@
 import re
-from datetime import datetime
-
 import requests
 from bs4 import BeautifulSoup
 
@@ -33,29 +31,69 @@ VENUES = {
 }
 
 
-def _get(url):
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 "
-            "Version/17.0 Mobile/15E148 Safari/604.1"
-        )
-    }
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) "
+        "Version/17.0 Mobile/15E148 Safari/604.1"
+    )
+}
 
+
+def _get(url):
     try:
         r = requests.get(
             url,
-            headers=headers,
+            headers=HEADERS,
             timeout=15,
         )
-
         r.raise_for_status()
-
         return r.text
-
     except Exception:
         return ""
+
+
+def _num(text):
+    try:
+        return float(
+            str(text)
+            .replace(",", "")
+            .replace("％", "")
+            .replace("%", "")
+            .strip()
+        )
+    except Exception:
+        return 0.0
+
+
+def _boat_name(soup, boat):
+    patterns = [
+        f".boatColor{boat}",
+        f".is-fs12.boatColor{boat}",
+    ]
+
+    for selector in patterns:
+        node = soup.select_one(selector)
+
+        if node:
+            text = node.get_text(
+                " ",
+                strip=True,
+            )
+
+            if text:
+                text = re.sub(
+                    r"\s+",
+                    " ",
+                    text,
+                )
+
+                if len(text) <= 30:
+                    return text
+
+    return f"{boat}号艇"
 
 
 def get_race(
@@ -68,45 +106,36 @@ def get_race(
     if not venue_id:
         return None
 
+    hd = date.replace("-", "")
+
     url = (
         "https://www.boatrace.jp/"
         "owpc/pc/race/racelist"
-        f"?hd={date.replace('-', '')}"
+        f"?hd={hd}"
         f"&jcd={venue_id}"
         f"&rno={race_no}"
     )
 
     html = _get(url)
 
-    # 取得できない場合でも
-    # AIを動かせる最低限のデータを返す
-    boats = []
+    if not html:
+        return None
 
     soup = BeautifulSoup(
         html,
         "html.parser",
     )
 
+    boats = []
+
     for boat in range(1, 7):
-        name = f"{boat}号艇"
-
-        candidates = soup.select(
-            f".is-fs12.boatColor{boat}"
-        )
-
-        if candidates:
-            text = candidates[0].get_text(
-                " ",
-                strip=True,
-            )
-
-            if text:
-                name = text
-
         boats.append(
             {
                 "boat": boat,
-                "name": name,
+                "name": _boat_name(
+                    soup,
+                    boat,
+                ),
                 "win_rate": 0.0,
                 "local_rate": 0.0,
                 "motor_rate": 0.0,
@@ -122,8 +151,185 @@ def get_race(
         "date": date,
         "venue": venue,
         "venue_id": venue_id,
-        "race_no": race_no,
+        "race_no": int(race_no),
         "boats": boats,
+    }
+
+
+def get_race_result(
+    date,
+    venue_id,
+    race_no,
+):
+    """
+    公式BOATRACEのレース結果を取得。
+    戻り値:
+        {
+            "actual": (1, 2, 3),
+            "trifecta_payout": 12340
+        }
+    """
+
+    hd = date.replace("-", "")
+
+    url = (
+        "https://www.boatrace.jp/"
+        "owpc/pc/race/raceresult"
+        f"?hd={hd}"
+        f"&jcd={venue_id}"
+        f"&rno={race_no}"
+    )
+
+    html = _get(url)
+
+    if not html:
+        return None
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    # -------------------------
+    # 着順
+    # -------------------------
+
+    actual = []
+
+    # 公式結果ページでは
+    # 着順欄に艇番が入っている。
+    #
+    # まず result系class を優先。
+    selectors = [
+        ".is-fs14",
+        ".is-fs12",
+        "td",
+    ]
+
+    candidates = []
+
+    for selector in selectors:
+        candidates.extend(
+            soup.select(selector)
+        )
+
+    for node in candidates:
+        text = node.get_text(
+            " ",
+            strip=True,
+        )
+
+        if re.fullmatch(
+            r"[1-6]",
+            text,
+        ):
+            value = int(text)
+
+            if value not in actual:
+                actual.append(value)
+
+            if len(actual) == 3:
+                break
+
+    # HTML構造によって上記で取れない場合の
+    # フォールバック
+    if len(actual) < 3:
+        text = soup.get_text(
+            " ",
+            strip=True,
+        )
+
+        # 「1 2 3」のような並びを探す
+        for m in re.finditer(
+            r"\b([1-6])\b",
+            text,
+        ):
+            value = int(
+                m.group(1)
+            )
+
+            if value not in actual:
+                actual.append(value)
+
+            if len(actual) == 3:
+                break
+
+    if len(actual) < 3:
+        return None
+
+    actual = tuple(actual[:3])
+
+    # -------------------------
+    # 3連単払戻
+    # -------------------------
+
+    payout = 0
+
+    # まず払戻表を探す
+    for row in soup.find_all("tr"):
+        text = row.get_text(
+            " ",
+            strip=True,
+        )
+
+        if "3連単" not in text:
+            continue
+
+        # 例:
+        # 3連単 1-2-3 1,230円
+        m = re.search(
+            r"([1-6])\s*[-－]\s*"
+            r"([1-6])\s*[-－]\s*"
+            r"([1-6]).*?"
+            r"([\d,]+)\s*円?",
+            text,
+        )
+
+        if not m:
+            continue
+
+        combo = (
+            int(m.group(1)),
+            int(m.group(2)),
+            int(m.group(3)),
+        )
+
+        if combo == actual:
+            payout = int(
+                m.group(4).replace(
+                    ",",
+                    "",
+                )
+            )
+            break
+
+    # 別構造のフォールバック
+    if payout <= 0:
+        for node in soup.select(
+            ".is-payout1"
+        ):
+            text = node.get_text(
+                " ",
+                strip=True,
+            )
+
+            m = re.search(
+                r"([\d,]+)\s*円",
+                text,
+            )
+
+            if m:
+                payout = int(
+                    m.group(1).replace(
+                        ",",
+                        "",
+                    )
+                )
+                break
+
+    return {
+        "actual": actual,
+        "trifecta_payout": payout,
     }
 
 
@@ -133,26 +339,16 @@ def get_trifecta_odds(
     race_no,
 ):
     """
-    BOATRACE公式3連単オッズ取得。
+    公式3連単オッズを取得。
 
-    3連単表は、
-      ・18個の数値を持つ行
-      ・12個の数値を持つ行
-    が混在する。
+    取得できた組み合わせを
+    {(1,2,3): 23.9, ...}
+    の形で返す。
 
-    18個:
-      2着/3着/オッズ × 6
-
-    12個:
-      3着/オッズ × 6
-
-    これを解析して最大120通り取得する。
+    最大120通り。
     """
 
-    hd = date.replace(
-        "-",
-        "",
-    )
+    hd = date.replace("-", "")
 
     url = (
         "https://www.boatrace.jp/"
@@ -174,27 +370,95 @@ def get_trifecta_odds(
 
     odds = {}
 
-    # -------------------------
-    # 公式オッズ表
-    # -------------------------
+    # --------------------------------
+    # oddsPoint の親構造から取得
+    # --------------------------------
 
-    tables = soup.find_all("table")
+    for point in soup.select(
+        "[class*='oddsPoint']"
+    ):
+        text = point.get_text(
+            " ",
+            strip=True,
+        )
 
-    for table in tables:
-        rows = table.find_all("tr")
+        m = re.search(
+            r"\d+(?:\.\d+)?",
+            text,
+        )
 
+        if not m:
+            continue
+
+        odd = float(
+            m.group()
+        )
+
+        if odd <= 0:
+            continue
+
+        # 親要素を数段確認
+        parent = point
+
+        for _ in range(4):
+            if not parent:
+                break
+
+            parent = parent.parent
+
+            if not parent:
+                break
+
+            nums = re.findall(
+                r"\b[1-6]\b",
+                parent.get_text(
+                    " ",
+                    strip=True,
+                ),
+            )
+
+            # 重複を除いた艇番
+            unique = []
+
+            for n in nums:
+                n = int(n)
+
+                if n not in unique:
+                    unique.append(n)
+
+            if len(unique) >= 3:
+                combo = tuple(
+                    unique[-3:]
+                )
+
+                if (
+                    len(set(combo)) == 3
+                    and combo not in odds
+                ):
+                    odds[combo] = odd
+                    break
+
+    # --------------------------------
+    # テーブル解析
+    # --------------------------------
+
+    for table in soup.find_all(
+        "table"
+    ):
         first_boat = None
 
-        for tr in rows:
-            text = tr.get_text(
+        for tr in table.find_all(
+            "tr"
+        ):
+            row_text = tr.get_text(
                 " ",
                 strip=True,
             )
 
-            # 行の先頭に艇番があるケース
+            # 行頭の艇番
             m = re.match(
-                r"^\s*([1-6])\s+",
-                text,
+                r"^\s*([1-6])(?:\s|$)",
+                row_text,
             )
 
             if m:
@@ -202,161 +466,51 @@ def get_trifecta_odds(
                     m.group(1)
                 )
 
+            if first_boat is None:
+                continue
+
             cells = []
 
             for cell in tr.find_all(
                 ["td", "th"]
             ):
-                value = cell.get_text(
+                text = cell.get_text(
                     " ",
                     strip=True,
                 )
 
-                value = value.replace(
-                    ",",
-                    "",
+                if text:
+                    cells.append(text)
+
+            # --------------------------------
+            # セルの中から
+            # 組み合わせ＋オッズを探す
+            # --------------------------------
+
+            for cell in cells:
+                m = re.search(
+                    r"([1-6])\s*[-－]\s*"
+                    r"([1-6])\s*[-－]\s*"
+                    r"([1-6]).*?"
+                    r"(\d+(?:\.\d+)?)",
+                    cell,
                 )
 
-                if value:
-                    cells.append(value)
-
-            numeric = []
-
-            for value in cells:
-                if re.fullmatch(
-                    r"\d+(?:\.\d+)?",
-                    value,
-                ):
-                    try:
-                        numeric.append(
-                            float(value)
-                        )
-                    except Exception:
-                        pass
-
-            if first_boat is None:
-                continue
-
-            # ---------------------
-            # 18セル形式
-            # ---------------------
-
-            if len(numeric) >= 18:
-                for i in range(0, 18, 3):
-                    second = int(
-                        numeric[i]
-                    )
-
-                    third = int(
-                        numeric[i + 1]
+                if m:
+                    combo = (
+                        int(m.group(1)),
+                        int(m.group(2)),
+                        int(m.group(3)),
                     )
 
                     odd = float(
-                        numeric[i + 2]
+                        m.group(4)
                     )
 
                     if (
-                        1 <= second <= 6
-                        and 1 <= third <= 6
-                        and len(
-                            {
-                                first_boat,
-                                second,
-                                third,
-                            }
-                        )
-                        == 3
+                        len(set(combo)) == 3
                         and odd > 0
                     ):
-                        odds[
-                            (
-                                first_boat,
-                                second,
-                                third,
-                            )
-                        ] = odd
-
-            # ---------------------
-            # 12セル形式
-            # ---------------------
-
-            elif len(numeric) >= 12:
-                for i in range(0, 12, 2):
-                    third = int(
-                        numeric[i]
-                    )
-
-                    odd = float(
-                        numeric[i + 1]
-                    )
-
-                    if (
-                        1 <= third <= 6
-                        and third != first_boat
-                        and odd > 0
-                    ):
-                        # 12セル形式では
-                        # 2着艇を特定できない場合が
-                        # あるため、後述の解析対象外。
-                        #
-                        # 公式HTMLの別属性を
-                        # 探すためここでは保存しない。
-                        pass
-
-    # -------------------------
-    # oddsPoint 属性を持つ
-    # 個別セルからの補完
-    # -------------------------
-
-    for point in soup.select(
-        "[class*='oddsPoint']"
-    ):
-        value = point.get_text(
-            " ",
-            strip=True,
-        )
-
-        value = value.replace(
-            ",",
-            "",
-        )
-
-        try:
-            odd = float(
-                re.search(
-                    r"\d+(?:\.\d+)?",
-                    value,
-                ).group()
-            )
-        except Exception:
-            continue
-
-        parent = point.parent
-
-        if not parent:
-            continue
-
-        text = parent.get_text(
-            " ",
-            strip=True,
-        )
-
-        nums = re.findall(
-            r"\b[1-6]\b",
-            text,
-        )
-
-        if len(nums) >= 3:
-            combo = tuple(
-                int(x)
-                for x in nums[-3:]
-            )
-
-            if (
-                len(set(combo)) == 3
-                and combo not in odds
-                and odd > 0
-            ):
-                odds[combo] = odd
+                        odds[combo] = odd
 
     return odds

@@ -1,13 +1,11 @@
 import itertools
 import math
-
 import numpy as np
 
 
 def _normalize(values):
     arr = np.asarray(values, dtype=float)
     arr = np.maximum(arr, 0.0)
-
     total = arr.sum()
 
     if total <= 0:
@@ -17,144 +15,84 @@ def _normalize(values):
 
 
 def predict_race(race):
-    """
-    6艇AI評価と3連単120通りを計算。
-
-    的中率を最優先し、
-    1着・2着・3着を別々に評価する。
-    """
-
     boats = race["boats"]
 
     scores = {}
 
-    for boat_data in boats:
-
-        boat = boat_data["boat"]
+    for b in boats:
+        no = b["boat"]
 
         score = (
-            boat_data["rate"] * 4.2
-            + boat_data["local_rate"] * 1.8
-            + boat_data["motor"] * 0.8
-            + boat_data["course"] * 0.7
-            + max(0, 7 - boat) * 1.2
+            b["rate"] * 4.2
+            + b["local_rate"] * 1.8
+            + b["motor"] * 0.8
+            + b["course"] * 0.7
+            + max(0, 7 - no) * 1.2
         )
 
-        # 1コース優位
-        if boat == 1:
+        if no == 1:
             score += 8.0
 
-        scores[boat] = max(
-            score,
-            0.1,
-        )
+        scores[no] = max(score, 0.1)
 
-    # -------------------------
-    # 1着確率
-    # -------------------------
+    # 1着評価
+    raw = {}
 
-    first_raw = {}
+    for no, score in scores.items():
+        bonus = 3.0 if no == 1 else 0.0
+        raw[no] = math.exp((score + bonus) / 10.0)
 
-    for boat, score in scores.items():
-
-        bonus = 0.0
-
-        if boat == 1:
-            bonus = 3.0
-
-        first_raw[boat] = math.exp(
-            (score + bonus) / 10.0
-        )
-
-    first_probs = _normalize(
-        list(first_raw.values())
+    first_values = _normalize(
+        [raw[i] for i in range(1, 7)]
     )
 
     first_probs = {
-        boat: float(prob)
-        for boat, prob in zip(
-            first_raw.keys(),
-            first_probs,
-        )
+        i: float(first_values[i - 1])
+        for i in range(1, 7)
     }
 
-    # -------------------------
     # 3連単120通り
-    # -------------------------
-
     combos = list(
-        itertools.permutations(
-            range(1, 7),
-            3,
-        )
+        itertools.permutations(range(1, 7), 3)
     )
 
     weights = []
 
     for first, second, third in combos:
-
-        # 1着を最重要
-        first_score = (
-            first_probs[first] ** 1.60
-        )
-
-        # 2着
-        second_score = (
-            first_probs[second] ** 0.90
-        )
-
-        # 3着
-        third_score = (
-            first_probs[third] ** 0.65
-        )
-
         weight = (
-            first_score
-            * second_score
-            * third_score
+            first_probs[first] ** 1.60
+            * first_probs[second] ** 0.90
+            * first_probs[third] ** 0.65
         )
 
-        # 1号艇の1着をさらに少し優遇
+        # インコース1着を少し優先
         if first == 1:
             weight *= 1.20
 
-        # 2号艇・3号艇の2着を少し優遇
+        # 2・3号艇の2着を少し優先
         if second in (2, 3):
             weight *= 1.05
 
-        # 5・6号艇の1着は
-        # AI確率が十分高い場合だけ残す
+        # 5・6号艇頭の暴走を抑制
         if first in (5, 6):
             if first_probs[first] < 0.12:
                 weight *= 0.55
 
         weights.append(weight)
 
-    probabilities = _normalize(
-        weights
+    probs = _normalize(weights)
+
+    probs = (
+        0.985 * probs
+        + 0.015 / len(probs)
     )
 
-    # 最低確率フロア
-    probabilities = (
-        0.985 * probabilities
-        + 0.015 / len(probabilities)
-    )
-
-    probabilities = _normalize(
-        probabilities
-    )
+    probs = _normalize(probs)
 
     joint = {
         combo: float(prob)
-        for combo, prob in zip(
-            combos,
-            probabilities,
-        )
+        for combo, prob in zip(combos, probs)
     }
-
-    # -------------------------
-    # 1着ランキング
-    # -------------------------
 
     ranking = sorted(
         first_probs,
@@ -166,15 +104,11 @@ def predict_race(race):
     counter = ranking[1]
     hole = ranking[2]
 
-    # -------------------------
-    # 本命を1着にした場合の
-    # 最有力3連単
-    # -------------------------
-
+    # 本命を1着にした最有力買い目
     main_combos = {
-        combo: prob
-        for combo, prob in joint.items()
-        if combo[0] == main
+        c: p
+        for c, p in joint.items()
+        if c[0] == main
     }
 
     main_best_combo = max(
@@ -182,27 +116,25 @@ def predict_race(race):
         key=main_combos.get,
     )
 
-    # 全体最高確率
     best_combo = max(
         joint,
         key=joint.get,
     )
 
-    # -------------------------
     # 信頼度
-    # -------------------------
+    # 1着確率だけで95%にならないようにする
+    concentration = (
+        first_probs[main] - 1 / 6
+    )
 
     confidence = (
-        50.0
-        + first_probs[main] * 100.0
+        55.0
+        + concentration * 75.0
     )
 
     confidence = max(
         55.0,
-        min(
-            95.0,
-            confidence,
-        ),
+        min(90.0, confidence),
     )
 
     return {
@@ -214,12 +146,10 @@ def predict_race(race):
         "counter": counter,
         "hole": hole,
         "best_combo": best_combo,
-        "best_combo_prob":
-            float(joint[best_combo]),
-        "main_best_combo":
-            main_best_combo,
+        "best_combo_prob": joint[best_combo],
+        "main_best_combo": main_best_combo,
         "main_best_combo_prob":
-            float(joint[main_best_combo]),
+            joint[main_best_combo],
         "confidence": confidence,
     }
 
@@ -231,106 +161,75 @@ def value_candidates(
     limit=8,
 ):
     """
-    的中率最優先の期待値候補。
+    的中率を最優先した期待値候補。
 
-    高配当だけで上位を独占しない。
+    的中率 80%
+    EV    20%
+
+    高配当ほど補正を強くする。
     """
 
-    candidates = []
+    raw = []
 
-    joint = prediction["joint"]
-
-    for combo, probability in joint.items():
+    for combo, prob in prediction["joint"].items():
 
         odd = odds.get(combo)
 
         if not odd or odd <= 0:
             continue
 
-        if probability < min_prob:
+        if prob < min_prob:
             continue
 
-        market_probability = 1.0 / odd
+        market_prob = 1.0 / odd
 
-        ev = (
-            probability * odd
-            - 1.0
-        )
+        ev = prob * odd - 1.0
 
         if ev <= 0:
             continue
 
-        edge = (
-            probability
-            - market_probability
-        )
+        edge = prob - market_prob
 
-        # -------------------------
-        # 的中率
-        # -------------------------
+        if odd <= 30:
+            odds_factor = 1.00
+        elif odd <= 50:
+            odds_factor = 0.95
+        elif odd <= 100:
+            odds_factor = 0.85
+        elif odd <= 200:
+            odds_factor = 0.70
+        elif odd <= 300:
+            odds_factor = 0.55
+        elif odd <= 500:
+            odds_factor = 0.40
+        else:
+            odds_factor = 0.20
 
-        hit_score = probability
-
-        # -------------------------
-        # EV
-        # 高すぎるEVは頭打ち
-        # -------------------------
-
+        # EVの暴走を抑える
         ev_score = min(
             max(ev, 0.0),
             2.0,
         ) / 2.0
 
-        # -------------------------
-        # オッズ補正
-        # -------------------------
-
-        if odd <= 30:
-            odds_factor = 1.00
-
-        elif odd <= 50:
-            odds_factor = 0.97
-
-        elif odd <= 100:
-            odds_factor = 0.90
-
-        elif odd <= 200:
-            odds_factor = 0.78
-
-        elif odd <= 300:
-            odds_factor = 0.65
-
-        elif odd <= 500:
-            odds_factor = 0.50
-
-        else:
-            odds_factor = 0.30
-
-        # -------------------------
-        # 最終評価
-        #
-        # 的中率を強くする
-        # -------------------------
-
+        # 的中率を主役にする
         score = (
-            hit_score * 0.80
+            prob * 0.80
             + ev_score
             * 0.20
             * odds_factor
         )
 
-        candidates.append({
+        raw.append({
             "combo": combo,
-            "prob": probability,
+            "prob": prob,
             "odds": odd,
             "ev": ev,
-            "market_prob":
-                market_probability,
+            "market_prob": market_prob,
             "edge": edge,
             "score": score,
         })
 
-    candidates.sort(
+    raw.sort(
         key=lambda x: (
             x["score"],
             x["prob"],
@@ -339,4 +238,4 @@ def value_candidates(
         reverse=True,
     )
 
-    return candidates[:limit]
+    return raw[:limit]

@@ -1,7 +1,11 @@
 from datetime import timedelta
 
 from ai import predict_race
-from data import VENUES, get_race
+from data import (
+    VENUES,
+    get_race,
+    get_race_result,
+)
 
 
 TARGET_RACES = [
@@ -12,47 +16,19 @@ TARGET_RACES = [
 ]
 
 
-def _actual_result(race):
-    """
-    実際の着順を取得。
-    データがない場合はNone。
-    """
-
-    result = race.get("result")
-
-    if not result:
-        return None
-
-    try:
-        result = [
-            int(x)
-            for x in result
-        ]
-
-        if len(result) >= 3:
-            return tuple(result[:3])
-
-    except Exception:
-        pass
-
-    return None
-
-
-def _box_hit(prediction, actual):
-    """
-    AI本命・対抗・穴の3艇が
-    実着順3艇にすべて含まれているか。
-    """
-
+def _box_hit(
+    prediction,
+    actual,
+):
     selected = {
         prediction["main"],
         prediction["counter"],
         prediction["hole"],
     }
 
-    actual_set = set(actual)
-
-    return selected.issubset(actual_set)
+    return selected.issubset(
+        set(actual)
+    )
 
 
 def run_backtest(
@@ -61,22 +37,29 @@ def run_backtest(
     progress_callback=None,
 ):
     """
-    全国24場を対象に、
-    end_dateの前日から
-    2026-01-01まで遡って検証。
+    全国24場を対象。
 
-    target:
-        100 / 300 / 500 / 1000
+    end_date当日は除外し、
+    前日から2026-01-01まで遡る。
+
+    1レース600円投資。
+    本命・対抗・穴の3連単1点を購入。
+
+    的中した場合は公式3連単払戻を
+    実際に加算する。
     """
 
     target = int(target)
-
-    start_date = end_date - timedelta(days=1)
 
     cutoff = end_date.replace(
         year=2026,
         month=1,
         day=1,
+    )
+
+    current = (
+        end_date
+        - timedelta(days=1)
     )
 
     rows = []
@@ -90,37 +73,30 @@ def run_backtest(
     box_hits = 0
     exact_hits = 0
 
-    checked = 0
-
-    current = start_date
-
-    # --------------------------------
-    # 日付を遡る
-    # --------------------------------
-
     while (
         current >= cutoff
         and len(rows) < target
     ):
         date_str = current.isoformat()
 
-        # --------------------------------
-        # 全国24場
-        # --------------------------------
-
         for venue, venue_id in VENUES.items():
 
             if len(rows) >= target:
                 break
 
-            for race_no in range(1, 13):
+            for race_no in range(
+                1,
+                13,
+            ):
 
                 if len(rows) >= target:
                     break
 
-                checked += 1
-
                 try:
+                    # -------------------------
+                    # レース情報
+                    # -------------------------
+
                     race = get_race(
                         date_str,
                         venue,
@@ -130,12 +106,33 @@ def run_backtest(
                     if not race:
                         continue
 
-                    actual = _actual_result(
-                        race
+                    # -------------------------
+                    # 実際の結果
+                    # -------------------------
+
+                    result = get_race_result(
+                        date_str,
+                        venue_id,
+                        race_no,
                     )
 
-                    if not actual:
+                    if not result:
                         continue
+
+                    actual = result[
+                        "actual"
+                    ]
+
+                    actual_payout = result[
+                        "trifecta_payout"
+                    ]
+
+                    if len(actual) != 3:
+                        continue
+
+                    # -------------------------
+                    # AI予想
+                    # -------------------------
 
                     prediction = predict_race(
                         race
@@ -153,49 +150,91 @@ def run_backtest(
                         "hole"
                     ]
 
-                    top3 = set(
-                        prediction[
-                            "ranking"
-                        ][:3]
-                    )
-
-                    actual_set = set(
-                        actual
-                    )
-
-                    investment += 600
-
-                    if actual[0] == main:
-                        main_win += 1
-
-                    if main in actual_set:
-                        main_top3 += 1
-
-                    if top3.issubset(
-                        actual_set
-                    ):
-                        top3_all_top3 += 1
-
-                    is_box = _box_hit(
-                        prediction,
-                        actual,
-                    )
-
-                    if is_box:
-                        box_hits += 1
-
                     predicted = (
                         main,
                         counter,
                         hole,
                     )
 
-                    is_exact = (
-                        predicted == actual
+                    ranking = prediction[
+                        "ranking"
+                    ]
+
+                    top3 = set(
+                        ranking[:3]
                     )
 
-                    if is_exact:
+                    actual_set = set(
+                        actual
+                    )
+
+                    # -------------------------
+                    # 投資
+                    # -------------------------
+
+                    bet = 600
+
+                    investment += bet
+
+                    # -------------------------
+                    # 本命1着
+                    # -------------------------
+
+                    if actual[0] == main:
+                        main_win += 1
+
+                    # -------------------------
+                    # 本命3連対
+                    # -------------------------
+
+                    if main in actual_set:
+                        main_top3 += 1
+
+                    # -------------------------
+                    # AI上位3艇
+                    # 全艇3連対
+                    # -------------------------
+
+                    if top3.issubset(
+                        actual_set
+                    ):
+                        top3_all_top3 += 1
+
+                    # -------------------------
+                    # AI3艇BOX
+                    # -------------------------
+
+                    box_hit = _box_hit(
+                        prediction,
+                        actual,
+                    )
+
+                    if box_hit:
+                        box_hits += 1
+
+                    # -------------------------
+                    # 完全的中
+                    # -------------------------
+
+                    exact_hit = (
+                        predicted
+                        == actual
+                    )
+
+                    if exact_hit:
                         exact_hits += 1
+
+                        # 実際の払戻
+                        if actual_payout > 0:
+                            payout += (
+                                actual_payout
+                                / 100
+                                * 100
+                            )
+
+                    # -------------------------
+                    # 結果保存
+                    # -------------------------
 
                     rows.append(
                         {
@@ -207,10 +246,19 @@ def run_backtest(
                             "hole": hole,
                             "predicted": predicted,
                             "actual": actual,
-                            "box_hit": is_box,
-                            "exact_hit": is_exact,
+                            "box_hit": box_hit,
+                            "exact_hit": exact_hit,
+                            "payout": (
+                                actual_payout
+                                if exact_hit
+                                else 0
+                            ),
                         }
                     )
+
+                    # -------------------------
+                    # 進捗
+                    # -------------------------
 
                     if progress_callback:
                         try:
@@ -222,11 +270,11 @@ def run_backtest(
                             pass
 
                 except Exception:
-                    # 1レースでエラーが出ても
-                    # バックテスト全体を止めない
                     continue
 
-        current -= timedelta(days=1)
+        current -= timedelta(
+            days=1
+        )
 
     # --------------------------------
     # 指標
@@ -235,6 +283,7 @@ def run_backtest(
     count = len(rows)
 
     if count > 0:
+
         main_win_rate = (
             main_win
             / count
@@ -266,6 +315,7 @@ def run_backtest(
         )
 
     else:
+
         main_win_rate = 0.0
         main_top3_rate = 0.0
         top3_all_top3_rate = 0.0
@@ -273,35 +323,29 @@ def run_backtest(
         exact_hit_rate = 0.0
 
     # --------------------------------
-    # 払戻
+    # 回収率
     # --------------------------------
-    #
-    # バックテストの回収率は、
-    # 1レース600円投資を基準にする。
-    #
-    # 3連単の実払戻を取得できる場合は
-    # 後から payout を加算できる構造。
-    #
-    # 現時点では exact hit のみ
-    # 仮払戻を入れず、
-    # 実オッズ取得側と分離している。
-    #
 
-    recovery = (
-        payout / investment * 100
-        if investment > 0
-        else 0.0
-    )
+    if investment > 0:
+        recovery = (
+            payout
+            / investment
+            * 100
+        )
+    else:
+        recovery = 0.0
 
     return {
         "count": count,
         "recovery": recovery,
         "main_win_rate": main_win_rate,
         "main_top3_rate": main_top3_rate,
-        "top3_all_top3_rate": top3_all_top3_rate,
+        "top3_all_top3_rate": (
+            top3_all_top3_rate
+        ),
         "box_hit_rate": box_hit_rate,
         "exact_hit_rate": exact_hit_rate,
         "investment": investment,
         "return": payout,
         "rows": rows,
-                    }
+    }

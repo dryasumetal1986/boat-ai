@@ -1,10 +1,8 @@
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
-from datetime import datetime
 
 BASE_API = "https://boatraceopenapi.github.io/api/v1"
-DAY_CACHE = {}
 
 STADIUMS = {
     "01": "桐生", "02": "戸田", "03": "江戸川", "04": "平和島",
@@ -15,37 +13,7 @@ STADIUMS = {
     "21": "芦屋", "22": "福岡", "23": "唐津", "24": "大村"
 }
 
-def _day_data(date):
-    if date in DAY_CACHE:
-        return DAY_CACHE[date]
-
-    y = date[:4]
-    url = f"{BASE_API}/{y}/{date}.json"
-
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        DAY_CACHE[date] = data
-        return data
-    except Exception:
-        return None
-
-
-def get_race(date, stadium, race_no):
-    data = _day_data(date)
-    if not data:
-        return None
-
-    try:
-        jcd = next(
-            k for k, v in STADIUMS.items()
-            if v == stadium
-        )
-        race = data["programs"]["stadiums"][jcd]["races"][str(race_no)]
-        return race
-    except Exception:
-        return None
+DAY_CACHE = {}
 
 
 def _num(x, default=0.0):
@@ -57,40 +25,183 @@ def _num(x, default=0.0):
         return default
 
 
+def stadium_code(name):
+    for code, label in STADIUMS.items():
+        if label == name:
+            return code
+    return None
+
+
+def get_day_data(date):
+    if date in DAY_CACHE:
+        return DAY_CACHE[date]
+
+    url = f"{BASE_API}/{date[:4]}/{date}.json"
+
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        DAY_CACHE[date] = data
+        return data
+    except Exception:
+        return None
+
+
+def get_all_races(date):
+    """
+    1日分の全24場・全レースを取得。
+    """
+    data = get_day_data(date)
+    result = []
+
+    if not data:
+        return result
+
+    try:
+        stadiums = data["programs"]["stadiums"]
+    except Exception:
+        return result
+
+    for code in STADIUMS:
+        stadium = stadiums.get(code)
+        if not stadium:
+            stadium = stadiums.get(int(code)) if isinstance(stadiums, dict) else None
+        if not stadium:
+            continue
+
+        races = stadium.get("races", {})
+
+        if isinstance(races, list):
+            iterable = enumerate(races, 1)
+        else:
+            iterable = races.items()
+
+        for race_no, race in iterable:
+            if not race:
+                continue
+
+            try:
+                rno = int(race_no)
+            except Exception:
+                continue
+
+            result.append({
+                "date": date,
+                "stadium_code": code,
+                "stadium": STADIUMS[code],
+                "race_no": rno,
+                "race": race,
+            })
+
+    result.sort(key=lambda x: (x["stadium_code"], x["race_no"]))
+    return result
+
+
+def get_race(date, stadium, race_no):
+    code = stadium_code(stadium)
+    if not code:
+        return None
+
+    data = get_day_data(date)
+    if not data:
+        return None
+
+    try:
+        stadiums = data["programs"]["stadiums"]
+
+        st = stadiums.get(code)
+        if st is None:
+            st = stadiums.get(int(code))
+
+        races = st.get("races", {})
+        race = races.get(str(race_no))
+
+        if race is None and isinstance(races, dict):
+            race = races.get(int(race_no))
+
+        if race is None and isinstance(races, list):
+            race = races[race_no - 1]
+
+        return race
+    except Exception:
+        return None
+
+
+def _preview_list(race):
+    preview = race.get("preview", {})
+    racers = preview.get("racers", [])
+
+    if isinstance(racers, dict):
+        racers = list(racers.values())
+
+    return racers if isinstance(racers, list) else []
+
+
+def _find_preview(previews, boat):
+    for p in previews:
+        b = p.get(
+            "boat_number",
+            p.get("course_number", p.get("racer_number", ""))
+        )
+        try:
+            if int(b) == boat:
+                return p
+        except Exception:
+            pass
+    return {}
+
+
 def race_to_df(race):
     if not race:
         return pd.DataFrame()
 
+    racers = race.get("racers", [])
+    if isinstance(racers, dict):
+        racers = list(racers.values())
+
+    if not isinstance(racers, list):
+        return pd.DataFrame()
+
+    previews = _preview_list(race)
     rows = []
 
-    for i, r in enumerate(race.get("racers", []), 1):
-        preview = {}
-        previews = race.get("preview", {}).get("racers", [])
+    for i in range(6):
+        r = racers[i] if i < len(racers) else {}
+        boat = i + 1
 
-        if isinstance(previews, list):
-            for p in previews:
-                if str(p.get("boat_number", p.get("course_number", ""))) == str(i):
-                    preview = p
-                    break
+        b = r.get("boat_number", r.get("racer_number", boat))
+        try:
+            boat = int(b)
+        except Exception:
+            boat = i + 1
+
+        p = _find_preview(previews, boat)
 
         rows.append({
-            "boat": i,
-            "name": r.get("name", f"{i}号艇"),
+            "boat": boat,
+            "name": r.get("name", f"{boat}号艇"),
+
             "win_rate": _num(r.get("national_win_rate")),
             "top2": _num(r.get("national_top_2_percent")),
             "top3": _num(r.get("national_top_3_percent")),
+
             "local_rate": _num(r.get("local_win_rate")),
             "local_top2": _num(r.get("local_top_2_percent")),
             "local_top3": _num(r.get("local_top_3_percent")),
+
             "motor_top2": _num(r.get("motor_top_2_percent")),
             "motor_top3": _num(r.get("motor_top_3_percent")),
+
             "boat_top2": _num(r.get("boat_top_2_percent")),
             "boat_top3": _num(r.get("boat_top_3_percent")),
+
             "flying": _num(r.get("flying_count")),
             "late": _num(r.get("late_count")),
-            "start": _num(preview.get("start_timing")),
-            "exhibition": _num(preview.get("exhibition_time")),
-            "course": int(_num(preview.get("course_number"), i)),
+
+            "start": _num(p.get("start_timing")),
+            "exhibition": _num(p.get("exhibition_time")),
+            "course": int(_num(p.get("course_number"), boat)),
         })
 
     return pd.DataFrame(rows)
@@ -101,15 +212,33 @@ def get_result(race):
         result = race.get("result", {})
         racers = result.get("racers", [])
 
+        if isinstance(racers, dict):
+            racers = list(racers.values())
+
         places = {}
+
         for r in racers:
-            boat = int(r.get("boat_number", r.get("course_number", 0)))
-            place = int(r.get("place_number", 0))
-            if boat and place:
+            boat = r.get(
+                "boat_number",
+                r.get("course_number", r.get("racer_number", 0))
+            )
+            place = r.get("place_number", 0)
+
+            try:
+                boat = int(boat)
+                place = int(place)
+            except Exception:
+                continue
+
+            if 1 <= place <= 6 and 1 <= boat <= 6:
                 places[place] = boat
 
-        if len(places) >= 3:
-            return tuple(places[i] for i in (1, 2, 3))
+        if all(x in places for x in (1, 2, 3)):
+            return (
+                places[1],
+                places[2],
+                places[3],
+            )
     except Exception:
         pass
 
@@ -121,9 +250,15 @@ def get_payout(race, combination):
         payouts = race.get("result", {}).get("payouts", {})
         trifecta = payouts.get("trifecta", [])
 
+        if isinstance(trifecta, dict):
+            trifecta = list(trifecta.values())
+
+        target = "".join(map(str, combination))
+
         for p in trifecta:
-            c = str(p.get("combination", "")).replace("-", "").replace(" ", "")
-            target = "".join(map(str, combination))
+            c = str(p.get("combination", ""))
+            c = c.replace("-", "").replace(" ", "")
+
             if c == target:
                 return int(_num(p.get("amount"), 0))
     except Exception:
@@ -133,10 +268,6 @@ def get_payout(race, combination):
 
 
 def get_official_odds(date, jcd, race_no):
-    """
-    公式3連単オッズを120通り取得。
-    取得できない場合は空dict。
-    """
     url = (
         "https://www.boatrace.jp/owpc/pc/race/odds3t"
         f"?hd={date}&jcd={int(jcd):02d}&rno={race_no}"
@@ -157,58 +288,40 @@ def get_official_odds(date, jcd, race_no):
 
     for tr in soup.select("tr"):
         cells = tr.find_all("td")
-        texts = [x.get_text(" ", strip=True) for x in cells]
+        texts = [
+            x.get_text(" ", strip=True)
+            for x in cells
+        ]
         texts = [x for x in texts if x]
 
         if len(texts) < 18:
             continue
 
-        # 1着艇ごとに [2着, 3着, オッズ] が6セット
         for first in range(1, 7):
             base = (first - 1) * 3
-            if base + 2 >= len(texts):
-                continue
 
             try:
                 second = int(texts[base])
                 third = int(texts[base + 1])
-                odd_text = texts[base + 2].replace(",", "")
 
-                if second not in range(1, 7):
-                    continue
-                if third not in range(1, 7):
-                    continue
-                if len({first, second, third}) != 3:
-                    continue
-
-                odds_value = float(
-                    odd_text.replace("倍", "").strip()
+                odd_text = (
+                    texts[base + 2]
+                    .replace(",", "")
+                    .replace("倍", "")
+                    .strip()
                 )
-                if odds_value > 0:
-                    odds[(first, second, third)] = odds_value
+
+                odd = float(odd_text)
+
+                if (
+                    1 <= second <= 6
+                    and 1 <= third <= 6
+                    and len({first, second, third}) == 3
+                    and odd > 0
+                ):
+                    odds[(first, second, third)] = odd
+
             except Exception:
                 continue
 
     return odds
-
-
-def get_history(date, stadium, start_race=1, end_race=12):
-    rows = []
-
-    for rno in range(start_race, end_race + 1):
-        race = get_race(date, stadium, rno)
-        if not race:
-            continue
-
-        df = race_to_df(race)
-        result = get_result(race)
-
-        if len(df) == 6 and result:
-            rows.append({
-                "race_no": rno,
-                "df": df,
-                "result": result,
-                "payout": get_payout(race, result),
-            })
-
-    return rows

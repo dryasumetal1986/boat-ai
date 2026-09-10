@@ -48,12 +48,14 @@ VENUE_BY_ID = {
 
 
 def _get_json(url):
-    r = requests.get(
+    response = requests.get(
         url,
         timeout=15,
     )
-    r.raise_for_status()
-    return r.json()
+
+    response.raise_for_status()
+
+    return response.json()
 
 
 @lru_cache(maxsize=400)
@@ -67,6 +69,7 @@ def get_day_programs(yyyymmdd):
 
     try:
         return _get_json(url)
+
     except Exception:
         return None
 
@@ -75,17 +78,33 @@ def _float(value):
 
     try:
         text = str(value)
-        text = text.replace(",", "")
-        text = text.replace("倍", "")
+
+        text = text.replace(
+            ",",
+            "",
+        )
+
+        text = text.replace(
+            "倍",
+            "",
+        )
+
         return float(text)
+
     except Exception:
         return 0.0
 
 
-def _value(data, keys, default=0):
+def _value(
+    data,
+    keys,
+    default=0,
+):
 
     for key in keys:
+
         if key in data:
+
             value = data[key]
 
             if value not in (
@@ -103,8 +122,14 @@ def get_race(
     race_no,
 ):
 
-    yyyymmdd = date_str.replace("-", "")
-    venue_id = VENUES.get(venue_name)
+    yyyymmdd = date_str.replace(
+        "-",
+        "",
+    )
+
+    venue_id = VENUES.get(
+        venue_name
+    )
 
     if not venue_id:
         return None
@@ -150,15 +175,22 @@ def get_race(
 
     boats = []
 
-    if isinstance(racers, dict):
+    if isinstance(
+        racers,
+        dict,
+    ):
 
         for key, value in racers.items():
 
-            if not isinstance(value, dict):
+            if not isinstance(
+                value,
+                dict,
+            ):
                 continue
 
             try:
                 boat_no = int(key)
+
             except Exception:
                 continue
 
@@ -239,20 +271,25 @@ def get_race(
 
     actual = []
 
+    temp = []
+
     if isinstance(
         result_racers,
         dict,
     ):
 
-        temp = []
-
         for key, value in result_racers.items():
 
-            if not isinstance(value, dict):
+            if not isinstance(
+                value,
+                dict,
+            ):
                 continue
 
             try:
+
                 boat = int(key)
+
                 place = int(
                     value.get(
                         "place_number"
@@ -260,18 +297,21 @@ def get_race(
                 )
 
                 temp.append(
-                    (place, boat)
+                    (
+                        place,
+                        boat,
+                    )
                 )
 
             except Exception:
                 continue
 
-        temp.sort()
+    temp.sort()
 
-        actual = [
-            boat
-            for _, boat in temp[:3]
-        ]
+    actual = [
+        boat
+        for _, boat in temp[:3]
+    ]
 
     payout = 0.0
 
@@ -292,7 +332,10 @@ def get_race(
 
         for item in trifecta:
 
-            if not isinstance(item, dict):
+            if not isinstance(
+                item,
+                dict,
+            ):
                 continue
 
             payout = _float(
@@ -318,23 +361,7 @@ def get_race(
 
 
 # =========================================================
-# 公式3連単オッズ解析
-#
-# BOAT RACE公式は以下の構造:
-#
-# 2着=2 のブロック
-#   18セル → 2-3, 1-3, ...
-#   12セル → 2-4, 1-4, ...
-#   12セル → 2-5, 1-5, ...
-#   12セル → 2-6, 1-6, ...
-#
-# 2着=3 のブロック
-#   18セル
-#   12セル
-#   12セル
-#   12セル
-#
-# ...合計5ブロック×24 = 120通り
+# オッズ解析
 # =========================================================
 
 
@@ -365,15 +392,6 @@ def _odd(text):
         "",
     )
 
-    if text in (
-        "",
-        "-",
-        "--",
-        "－",
-        "－－",
-    ):
-        return None
-
     if not re.fullmatch(
         r"\d+(?:\.\d+)?",
         text,
@@ -382,54 +400,49 @@ def _odd(text):
 
     try:
         return float(text)
+
     except Exception:
         return None
 
 
-def _cell_text(cell):
+def _numeric_tokens_from_row(tr):
 
-    return re.sub(
-        r"\s+",
-        " ",
-        cell.get_text(
-            " ",
-            strip=True,
-        )
-    ).strip()
+    tokens = []
 
+    for text in tr.stripped_strings:
 
-def _parse_odds_table(table):
+        value = str(text).strip()
 
-    rows = []
-
-    for tr in table.find_all("tr"):
-
-        cells = tr.find_all(
-            ["th", "td"],
-            recursive=False,
+        value = value.replace(
+            ",",
+            "",
         )
 
-        if not cells:
-            continue
+        value = value.replace(
+            "倍",
+            "",
+        )
 
-        texts = [
-            _cell_text(cell)
-            for cell in cells
-        ]
+        if re.fullmatch(
+            r"\d+(?:\.\d+)?",
+            value,
+        ):
 
-        texts = [
-            x
-            for x in texts
-            if x != ""
-        ]
+            tokens.append(value)
 
-        if texts:
-            rows.append(texts)
+    return tokens
+
+
+def _parse_official_odds(html):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
 
     odds = {}
 
-    # 現在の各1着艇についての
-    # 「2着艇」を保持
+    # 現在の2着艇
     current_second = [
         None,
         None,
@@ -439,19 +452,41 @@ def _parse_odds_table(table):
         None,
     ]
 
-    for texts in rows:
+    for tr in soup.find_all("tr"):
 
-        # ---------------------------------
-        # 18セル:
-        # second, third, odds
-        # が6組
-        # ---------------------------------
+        tokens = (
+            _numeric_tokens_from_row(
+                tr
+            )
+        )
 
-        if len(texts) >= 18:
+        # 公式3連単表は
+        #
+        # 18個
+        # ↓
+        # 12個
+        # ↓
+        # 12個
+        # ↓
+        # 12個
+        #
+        # を繰り返す
+        if len(tokens) not in (
+            12,
+            18,
+        ):
+            continue
 
-            chunk = texts[:18]
+        # -------------------------------------------------
+        # 18個の行
+        #
+        # 2着 / 3着 / オッズ
+        # を6艇分
+        # -------------------------------------------------
 
-            parsed = True
+        if len(tokens) == 18:
+
+            parsed = []
 
             new_second = [
                 None,
@@ -462,32 +497,32 @@ def _parse_odds_table(table):
                 None,
             ]
 
-            temp = []
+            ok = True
 
-            for first in range(1, 7):
+            for i in range(6):
 
-                p = (
-                    first - 1
-                ) * 3
+                p = i * 3
 
                 second = _boat(
-                    chunk[p]
+                    tokens[p]
                 )
 
                 third = _boat(
-                    chunk[p + 1]
+                    tokens[p + 1]
                 )
 
                 odd = _odd(
-                    chunk[p + 2]
+                    tokens[p + 2]
                 )
+
+                first = i + 1
 
                 if (
                     second is None
                     or third is None
                     or odd is None
                 ):
-                    parsed = False
+                    ok = False
                     break
 
                 if len({
@@ -495,14 +530,12 @@ def _parse_odds_table(table):
                     second,
                     third,
                 }) != 3:
-                    parsed = False
+                    ok = False
                     break
 
-                new_second[
-                    first - 1
-                ] = second
+                new_second[i] = second
 
-                temp.append(
+                parsed.append(
                     (
                         (
                             first,
@@ -513,28 +546,27 @@ def _parse_odds_table(table):
                     )
                 )
 
-            if parsed:
+            if not ok:
+                continue
 
-                current_second = (
-                    new_second
-                )
+            current_second = (
+                new_second
+            )
 
-                for combo, odd in temp:
-                    odds[combo] = odd
+            for combo, odd in parsed:
 
-            continue
+                odds[combo] = odd
 
-        # ---------------------------------
-        # 12セル:
+        # -------------------------------------------------
+        # 12個の行
         #
-        # third, odds
-        # third, odds
-        # ...
+        # 3着 / オッズ
+        # だけが並ぶ
         #
-        # 2着艇は直前の18セルから引き継ぐ
-        # ---------------------------------
+        # 2着は直前の18個行から引き継ぐ
+        # -------------------------------------------------
 
-        if len(texts) >= 12:
+        else:
 
             if not all(
                 x is not None
@@ -542,38 +574,34 @@ def _parse_odds_table(table):
             ):
                 continue
 
-            chunk = texts[:12]
+            parsed = []
 
-            parsed = True
+            ok = True
 
-            temp = []
+            for i in range(6):
 
-            for first in range(1, 7):
-
-                p = (
-                    first - 1
-                ) * 2
+                p = i * 2
 
                 third = _boat(
-                    chunk[p]
+                    tokens[p]
                 )
 
                 odd = _odd(
-                    chunk[p + 1]
+                    tokens[p + 1]
                 )
 
                 second = (
-                    current_second[
-                        first - 1
-                    ]
+                    current_second[i]
                 )
 
+                first = i + 1
+
                 if (
-                    second is None
-                    or third is None
+                    third is None
                     or odd is None
+                    or second is None
                 ):
-                    parsed = False
+                    ok = False
                     break
 
                 if len({
@@ -581,10 +609,10 @@ def _parse_odds_table(table):
                     second,
                     third,
                 }) != 3:
-                    parsed = False
+                    ok = False
                     break
 
-                temp.append(
+                parsed.append(
                     (
                         (
                             first,
@@ -595,40 +623,14 @@ def _parse_odds_table(table):
                     )
                 )
 
-            if parsed:
+            if not ok:
+                continue
 
-                for combo, odd in temp:
-                    odds[combo] = odd
+            for combo, odd in parsed:
+
+                odds[combo] = odd
 
     return odds
-
-
-def _parse_official_odds(html):
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    best = {}
-
-    # 公式ページ内の全テーブルを確認し、
-    # 最も多く3連単を拾えたテーブルを採用
-    for table in soup.find_all(
-        "table"
-    ):
-
-        parsed = _parse_odds_table(
-            table
-        )
-
-        if len(parsed) > len(best):
-            best = parsed
-
-        if len(parsed) == 120:
-            return parsed
-
-    return best
 
 
 @lru_cache(maxsize=2000)
@@ -654,22 +656,21 @@ def get_trifecta_odds(
 
     try:
 
-        r = requests.get(
+        response = requests.get(
             url,
             timeout=15,
             headers={
                 "User-Agent":
-                    "Mozilla/5.0 "
-                    "(iPhone; CPU iPhone OS 17_0 "
-                    "like Mac OS X)"
+                    "Mozilla/5.0"
             },
         )
 
-        r.raise_for_status()
+        response.raise_for_status()
 
     except Exception:
+
         return {}
 
     return _parse_official_odds(
-        r.text
-            )
+        response.text
+    )

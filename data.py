@@ -227,22 +227,6 @@ def get_race(
         key=lambda x: x["boat"]
     )
 
-    if len(boats) != 6:
-        return {
-            "date": date_str,
-            "venue": venue_name,
-            "venue_id": venue_id,
-            "race_no": race_no,
-            "boats": boats,
-            "actual": [],
-            "payout": 0,
-            "raw": race,
-        }
-
-    # -------------------------
-    # 結果
-    # -------------------------
-
     result = race.get(
         "result",
         {},
@@ -289,10 +273,6 @@ def get_race(
             for _, boat in temp[:3]
         ]
 
-    # -------------------------
-    # 払戻
-    # -------------------------
-
     payout = 0.0
 
     payouts = result.get(
@@ -337,6 +317,27 @@ def get_race(
     }
 
 
+# =========================================================
+# 公式3連単オッズ解析
+#
+# BOAT RACE公式は以下の構造:
+#
+# 2着=2 のブロック
+#   18セル → 2-3, 1-3, ...
+#   12セル → 2-4, 1-4, ...
+#   12セル → 2-5, 1-5, ...
+#   12セル → 2-6, 1-6, ...
+#
+# 2着=3 のブロック
+#   18セル
+#   12セル
+#   12セル
+#   12セル
+#
+# ...合計5ブロック×24 = 120通り
+# =========================================================
+
+
 def _boat(text):
 
     text = str(text).strip()
@@ -352,11 +353,19 @@ def _boat(text):
 
 def _odd(text):
 
-    text = str(text)
-    text = text.replace(",", "")
-    text = text.replace("倍", "")
+    text = str(text).strip()
 
-    if text.strip() in (
+    text = text.replace(
+        ",",
+        "",
+    )
+
+    text = text.replace(
+        "倍",
+        "",
+    )
+
+    if text in (
         "",
         "-",
         "--",
@@ -365,132 +374,261 @@ def _odd(text):
     ):
         return None
 
-    m = re.search(
+    if not re.fullmatch(
         r"\d+(?:\.\d+)?",
         text,
-    )
-
-    if not m:
+    ):
         return None
 
     try:
-        return float(m.group())
+        return float(text)
     except Exception:
         return None
 
 
-def _parse_odds_rows(soup):
+def _cell_text(cell):
 
-    odds = {}
-
-    # 3連単関連テーブルを優先
-    tables = []
-
-    for table in soup.find_all("table"):
-
-        text = table.get_text(
+    return re.sub(
+        r"\s+",
+        " ",
+        cell.get_text(
             " ",
             strip=True,
         )
+    ).strip()
 
-        if (
-            "3連単" in text
-            or "3連単オッズ" in text
-        ):
-            tables.append(table)
 
-    if not tables:
-        tables = soup.find_all("table")
+def _parse_odds_table(table):
 
-    for table in tables:
+    rows = []
 
-        for tr in table.find_all("tr"):
+    for tr in table.find_all("tr"):
 
-            cells = tr.find_all("td")
+        cells = tr.find_all(
+            ["th", "td"],
+            recursive=False,
+        )
 
-            if len(cells) < 18:
-                continue
+        if not cells:
+            continue
 
-            texts = [
-                re.sub(
-                    r"\s+",
-                    " ",
-                    c.get_text(
-                        " ",
-                        strip=True,
-                    )
-                ).strip()
-                for c in cells
+        texts = [
+            _cell_text(cell)
+            for cell in cells
+        ]
+
+        texts = [
+            x
+            for x in texts
+            if x != ""
+        ]
+
+        if texts:
+            rows.append(texts)
+
+    odds = {}
+
+    # 現在の各1着艇についての
+    # 「2着艇」を保持
+    current_second = [
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+
+    for texts in rows:
+
+        # ---------------------------------
+        # 18セル:
+        # second, third, odds
+        # が6組
+        # ---------------------------------
+
+        if len(texts) >= 18:
+
+            chunk = texts[:18]
+
+            parsed = True
+
+            new_second = [
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             ]
 
-            # 行の中から
-            # 18セルの正しい並びを探す
-            for start in range(
-                len(texts) - 17
-            ):
+            temp = []
 
-                chunk = texts[
-                    start:start + 18
-                ]
+            for first in range(1, 7):
 
-                parsed = []
+                p = (
+                    first - 1
+                ) * 3
 
-                ok = True
+                second = _boat(
+                    chunk[p]
+                )
 
-                for group in range(6):
+                third = _boat(
+                    chunk[p + 1]
+                )
 
-                    p = group * 3
+                odd = _odd(
+                    chunk[p + 2]
+                )
 
-                    second = _boat(
-                        chunk[p]
-                    )
+                if (
+                    second is None
+                    or third is None
+                    or odd is None
+                ):
+                    parsed = False
+                    break
 
-                    third = _boat(
-                        chunk[p + 1]
-                    )
+                if len({
+                    first,
+                    second,
+                    third,
+                }) != 3:
+                    parsed = False
+                    break
 
-                    odd = _odd(
-                        chunk[p + 2]
-                    )
+                new_second[
+                    first - 1
+                ] = second
 
-                    first = group + 1
-
-                    if (
-                        second is None
-                        or third is None
-                        or odd is None
-                    ):
-                        ok = False
-                        break
-
-                    if len({
-                        first,
-                        second,
-                        third,
-                    }) != 3:
-                        ok = False
-                        break
-
-                    parsed.append(
+                temp.append(
+                    (
                         (
-                            (
-                                first,
-                                second,
-                                third,
-                            ),
-                            odd,
-                        )
+                            first,
+                            second,
+                            third,
+                        ),
+                        odd,
                     )
+                )
 
-                if not ok:
-                    continue
+            if parsed:
 
-                for combo, value in parsed:
-                    odds[combo] = value
+                current_second = (
+                    new_second
+                )
 
-                break
+                for combo, odd in temp:
+                    odds[combo] = odd
+
+            continue
+
+        # ---------------------------------
+        # 12セル:
+        #
+        # third, odds
+        # third, odds
+        # ...
+        #
+        # 2着艇は直前の18セルから引き継ぐ
+        # ---------------------------------
+
+        if len(texts) >= 12:
+
+            if not all(
+                x is not None
+                for x in current_second
+            ):
+                continue
+
+            chunk = texts[:12]
+
+            parsed = True
+
+            temp = []
+
+            for first in range(1, 7):
+
+                p = (
+                    first - 1
+                ) * 2
+
+                third = _boat(
+                    chunk[p]
+                )
+
+                odd = _odd(
+                    chunk[p + 1]
+                )
+
+                second = (
+                    current_second[
+                        first - 1
+                    ]
+                )
+
+                if (
+                    second is None
+                    or third is None
+                    or odd is None
+                ):
+                    parsed = False
+                    break
+
+                if len({
+                    first,
+                    second,
+                    third,
+                }) != 3:
+                    parsed = False
+                    break
+
+                temp.append(
+                    (
+                        (
+                            first,
+                            second,
+                            third,
+                        ),
+                        odd,
+                    )
+                )
+
+            if parsed:
+
+                for combo, odd in temp:
+                    odds[combo] = odd
 
     return odds
+
+
+def _parse_official_odds(html):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    best = {}
+
+    # 公式ページ内の全テーブルを確認し、
+    # 最も多く3連単を拾えたテーブルを採用
+    for table in soup.find_all(
+        "table"
+    ):
+
+        parsed = _parse_odds_table(
+            table
+        )
+
+        if len(parsed) > len(best):
+            best = parsed
+
+        if len(parsed) == 120:
+            return parsed
+
+    return best
 
 
 @lru_cache(maxsize=2000)
@@ -521,7 +659,9 @@ def get_trifecta_odds(
             timeout=15,
             headers={
                 "User-Agent":
-                    "Mozilla/5.0"
+                    "Mozilla/5.0 "
+                    "(iPhone; CPU iPhone OS 17_0 "
+                    "like Mac OS X)"
             },
         )
 
@@ -530,11 +670,6 @@ def get_trifecta_odds(
     except Exception:
         return {}
 
-    soup = BeautifulSoup(
-        r.text,
-        "html.parser",
-    )
-
-    return _parse_odds_rows(
-        soup
-    )
+    return _parse_official_odds(
+        r.text
+            )

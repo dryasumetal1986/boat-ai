@@ -1,7 +1,10 @@
 from datetime import date, timedelta
 
 from ai import predict_race
-from data import VENUE_BY_ID, get_race
+from data import (
+    VENUE_BY_ID,
+    get_race,
+)
 
 
 INVEST_PER_RACE = 600
@@ -87,11 +90,11 @@ def run_backtest(
                 if len(actual) < 3:
                     continue
 
-                pred = predict_race(
+                prediction = predict_race(
                     race
                 )
 
-                ranking = pred[
+                ranking = prediction[
                     "ranking"
                 ]
 
@@ -107,32 +110,32 @@ def run_backtest(
                     INVEST_PER_RACE
                 )
 
-                # 本命1着
-                if actual_top3[0] == main:
+                if (
+                    actual_top3[0]
+                    == main
+                ):
                     main_win += 1
 
-                # 本命3連対
                 if main in actual_top3:
                     main_top3 += 1
 
-                # AI上位3艇が全て3連対
                 if all(
                     x in actual_top3
                     for x in ranking[:3]
                 ):
                     all_top3 += 1
 
-                # BOX
                 if (
                     set(ranking[:3])
                     == set(actual_top3)
                 ):
                     box_hit += 1
 
-                # 本命1着を基本とする
-                predicted_combo = pred[
-                    "main_best_combo"
-                ]
+                predicted_combo = (
+                    prediction[
+                        "main_best_combo"
+                    ]
+                )
 
                 hit = (
                     actual_top3
@@ -166,13 +169,15 @@ def run_backtest(
                     "actual":
                         actual_top3,
                     "main_win":
-                        actual_top3[0] == main,
+                        actual_top3[0]
+                        == main,
                     "main_top3":
                         main in actual_top3,
                     "box_hit":
                         set(ranking[:3])
                         == set(actual_top3),
-                    "exact_hit": hit,
+                    "exact_hit":
+                        hit,
                 })
 
         cursor -= timedelta(days=1)
@@ -242,4 +247,4 @@ def run_backtest(
             box_rate,
         "exact_hit_rate":
             exact_rate,
-                    }
+    }

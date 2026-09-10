@@ -1,5 +1,6 @@
 import streamlit as st
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import data
 from ai import predict
@@ -45,39 +46,42 @@ h1{
 
 
 # =========================================================
-# 起動時の初期化
+# 今日の日付
+# 日本時間で判定
+# =========================================================
+
+JST = ZoneInfo("Asia/Tokyo")
+today = datetime.now(JST).date()
+bt_default = today - timedelta(days=1)
+
+
+# =========================================================
+# 新しいセッションの初期化
 # =========================================================
 #
-# 新しいStreamlitセッションで最初に1回だけ実行。
-# 前回の開催場・レース・日付などを引き継がず、
-# 毎回「初期状態」からスタートする。
+# 新しいStreamlitセッションで最初の1回だけ実行。
 #
+# 初期状態：
+#   開催日       → 今日
+#   開催場       → 選択してください
+#   レース       → 選択してください
+#   バックテスト → 昨日
+#   検証数       → 100
+#
+# date_input / selectbox 側では value を指定せず、
+# Session Stateだけで初期値を管理する。
+# これによりStreamlitの警告を防ぐ。
 # =========================================================
 
 if "app_initialized" not in st.session_state:
 
-    # 既存セッションに残っている選択状態を削除
-    st.session_state.pop("race_day", None)
-    st.session_state.pop("venue", None)
-    st.session_state.pop("race", None)
-    st.session_state.pop("bt_day", None)
-
-    # 初期値
-    today = date.today()
-
     st.session_state["race_day"] = today
     st.session_state["venue"] = "選択してください"
     st.session_state["race"] = "選択してください"
-    st.session_state["bt_day"] = today - timedelta(days=1)
-
-    # バックテスト件数も初期化
+    st.session_state["bt_day"] = bt_default
     st.session_state["count"] = 100
 
-    # 初期化済みフラグ
     st.session_state["app_initialized"] = True
-
-
-today = date.today()
 
 
 # =========================================================
@@ -101,9 +105,8 @@ st.header("🎯 AI予想")
 
 race_day = st.date_input(
     "開催日",
-    value=st.session_state["race_day"],
-    max_value=today,
-    key="race_day"
+    key="race_day",
+    max_value=today
 )
 
 
@@ -131,12 +134,14 @@ if venue_name != "選択してください":
     venue_no = data.STADIUM_BY_NAME[venue_name]
 
     try:
+
         race_numbers = data.get_races_for_stadium(
             race_day,
             venue_no
         )
 
     except Exception as e:
+
         race_numbers = []
 
         st.error(
@@ -154,6 +159,17 @@ else:
     race_options = [
         "選択してください"
     ]
+
+
+# ---------------------------------------------------------
+# レース選択
+# ---------------------------------------------------------
+
+# 開催場を変更した結果、以前のレース番号が
+# 現在の候補に存在しない場合は初期状態へ戻す
+if st.session_state.get("race") not in race_options:
+
+    st.session_state["race"] = "選択してください"
 
 
 race_choice = st.selectbox(
@@ -197,11 +213,13 @@ if st.button(
                 df = data.race_to_df(race)
 
                 if df.empty or len(df) != 6:
+
                     raise ValueError(
                         "6艇分の出走表データを正しく取得できませんでした。"
                     )
 
                 if set(df["boat"].astype(int)) != set(range(1, 7)):
+
                     raise ValueError(
                         "艇番が1〜6として取得できていません。"
                     )
@@ -330,13 +348,10 @@ st.header("📈 バックテスト")
 # バックテスト日
 # ---------------------------------------------------------
 
-bt_default = today - timedelta(days=1)
-
 bt_day = st.date_input(
     "バックテスト日",
-    value=st.session_state["bt_day"],
-    max_value=bt_default,
-    key="bt_day"
+    key="bt_day",
+    max_value=bt_default
 )
 
 
@@ -347,7 +362,6 @@ bt_day = st.date_input(
 count = st.selectbox(
     "検証レース数",
     [100, 200, 300, 500, 1000],
-    index=0,
     key="count"
 )
 

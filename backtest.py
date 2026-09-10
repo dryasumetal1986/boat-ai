@@ -16,235 +16,208 @@ TARGET_RACES = [
     1000,
 ]
 
+START_DATE = date(
+    2026,
+    1,
+    1
+)
+
 
 def run_backtest(
     target_count,
-    end_date=None,
+    end_date=None
 ):
 
-    if end_date is None:
-        end_date = date.today()
+    end_date = (
+        end_date
+        or date.today()
+    )
 
     cursor = (
         end_date
         - timedelta(days=1)
     )
 
-    start_date = date(
-        2026,
-        1,
-        1,
-    )
-
     rows = []
 
-    investment = 0.0
-    total_return = 0.0
+    investment = 0
+    returned = 0
 
     main_win = 0
     main_top3 = 0
-    all_top3 = 0
+    top3_all = 0
     box_hit = 0
-    exact_hit = 0
+    exact = 0
 
     while (
-        cursor >= start_date
+        cursor >= START_DATE
         and len(rows) < target_count
     ):
 
-        date_str = cursor.isoformat()
+        ds = cursor.isoformat()
 
-        for venue_id in range(1, 25):
+        # 全国24場
+        for sid in range(1, 25):
 
-            if len(rows) >= target_count:
-                break
+            venue = VENUE_BY_ID[sid]
 
-            venue = VENUE_BY_ID[
-                venue_id
-            ]
-
+            # 1R〜12R
             for race_no in range(1, 13):
 
                 if len(rows) >= target_count:
                     break
 
                 race = get_race(
-                    date_str,
+                    ds,
                     venue,
-                    race_no,
+                    race_no
                 )
 
                 if not race:
                     continue
 
                 if len(
-                    race.get("boats", [])
+                    race["boats"]
                 ) != 6:
                     continue
 
-                actual = race.get(
-                    "actual",
-                    [],
-                )
-
-                if len(actual) < 3:
+                if len(
+                    race["actual"]
+                ) < 3:
                     continue
 
-                prediction = predict_race(
+                pred = predict_race(
                     race
                 )
 
-                ranking = prediction[
-                    "ranking"
-                ]
+                main, counter, hole = (
+                    pred["ranking"][:3]
+                )
 
-                main = ranking[0]
-                counter = ranking[1]
-                hole = ranking[2]
+                actual = tuple(
+                    race["actual"][:3]
+                )
 
-                actual_top3 = tuple(
-                    actual[:3]
+                selected = (
+                    main,
+                    counter,
+                    hole
                 )
 
                 investment += (
                     INVEST_PER_RACE
                 )
 
-                if (
-                    actual_top3[0]
+                mw = (
+                    actual[0]
                     == main
-                ):
-                    main_win += 1
-
-                if main in actual_top3:
-                    main_top3 += 1
-
-                if all(
-                    x in actual_top3
-                    for x in ranking[:3]
-                ):
-                    all_top3 += 1
-
-                if (
-                    set(ranking[:3])
-                    == set(actual_top3)
-                ):
-                    box_hit += 1
-
-                predicted_combo = (
-                    prediction[
-                        "main_best_combo"
-                    ]
                 )
 
-                hit = (
-                    actual_top3
-                    == predicted_combo
+                mt = (
+                    main
+                    in actual
                 )
 
-                if hit:
+                ta = all(
+                    x in actual
+                    for x in pred[
+                        "ranking"
+                    ][:3]
+                )
 
-                    exact_hit += 1
+                bx = (
+                    set(selected)
+                    == set(actual)
+                )
 
-                    payout = float(
-                        race.get(
-                            "payout",
-                            0,
-                        )
+                ex = (
+                    actual
+                    == selected
+                )
+
+                main_win += int(mw)
+                main_top3 += int(mt)
+                top3_all += int(ta)
+                box_hit += int(bx)
+                exact += int(ex)
+
+                if ex:
+
+                    # 100円券の払戻 × 600円投資
+                    returned += (
+                        race["payout"]
+                        * 6
                     )
 
-                    total_return += (
-                        payout * 6
-                    )
-
-                rows.append({
-                    "date": date_str,
-                    "venue": venue,
-                    "race_no": race_no,
-                    "main": main,
-                    "counter": counter,
-                    "hole": hole,
-                    "predicted_combo":
-                        predicted_combo,
-                    "actual":
-                        actual_top3,
-                    "main_win":
-                        actual_top3[0]
-                        == main,
-                    "main_top3":
-                        main in actual_top3,
-                    "box_hit":
-                        set(ranking[:3])
-                        == set(actual_top3),
-                    "exact_hit":
-                        hit,
-                })
+                rows.append(
+                    {
+                        "date": ds,
+                        "venue": venue,
+                        "race_no": race_no,
+                        "main": main,
+                        "counter": counter,
+                        "hole": hole,
+                        "actual": actual,
+                        "box_hit": bx,
+                        "exact_hit": ex,
+                    }
+                )
 
         cursor -= timedelta(days=1)
 
-    count = len(rows)
-
-    if count:
-
-        recovery = (
-            total_return
-            / investment
-            * 100
-        )
-
-        main_win_rate = (
-            main_win
-            / count
-            * 100
-        )
-
-        main_top3_rate = (
-            main_top3
-            / count
-            * 100
-        )
-
-        all_top3_rate = (
-            all_top3
-            / count
-            * 100
-        )
-
-        box_rate = (
-            box_hit
-            / count
-            * 100
-        )
-
-        exact_rate = (
-            exact_hit
-            / count
-            * 100
-        )
-
-    else:
-
-        recovery = 0
-        main_win_rate = 0
-        main_top3_rate = 0
-        all_top3_rate = 0
-        box_rate = 0
-        exact_rate = 0
+    n = len(rows)
 
     return {
         "rows": rows,
-        "count": count,
+        "count": n,
         "investment": investment,
-        "return": total_return,
-        "recovery": recovery,
-        "main_win_rate":
-            main_win_rate,
-        "main_top3_rate":
-            main_top3_rate,
-        "top3_all_top3_rate":
-            all_top3_rate,
-        "box_hit_rate":
-            box_rate,
-        "exact_hit_rate":
-            exact_rate,
+        "return": returned,
+
+        "recovery": (
+            returned
+            / investment
+            * 100
+            if investment
+            else 0
+        ),
+
+        "main_win_rate": (
+            main_win
+            / n
+            * 100
+            if n
+            else 0
+        ),
+
+        "main_top3_rate": (
+            main_top3
+            / n
+            * 100
+            if n
+            else 0
+        ),
+
+        "top3_all_top3_rate": (
+            top3_all
+            / n
+            * 100
+            if n
+            else 0
+        ),
+
+        "box_hit_rate": (
+            box_hit
+            / n
+            * 100
+            if n
+            else 0
+        ),
+
+        "exact_hit_rate": (
+            exact
+            / n
+            * 100
+            if n
+            else 0
+        ),
     }

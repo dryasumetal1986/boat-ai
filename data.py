@@ -1,303 +1,465 @@
+import json
+from functools import lru_cache
+from datetime import date
+
 import requests
 import pandas as pd
-from bs4 import BeautifulSoup
-from datetime import date, timedelta
 
-BASE_API = "https://boatraceopenapi.github.io/api/v1"
+
+BASE_URL = "https://boatraceopenapi.github.io/api/v1"
+
 
 STADIUMS = {
-    "桐生": 1, "戸田": 2, "江戸川": 3, "平和島": 4,
-    "多摩川": 5, "浜名湖": 6, "蒲郡": 7, "常滑": 8,
-    "津": 9, "三国": 10, "びわこ": 11, "住之江": 12,
-    "尼崎": 13, "鳴門": 14, "丸亀": 15, "児島": 16,
-    "宮島": 17, "徳山": 18, "下関": 19, "若松": 20,
-    "芦屋": 21, "福岡": 22, "唐津": 23, "大村": 24,
+    1: "桐生",
+    2: "戸田",
+    3: "江戸川",
+    4: "平和島",
+    5: "多摩川",
+    6: "浜名湖",
+    7: "蒲郡",
+    8: "常滑",
+    9: "津",
+    10: "三国",
+    11: "びわこ",
+    12: "住之江",
+    13: "尼崎",
+    14: "鳴門",
+    15: "丸亀",
+    16: "児島",
+    17: "宮島",
+    18: "徳山",
+    19: "下関",
+    20: "若松",
+    21: "芦屋",
+    22: "福岡",
+    23: "唐津",
+    24: "大村",
 }
 
-DAY_CACHE = {}
+STADIUM_BY_NAME = {v: k for k, v in STADIUMS.items()}
 
 
-def _num(v, default=0.0):
+def _num(value, default=0.0):
     try:
-        if v is None or v == "":
+        if value is None or value == "":
             return default
-        return float(v)
-    except Exception:
+        return float(value)
+    except (TypeError, ValueError):
         return default
 
 
-def stadium_code(name):
-    return STADIUMS.get(name)
-
-
-def get_day_data(target_date):
-    """
-    1日分の24場データを取得。
-    """
-    key = target_date.strftime("%Y%m%d")
-
-    if key in DAY_CACHE:
-        return DAY_CACHE[key]
-
-    url = f"{BASE_API}/{target_date.year}/{key}.json"
-
+def _int(value, default=0):
     try:
-        r = requests.get(
-            url,
-            timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        r.raise_for_status()
-        data = r.json()
-        DAY_CACHE[key] = data
-        return data
-    except Exception:
-        DAY_CACHE[key] = {}
-        return {}
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
 
 
-def get_all_races(target_date):
+def _normalize_racers(racers):
     """
-    1日分の全24場・全レースを返す。
+    API v1のracersを、
+    {1: {...}, 2: {...}, ..., 6: {...}}
+    の形に統一する。
+
+    v1はdict形式。
+    念のため旧list形式も受け付ける。
     """
-    data = get_day_data(target_date)
-    out = []
 
-    programs = data.get("programs", {})
-    stadiums = programs.get("stadiums", {})
+    result = {}
 
-    for stadium_no, stadium_data in stadiums.items():
-        try:
-            stadium_no = int(stadium_no)
-        except Exception:
-            continue
+    if isinstance(racers, dict):
 
-        stadium_name = next(
-            (k for k, v in STADIUMS.items() if v == stadium_no),
-            str(stadium_no),
-        )
+        for key, racer in racers.items():
 
-        races = stadium_data.get("races", {})
-
-        for race_no, race in races.items():
-            try:
-                race_no_int = int(race_no)
-            except Exception:
+            if not isinstance(racer, dict):
                 continue
 
-            out.append({
-                "date": target_date,
-                "stadium_no": stadium_no,
-                "stadium": stadium_name,
-                "race_no": race_no_int,
-                "race": race,
-            })
-
-    out.sort(key=lambda x: (x["stadium_no"], x["race_no"]))
-    return out
-
-
-def get_race(target_date, stadium_name, race_no):
-    """
-    指定場・指定レースを取得。
-    """
-    data = get_day_data(target_date)
-    stadium_no = stadium_code(stadium_name)
-
-    if not stadium_no:
-        return None
-
-    stadiums = data.get("programs", {}).get("stadiums", {})
-    stadium = stadiums.get(str(stadium_no), stadiums.get(stadium_no, {}))
-
-    races = stadium.get("races", {})
-    race = races.get(str(race_no), races.get(race_no))
-
-    return race
-
-
-def _preview_list(race):
-    preview = race.get("preview", {}) if isinstance(race, dict) else {}
-
-    if isinstance(preview, list):
-        return preview
-
-    for key in ["racers", "entries", "players"]:
-        value = preview.get(key)
-        if isinstance(value, list):
-            return value
-
-    return []
-
-
-def _safe_boat(v):
-    """
-    1～6だけを艇番として認める。
-    67などは絶対に艇番にしない。
-    """
-    try:
-        n = int(v)
-        if 1 <= n <= 6:
-            return n
-    except Exception:
-        pass
-    return None
-
-
-def _find_preview(previews, boat, racer=None):
-    """
-    プレビュー情報を艇番で探す。
-
-    racer_numberは艇番として使わない。
-    """
-    boat = _safe_boat(boat)
-
-    if boat is not None:
-        for p in previews:
-            if not isinstance(p, dict):
-                continue
-
-            pboat = _safe_boat(
-                p.get("boat_number", p.get("course_number"))
+            boat = _int(
+                racer.get("entry_number"),
+                _int(key, 0)
             )
 
-            if pboat == boat:
-                return p
+            if 1 <= boat <= 6:
+                result[boat] = racer
 
-    # コース番号がない古い形式の場合だけ、
-    # リスト位置を艇番として利用する。
-    if boat is not None and 1 <= boat <= len(previews):
-        p = previews[boat - 1]
-        if isinstance(p, dict):
-            return p
+    elif isinstance(racers, list):
 
-    return {}
+        for index, racer in enumerate(racers, start=1):
 
+            if not isinstance(racer, dict):
+                continue
 
-def _racer_id(r):
-    if not isinstance(r, dict):
-        return None
+            boat = _int(
+                racer.get("entry_number"),
+                index
+            )
 
-    for key in [
-        "racer_number",
-        "racer_no",
-        "player_number",
-        "id",
-    ]:
-        value = r.get(key)
-        if value not in (None, ""):
-            return str(value)
+            if 1 <= boat <= 6:
+                result[boat] = racer
 
-    return None
+    return result
 
 
-def _racer_name(r):
-    if not isinstance(r, dict):
-        return ""
+@lru_cache(maxsize=128)
+def get_day_data(day_str):
+    """
+    1日分の全国24場データを取得する。
+    """
 
-    for key in ["name", "racer_name", "player_name"]:
-        value = r.get(key)
-        if value:
-            return str(value).strip()
+    clean_date = day_str.replace("-", "")
 
-    return ""
+    url = (
+        f"{BASE_URL}/"
+        f"{clean_date[:4]}/"
+        f"{clean_date}.json"
+    )
+
+    try:
+
+        response = requests.get(
+            url,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"API取得失敗: {day_str}\n{e}"
+        )
+
+    if not isinstance(data, dict):
+
+        raise RuntimeError(
+            f"APIデータ形式が不正です: {day_str}"
+        )
+
+    if not isinstance(
+        data.get("programs"),
+        dict
+    ):
+
+        raise RuntimeError(
+            f"programsデータがありません: {day_str}"
+        )
+
+    return data
+
+
+def get_race(day, stadium_no, race_no):
+    """
+    指定日・指定場・指定レースを取得。
+    """
+
+    if isinstance(day, date):
+        day_str = day.isoformat()
+    else:
+        day_str = str(day)
+
+    data = get_day_data(day_str)
+
+    stadiums = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+    )
+
+    stadium = stadiums.get(
+        str(int(stadium_no)),
+        {}
+    )
+
+    races = stadium.get(
+        "races",
+        {}
+    )
+
+    return races.get(
+        str(int(race_no))
+    )
+
+
+def get_races_for_stadium(
+    day,
+    stadium_no
+):
+    """
+    指定日の指定場について、
+    出走表が6艇揃っているレース番号を返す。
+    """
+
+    if isinstance(day, date):
+        day_str = day.isoformat()
+    else:
+        day_str = str(day)
+
+    data = get_day_data(day_str)
+
+    stadium = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+        .get(str(int(stadium_no)), {})
+    )
+
+    races = stadium.get(
+        "races",
+        {}
+    )
+
+    race_numbers = []
+
+    for race_key, race in races.items():
+
+        if not isinstance(race, dict):
+            continue
+
+        racers = _normalize_racers(
+            race.get("racers")
+        )
+
+        if len(racers) == 6:
+
+            race_no = _int(
+                race_key,
+                0
+            )
+
+            if 1 <= race_no <= 12:
+                race_numbers.append(
+                    race_no
+                )
+
+    return sorted(race_numbers)
 
 
 def race_to_df(race):
     """
-    出走表をAI用DataFrameに変換。
+    出走表と直前情報をDataFrameへ変換。
 
-    ★重要
-    APIのracer_numberは選手ID。
-    艇番には絶対に使用しない。
-
-    racerの配列順を1～6号艇として扱う。
+    最重要:
+    「艇番」は必ず1〜6のentry_numberを使用する。
     """
-    if not race:
+
+    if not isinstance(race, dict):
         return pd.DataFrame()
 
-    racers = race.get("racers", [])
-    if not isinstance(racers, list):
-        return pd.DataFrame()
+    racers = _normalize_racers(
+        race.get("racers")
+    )
 
-    previews = _preview_list(race)
+    preview = (
+        race
+        .get("preview", {})
+        .get("racers", {})
+    )
+
+    preview = _normalize_racers(
+        preview
+    )
+
+    if set(racers.keys()) != set(range(1, 7)):
+        return pd.DataFrame()
 
     rows = []
 
-    for i, r in enumerate(racers[:6]):
-        if not isinstance(r, dict):
-            continue
+    for boat in range(1, 7):
 
-        # ★艇番は必ず配列位置から決定
-        boat = i + 1
-
-        p = _find_preview(previews, boat, r)
+        racer = racers[boat]
+        preview_data = preview.get(
+            boat,
+            {}
+        )
 
         row = {
+
+            # ここが艇番
             "boat": boat,
-            "name": _racer_name(r),
 
-            # 選手IDは別項目
-            "racer_number": _racer_id(r) or "",
+            # API上の枠番
+            "entry_number": boat,
 
+            # 選手情報
+            "name": str(
+                racer.get(
+                    "name",
+                    ""
+                )
+            ),
+
+            # 選手登録番号
+            "racer_number": _int(
+                racer.get(
+                    "number"
+                ),
+                0
+            ),
+
+            "rank_number": _int(
+                racer.get(
+                    "rank_number"
+                ),
+                0
+            ),
+
+            "age": _int(
+                racer.get(
+                    "age"
+                ),
+                0
+            ),
+
+            # 全国成績
             "average_start_timing": _num(
-                r.get("average_start_timing")
+                racer.get(
+                    "average_start_timing"
+                ),
+                0
             ),
 
             "national_win_rate": _num(
-                r.get("national_win_rate")
-            ),
-            "national_top_2_percent": _num(
-                r.get("national_top_2_percent")
-            ),
-            "national_top_3_percent": _num(
-                r.get("national_top_3_percent")
+                racer.get(
+                    "national_win_rate"
+                ),
+                0
             ),
 
+            "national_top_2_percent": _num(
+                racer.get(
+                    "national_top_2_percent"
+                ),
+                0
+            ),
+
+            "national_top_3_percent": _num(
+                racer.get(
+                    "national_top_3_percent"
+                ),
+                0
+            ),
+
+            # 当地成績
             "local_win_rate": _num(
-                r.get("local_win_rate")
+                racer.get(
+                    "local_win_rate"
+                ),
+                0
             ),
+
             "local_top_2_percent": _num(
-                r.get("local_top_2_percent")
+                racer.get(
+                    "local_top_2_percent"
+                ),
+                0
             ),
+
             "local_top_3_percent": _num(
-                r.get("local_top_3_percent")
+                racer.get(
+                    "local_top_3_percent"
+                ),
+                0
+            ),
+
+            # モーター
+            "motor_number": _int(
+                racer.get(
+                    "motor_number"
+                ),
+                0
             ),
 
             "motor_top_2_percent": _num(
-                r.get("motor_top_2_percent")
+                racer.get(
+                    "motor_top_2_percent"
+                ),
+                0
             ),
+
             "motor_top_3_percent": _num(
-                r.get("motor_top_3_percent")
+                racer.get(
+                    "motor_top_3_percent"
+                ),
+                0
+            ),
+
+            # ボート
+            "boat_number": _int(
+                racer.get(
+                    "boat_number"
+                ),
+                0
             ),
 
             "boat_top_2_percent": _num(
-                r.get("boat_top_2_percent")
+                racer.get(
+                    "boat_top_2_percent"
+                ),
+                0
             ),
+
             "boat_top_3_percent": _num(
-                r.get("boat_top_3_percent")
+                racer.get(
+                    "boat_top_3_percent"
+                ),
+                0
             ),
 
-            "flying_count": _num(
-                r.get("flying_count")
-            ),
-            "late_count": _num(
-                r.get("late_count")
+            # F/L
+            "flying_count": _int(
+                racer.get(
+                    "flying_count"
+                ),
+                0
             ),
 
-            "course_number": boat,
+            "late_count": _int(
+                racer.get(
+                    "late_count"
+                ),
+                0
+            ),
+
+            # 直前情報
+            # course_numberは「進入コース」であり、
+            # 艇番そのものではない
+            "course_number": _int(
+                preview_data.get(
+                    "course_number"
+                ),
+                boat
+            ),
 
             "start_timing": _num(
-                p.get("start_timing")
+                preview_data.get(
+                    "start_timing"
+                ),
+                0
             ),
+
             "exhibition_time": _num(
-                p.get("exhibition_time")
+                preview_data.get(
+                    "exhibition_time"
+                ),
+                0
             ),
+
             "weight": _num(
-                p.get("weight")
+                preview_data.get(
+                    "weight"
+                ),
+                0
             ),
-            "tilt": _num(
-                p.get("tilt")
+
+            "tilt_adjustment": _num(
+                preview_data.get(
+                    "tilt_adjustment"
+                ),
+                0
             ),
         }
 
@@ -305,282 +467,252 @@ def race_to_df(race):
 
     df = pd.DataFrame(rows)
 
-    if df.empty:
-        return df
+    # 最終安全確認
+    if len(df) != 6:
+        return pd.DataFrame()
 
-    # 念のため艇番を1～6に固定
-    df["boat"] = range(1, len(df) + 1)
+    if set(
+        df["boat"].astype(int)
+    ) != set(range(1, 7)):
+        return pd.DataFrame()
 
     return df
 
 
-def _result_racers(race):
-    result = race.get("result", {}) if isinstance(race, dict) else {}
-
-    if isinstance(result, list):
-        return result
-
-    for key in ["racers", "results", "ranking"]:
-        value = result.get(key)
-        if isinstance(value, list):
-            return value
-
-    return []
-
-
-def _result_place(r):
-    if not isinstance(r, dict):
-        return None
-
-    for key in [
-        "place_number",
-        "place",
-        "rank",
-        "arrival",
-    ]:
-        value = r.get(key)
-        try:
-            n = int(value)
-            if 1 <= n <= 6:
-                return n
-        except Exception:
-            pass
-
-    return None
-
-
-def _result_explicit_boat(r):
-    if not isinstance(r, dict):
-        return None
-
-    # racer_numberはここでも使わない
-    for key in [
-        "boat_number",
-        "course_number",
-        "boat",
-    ]:
-        boat = _safe_boat(r.get(key))
-        if boat is not None:
-            return boat
-
-    return None
-
-
 def get_result(race):
     """
-    結果を「1着艇, 2着艇, 3着艇」で返す。
+    結果を1着-2着-3着の艇番で返す。
 
     例:
-        (2, 1, 4)
+    (4, 1, 2)
 
-    ★選手IDを艇番として使わない。
+    API v1では
+    result.racers["4"].place_number == 1
+    なら4号艇が1着。
     """
-    if not race:
+
+    if not isinstance(race, dict):
         return None
 
-    result_racers = _result_racers(race)
-
-    if not result_racers:
-        return None
-
-    program_racers = race.get("racers", [])
-    if not isinstance(program_racers, list):
-        program_racers = []
-
-    # 選手ID → 本来の艇番
-    id_to_boat = {}
-
-    # 選手名 → 本来の艇番
-    name_to_boat = {}
-
-    for i, r in enumerate(program_racers[:6]):
-        boat = i + 1
-
-        rid = _racer_id(r)
-        name = _racer_name(r)
-
-        if rid:
-            id_to_boat[rid] = boat
-
-        if name:
-            name_to_boat[name] = boat
-
-    placements = {}
-
-    for idx, rr in enumerate(result_racers):
-        if not isinstance(rr, dict):
-            continue
-
-        place = _result_place(rr)
-
-        if place is None:
-            continue
-
-        # まず明示された艇番
-        boat = _result_explicit_boat(rr)
-
-        # なければ選手IDからプログラムの艇番を逆引き
-        if boat is None:
-            rid = _racer_id(rr)
-            if rid and rid in id_to_boat:
-                boat = id_to_boat[rid]
-
-        # 名前から逆引き
-        if boat is None:
-            name = _racer_name(rr)
-            if name and name in name_to_boat:
-                boat = name_to_boat[name]
-
-        # 最後の非常手段
-        # 結果データが「艇番順」でしか入っていない場合のみ使用
-        if boat is None and idx < 6:
-            candidate = idx + 1
-            if candidate in range(1, 7):
-                boat = candidate
-
-        if boat in range(1, 7):
-            placements[place] = boat
-
-    if not all(p in placements for p in [1, 2, 3]):
-        return None
-
-    result = (
-        placements[1],
-        placements[2],
-        placements[3],
+    result = race.get(
+        "result"
     )
 
-    # 重複艇番は不正
-    if len(set(result)) != 3:
+    if not isinstance(result, dict):
         return None
 
-    return result
+    racers = _normalize_racers(
+        result.get("racers")
+    )
+
+    if len(racers) < 6:
+        return None
+
+    finish = []
+
+    for boat, racer in racers.items():
+
+        place = _int(
+            racer.get(
+                "place_number"
+            ),
+            0
+        )
+
+        if (
+            1 <= boat <= 6
+            and place > 0
+        ):
+            finish.append(
+                (
+                    place,
+                    boat
+                )
+            )
+
+    finish.sort(
+        key=lambda x: x[0]
+    )
+
+    if len(finish) < 3:
+        return None
+
+    top3 = tuple(
+        boat
+        for place, boat
+        in finish[:3]
+    )
+
+    if len(
+        set(top3)
+    ) != 3:
+        return None
+
+    if not all(
+        1 <= boat <= 6
+        for boat in top3
+    ):
+        return None
+
+    return top3
 
 
 def get_payout(race):
     """
-    3連単払戻金を取得。
+    3連単払戻を取得。
     """
-    if not race:
-        return 0
 
-    result = race.get("result", {})
+    if not isinstance(race, dict):
+        return None
 
-    payouts = result.get("payouts", {})
-    trifecta = payouts.get("trifecta", [])
-
-    if isinstance(trifecta, dict):
-        trifecta = [trifecta]
-
-    if isinstance(trifecta, list):
-        for item in trifecta:
-            if not isinstance(item, dict):
-                continue
-
-            amount = item.get("amount")
-
-            try:
-                return int(float(amount))
-            except Exception:
-                continue
-
-    return 0
-
-
-def get_official_odds(target_date, stadium_name, race_no):
-    """
-    BOATRACE公式3連単オッズを取得。
-
-    取得できなかった場合は {}。
-    """
-    code = stadium_code(stadium_name)
-
-    if not code:
-        return {}
-
-    date_str = target_date.strftime("%Y%m%d")
-
-    url = (
-        "https://www.boatrace.jp/owpc/pc/race/odds3t"
-        f"?hd={date_str}&jcd={code:02d}&rno={race_no}"
+    payouts = (
+        race
+        .get("result", {})
+        .get("payouts", {})
+        .get("trifecta", [])
     )
 
-    try:
-        r = requests.get(
-            url,
-            timeout=15,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            },
-        )
-        r.raise_for_status()
-    except Exception:
-        return {}
+    if not isinstance(
+        payouts,
+        list
+    ):
+        return None
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    for item in payouts:
 
-    odds = {}
-
-    # 3連単表のtrを探索
-    rows = soup.select("tr")
-
-    for tr in rows:
-        cells = tr.find_all(["td", "th"])
-
-        texts = []
-        for cell in cells:
-            text = cell.get_text(" ", strip=True)
-            if text:
-                texts.append(text)
-
-        # 18セル程度の行が3連単表
-        if len(texts) < 18:
+        if not isinstance(
+            item,
+            dict
+        ):
             continue
 
-        # 数字らしいものだけを残す
-        values = []
-        for text in texts:
-            cleaned = text.replace(",", "").replace("¥", "").strip()
-            values.append(cleaned)
+        combination = str(
+            item.get(
+                "combination",
+                ""
+            )
+        )
 
-        # 6グループ × 3セル
-        for group in range(6):
-            start = group * 3
+        combination = (
+            combination
+            .replace("=", "-")
+            .replace(" ", "")
+        )
 
-            if start + 2 >= len(values):
-                break
+        parts = combination.split("-")
 
-            second = values[start]
-            third = values[start + 1]
-            oddstext = values[start + 2]
+        if len(parts) == 3:
 
-            try:
-                second_i = int(second)
-                third_i = int(third)
-                odds_value = float(
-                    oddstext.replace("倍", "")
+            return {
+                "combination": combination,
+                "amount": _int(
+                    item.get(
+                        "amount"
+                    ),
+                    0
                 )
+            }
 
-                first_i = group + 1
+    return None
 
-                if (
-                    1 <= first_i <= 6
-                    and 1 <= second_i <= 6
-                    and 1 <= third_i <= 6
-                    and len({
-                        first_i,
-                        second_i,
-                        third_i,
-                    }) == 3
-                ):
-                    key = (
-                        first_i,
-                        second_i,
-                        third_i,
-                    )
-                    odds[key] = odds_value
 
-            except Exception:
+def get_all_races(
+    day,
+    require_result=False
+):
+    """
+    1日分の全24場レースを取得。
+
+    戻り値:
+    [
+        (stadium_no, race_no, race),
+        ...
+    ]
+    """
+
+    if isinstance(day, date):
+        day_str = day.isoformat()
+    else:
+        day_str = str(day)
+
+    data = get_day_data(
+        day_str
+    )
+
+    stadiums = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+    )
+
+    result = []
+
+    for stadium_key, stadium in stadiums.items():
+
+        stadium_no = _int(
+            stadium_key,
+            0
+        )
+
+        if not (
+            1 <= stadium_no <= 24
+        ):
+            continue
+
+        if not isinstance(
+            stadium,
+            dict
+        ):
+            continue
+
+        races = stadium.get(
+            "races",
+            {}
+        )
+
+        for race_key, race in races.items():
+
+            race_no = _int(
+                race_key,
+                0
+            )
+
+            if not (
+                1 <= race_no <= 12
+            ):
                 continue
 
-    return odds
+            if not isinstance(
+                race,
+                dict
+            ):
+                continue
+
+            racers = _normalize_racers(
+                race.get("racers")
+            )
+
+            if len(racers) != 6:
+                continue
+
+            if require_result:
+
+                if get_result(race) is None:
+                    continue
+
+            result.append(
+                (
+                    stadium_no,
+                    race_no,
+                    race
+                )
+            )
+
+    result.sort(
+        key=lambda x: (
+            x[0],
+            x[1]
+        )
+    )
+
+    return result

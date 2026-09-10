@@ -1,104 +1,160 @@
 import itertools
-import math
 
 import numpy as np
 
 
 def _norm(x):
     a = np.maximum(np.asarray(x, dtype=float), 0)
-    s = a.sum()
-    return a / s if s else np.ones(len(a)) / len(a)
+    total = a.sum()
+
+    if total <= 0:
+        return np.ones(len(a)) / len(a)
+
+    return a / total
 
 
 def predict_race(race):
     scores = []
 
-    for b in race["boats"]:
-        boat = b["boat"]
+    for boat_data in race["boats"]:
+        boat = boat_data["boat"]
 
-        s = (
-            b["rate"] * 4.2
-            + b["local_rate"] * 1.8
-            + b["motor"] * 0.8
-            + b["course"] * 0.7
+        score = (
+            boat_data["rate"] * 4.2
+            + boat_data["local_rate"] * 1.8
+            + boat_data["motor"] * 0.8
+            + boat_data["course"] * 0.7
             + max(0, 7 - boat) * 1.2
         )
 
         if boat == 1:
-            s += 8
+            score += 8
 
-        scores.append(max(s, 0.1))
+        scores.append(max(score, 0.1))
 
-    scores = np.array(scores, dtype=float)
-
-    first_raw = np.exp(
-        (scores + np.array([3, 0, 0, 0, 0, 0])) / 10
+    scores = np.array(
+        scores,
+        dtype=float
     )
 
-    first_probs = _norm(first_raw)
+    first_raw = np.exp(
+        (
+            scores
+            + np.array(
+                [3, 0, 0, 0, 0, 0],
+                dtype=float
+            )
+        )
+        / 10
+    )
+
+    first_probs_array = _norm(
+        first_raw
+    )
+
+    # 1〜6号艇の辞書に変換
+    first_probs = {
+        boat: float(
+            first_probs_array[boat - 1]
+        )
+        for boat in range(1, 7)
+    }
 
     combos = list(
-        itertools.permutations(range(1, 7), 3)
+        itertools.permutations(
+            range(1, 7),
+            3
+        )
     )
 
     weights = []
 
-    for a, b, c in combos:
-        w = first_probs[a - 1] ** 1.60
-        w *= first_probs[b - 1] ** 0.90
-        w *= first_probs[c - 1] ** 0.65
+    for first, second, third in combos:
 
-        if a == 1:
-            w *= 1.20
-
-        if b in (2, 3):
-            w *= 1.05
-
-        if a in (5, 6) and first_probs[a - 1] < 0.12:
-            w *= 0.85
-
-        weights.append(w)
-
-    probs = _norm(weights)
-
-    joint = dict(
-        zip(
-            combos,
-            map(float, probs)
+        weight = (
+            first_probs[first] ** 1.60
         )
+
+        weight *= (
+            first_probs[second] ** 0.90
+        )
+
+        weight *= (
+            first_probs[third] ** 0.65
+        )
+
+        if first == 1:
+            weight *= 1.20
+
+        if second in (2, 3):
+            weight *= 1.05
+
+        if (
+            first in (5, 6)
+            and first_probs[first] < 0.12
+        ):
+            weight *= 0.85
+
+        weights.append(weight)
+
+    combo_probs = _norm(
+        weights
     )
 
+    joint = {
+        combo: float(prob)
+        for combo, prob in zip(
+            combos,
+            combo_probs
+        )
+    }
+
     ranking = sorted(
-        first_probs.keys(),
-        key=first_probs.get,
+        range(1, 7),
+        key=lambda boat: first_probs[boat],
         reverse=True
     )
 
-    main, counter, hole = ranking[:3]
+    main = ranking[0]
+    counter = ranking[1]
+    hole = ranking[2]
+
+    confidence = (
+        55.0
+        + (
+            first_probs[main]
+            - 1 / 6
+        ) * 75
+    )
 
     confidence = max(
         55.0,
         min(
             90.0,
-            55.0
-            + (first_probs[main] - 1 / 6) * 75
+            confidence
         )
     )
 
     return {
         "scores": {
-            i + 1: float(scores[i])
-            for i in range(6)
+            boat: float(
+                scores[boat - 1]
+            )
+            for boat in range(1, 7)
         },
+
         "joint": joint,
-        "first_probs": {
-            i: float(first_probs[i - 1])
-            for i in range(1, 7)
-        },
+
+        "first_probs": first_probs,
+
         "ranking": ranking,
+
         "main": main,
+
         "counter": counter,
+
         "hole": hole,
+
         "confidence": confidence,
     }
 
@@ -109,13 +165,16 @@ def value_candidates(
     min_prob=0.006,
     limit=8
 ):
-    rows = []
+    candidates = []
 
     for combo, prob in prediction["joint"].items():
 
         odd = odds.get(combo)
 
-        if odd is None or odd <= 0:
+        if odd is None:
+            continue
+
+        if odd <= 0:
             continue
 
         if prob < min_prob:
@@ -123,44 +182,53 @@ def value_candidates(
 
         market_prob = 1.0 / odd
 
-        edge = prob - market_prob
+        edge = (
+            prob
+            - market_prob
+        )
 
-        ev = prob * odd - 1.0
+        ev = (
+            prob * odd
+            - 1.0
+        )
 
         if ev <= 0:
             continue
 
         # -----------------------------------------
-        # 的中率を最優先
+        # 的中率最優先
         # EVは補助評価
         # -----------------------------------------
-        #
-        # EVの影響を最大35%相当に制限。
-        # 150%以上のEVは、それ以上評価を膨らませない。
-        #
+
         ev_boost = (
-            min(max(ev, 0.0), 1.50)
+            min(
+                max(ev, 0.0),
+                1.50
+            )
             / 1.50
             * 0.35
         )
 
-        score = prob * (1.0 + ev_boost)
+        score = (
+            prob
+            * (1.0 + ev_boost)
+        )
 
-        rows.append(
+        candidates.append(
             {
                 "combo": combo,
                 "prob": float(prob),
                 "odds": float(odd),
-                "market_prob": float(market_prob),
+                "market_prob": float(
+                    market_prob
+                ),
                 "edge": float(edge),
                 "ev": float(ev),
                 "score": float(score),
             }
         )
 
-    # 的中率を最優先。
-    # 近い場合にEVで比較。
-    rows.sort(
+    candidates.sort(
         key=lambda x: (
             x["score"],
             x["prob"],
@@ -169,4 +237,4 @@ def value_candidates(
         reverse=True
     )
 
-    return rows[:limit]
+    return candidates[:limit]

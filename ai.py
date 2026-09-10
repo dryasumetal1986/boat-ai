@@ -1,5 +1,4 @@
 import math
-
 import numpy as np
 
 
@@ -16,22 +15,11 @@ def _score(racer):
 
     score = 0.0
 
-    # 全国成績
     score += _f(raw.get("national_win_rate")) * 2.2
-
-    # 当地成績
     score += _f(raw.get("local_win_rate")) * 1.8
-
-    # 全国2連対率
     score += _f(raw.get("national_top_2_percent")) * 0.06
-
-    # 当地2連対率
     score += _f(raw.get("local_top_2_percent")) * 0.04
-
-    # モーター2連対率
     score += _f(raw.get("motor_top_2_percent")) * 0.04
-
-    # ボート2連対率
     score += _f(raw.get("boat_top_2_percent")) * 0.02
 
     # コース補正
@@ -50,26 +38,13 @@ def _score(racer):
 
 
 def _scores(racers):
-    result = {}
-
-    for racer in racers:
-        result[racer["number"]] = _score(racer)
-
-    return result
+    return {
+        racer["number"]: _score(racer)
+        for racer in racers
+    }
 
 
 def _trifecta_distribution(scores):
-    """
-    6艇から3連単120通りを生成。
-
-    各組み合わせを独立に作ったあと、
-    120通り全体に対してsoftmaxを行うため、
-    3連単確率の合計は必ず100%になる。
-
-    さらに15%を均等分配して、
-    極端な確率集中を少し抑える。
-    """
-
     combinations = []
 
     for a in range(1, 7):
@@ -83,11 +58,11 @@ def _trifecta_distribution(scores):
 
                 combinations.append((a, b, c))
 
-    raw = {}
-
     t1 = 12.0
     t2 = 15.0
     t3 = 18.0
+
+    raw = {}
 
     for combo in combinations:
         a, b, c = combo
@@ -109,28 +84,21 @@ def _trifecta_distribution(scores):
 
     total = sum(weights.values())
 
-    if total <= 0:
-        uniform = 1.0 / len(combinations)
-        return {
-            combo: uniform
-            for combo in combinations
-        }
-
     probabilities = {
         combo: weights[combo] / total
         for combo in combinations
     }
 
-    # 極端な確率集中を抑える
+    # 極端なAI予想を少し緩和
     uniform = 1.0 / 120.0
 
     probabilities = {
-        combo: probabilities[combo] * 0.85
+        combo:
+        probabilities[combo] * 0.85
         + uniform * 0.15
         for combo in combinations
     }
 
-    # 最終的に誤差なく100%へ正規化
     total = sum(probabilities.values())
 
     return {
@@ -140,39 +108,18 @@ def _trifecta_distribution(scores):
 
 
 def _first_probabilities(trifecta):
-    """
-    120通りの3連単確率から、
-    1着艇別の確率を集計する。
-
-    合計は100%になる。
-    """
-
     result = {
         i: 0.0
         for i in range(1, 7)
     }
 
     for combo, probability in trifecta.items():
-        first = combo[0]
-        result[first] += probability
+        result[combo[0]] += probability
 
-    total = sum(result.values())
-
-    if total <= 0:
-        return result
-
-    return {
-        boat: probability / total
-        for boat, probability in result.items()
-    }
+    return result
 
 
 def _confidence(probabilities):
-    """
-    6艇の1着確率分布のエントロピーから
-    AI信頼度を算出。
-    """
-
     values = np.array(
         list(probabilities.values()),
         dtype=float,
@@ -190,12 +137,9 @@ def _confidence(probabilities):
 
     maximum = math.log(6)
 
-    if maximum <= 0:
-        certainty = 0.0
-    else:
-        certainty = 1.0 - (
-            entropy / maximum
-        )
+    certainty = 1.0 - (
+        entropy / maximum
+    )
 
     confidence = (
         0.55
@@ -212,24 +156,6 @@ def _confidence(probabilities):
 
 
 def _candidates(trifecta, odds):
-    """
-    3連単120通りについて、
-
-    - AI確率
-    - 公式オッズ
-    - 市場確率 = 1 / オッズ
-    - EV
-    - Edge
-
-    を計算。
-
-    EV:
-        AI確率 × オッズ - 1
-
-    Edge:
-        AI確率 - 市場確率
-    """
-
     result = []
 
     for combo, probability in trifecta.items():
@@ -246,7 +172,7 @@ def _candidates(trifecta, odds):
             "edge": None,
         }
 
-        if odd is not None and odd > 0:
+        if odd and odd > 0:
 
             market_probability = 1.0 / odd
 
@@ -260,10 +186,7 @@ def _candidates(trifecta, odds):
             )
 
             item["ev"] = ev
-
-            item["ev_rate"] = (
-                ev * 100.0
-            )
+            item["ev_rate"] = ev * 100.0
 
             item["edge"] = (
                 probability
@@ -274,16 +197,16 @@ def _candidates(trifecta, odds):
 
     if odds:
         result.sort(
-            key=lambda x: (
-                -999999999
-                if x["ev"] is None
-                else x["ev"]
-            ),
+            key=lambda x:
+            -999999
+            if x["ev"] is None
+            else x["ev"],
             reverse=True,
         )
     else:
         result.sort(
-            key=lambda x: x["probability"],
+            key=lambda x:
+            x["probability"],
             reverse=True,
         )
 
@@ -291,23 +214,6 @@ def _candidates(trifecta, odds):
 
 
 def tri_ai(racers, odds=None):
-    """
-    メインAI。
-
-    戻り値:
-        scores
-        probabilities
-        ranking
-        main
-        counter
-        hole
-        confidence
-        trifecta_probabilities
-        trifecta_candidates
-        odds
-        odds_available
-    """
-
     odds = odds or {}
 
     if not racers:
@@ -341,11 +247,7 @@ def tri_ai(racers, odds=None):
         trifecta
     )
 
-    main = (
-        ranking[0]
-        if ranking
-        else None
-    )
+    main = ranking[0] if ranking else None
 
     counter = (
         ranking[1]
@@ -357,32 +259,20 @@ def tri_ai(racers, odds=None):
 
     if len(ranking) >= 3:
 
-        remaining = [
+        candidates = [
             x
             for x in ranking
-            if x not in (
-                main,
-                counter,
-            )
+            if x not in [main, counter]
         ]
 
-        # 穴は残った艇の中で
-        # 1着確率が最も高い艇
         hole = max(
-            remaining,
-            key=lambda x: probabilities.get(
-                x,
-                0.0,
-            ),
+            candidates,
+            key=lambda x:
+            probabilities.get(x, 0.0),
         )
 
     confidence = _confidence(
         probabilities
-    )
-
-    candidates = _candidates(
-        trifecta,
-        odds,
     )
 
     return {
@@ -394,7 +284,10 @@ def tri_ai(racers, odds=None):
         "hole": hole,
         "confidence": confidence,
         "trifecta_probabilities": trifecta,
-        "trifecta_candidates": candidates,
+        "trifecta_candidates": _candidates(
+            trifecta,
+            odds,
+        ),
         "odds": odds,
         "odds_available": len(odds) > 0,
     }

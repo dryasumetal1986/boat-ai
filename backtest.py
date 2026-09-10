@@ -10,22 +10,15 @@ BET_AMOUNT = 600
 BET_UNIT = 100
 
 
-def _dates_backwards(run_date):
+def _dates_backwards(end_date):
     """
-    当日を除外し、
-    前日からSTART_DATEまで遡る。
-
-    例:
-        run_date = 20260910
-        ↓
-        20260909
-        20260908
-        ...
+    当日は除外。
+    前日からSTART_DATEまで。
     """
 
     current = (
         datetime.strptime(
-            str(run_date),
+            end_date,
             "%Y%m%d",
         )
         - timedelta(days=1)
@@ -42,16 +35,10 @@ def _dates_backwards(run_date):
             "%Y%m%d"
         )
 
-        current -= timedelta(
-            days=1
-        )
+        current -= timedelta(days=1)
 
 
 def _completed_races(target_date):
-    """
-    指定日の結果確定済みレースだけを取得。
-    """
-
     raw = data.get_data(
         target_date
     )
@@ -59,13 +46,15 @@ def _completed_races(target_date):
     if not raw:
         return []
 
-    groups = {}
+    result = []
 
     for (
-        stadium,
+        stadium_number,
         race_number,
         race,
-    ) in data.all_races_for_date(raw):
+    ) in data.all_races_for_date(
+        raw
+    ):
 
         actual = data.get_actual_order(
             race
@@ -74,78 +63,43 @@ def _completed_races(target_date):
         if len(actual) < 3:
             continue
 
-        groups.setdefault(
-            stadium,
-            [],
-        ).append(
-            (
+        result.append({
+            "date": target_date,
+            "stadium_number":
+                stadium_number,
+            "race_number":
                 race_number,
-                race,
-                actual,
-            )
+            "race": race,
+            "actual": actual,
+        })
+
+    result.sort(
+        key=lambda x: (
+            x["stadium_number"],
+            x["race_number"],
         )
-
-    for stadium in groups:
-        groups[stadium].sort(
-            key=lambda x: x[0]
-        )
-
-    # 全国24場をなるべく均等に
-    # 時系列へ混ぜる
-    result = []
-
-    while True:
-
-        added = False
-
-        for stadium in sorted(
-            groups
-        ):
-
-            if groups[stadium]:
-
-                result.append(
-                    (
-                        stadium,
-                        *groups[
-                            stadium
-                        ].pop(0),
-                    )
-                )
-
-                added = True
-
-        if not added:
-            break
+    )
 
     return result
 
 
 def run_backtest(
-    run_date,
+    end_date,
     target_count,
     progress_callback=None,
 ):
-    """
-    当日を除外して、
-    前日から過去へ遡って検証。
-
-    target_count:
-        100 / 300 / 500 など
-    """
-
     races = []
 
     dates = list(
         _dates_backwards(
-            run_date
+            end_date
         )
     )
 
-    total_dates = len(dates)
-
-    if total_dates == 0:
-        return _evaluate([])
+    total_dates = max(
+        len(dates),
+        1,
+    )
 
     for index, date in enumerate(
         dates,
@@ -156,31 +110,11 @@ def run_backtest(
             date
         )
 
-        for (
-            stadium,
-            race_number,
-            race,
-            actual,
-        ) in daily:
+        for item in daily:
 
-            races.append(
-                {
-                    "date": date,
-                    "stadium_number": (
-                        stadium
-                    ),
-                    "race_number": (
-                        race_number
-                    ),
-                    "race": race,
-                    "actual": actual,
-                }
-            )
+            races.append(item)
 
-            if (
-                len(races)
-                >= target_count
-            ):
+            if len(races) >= target_count:
 
                 if progress_callback:
                     progress_callback(
@@ -188,12 +122,11 @@ def run_backtest(
                     )
 
                 return _evaluate(
-                    races[
-                        :target_count
-                    ]
+                    races[:target_count]
                 )
 
         if progress_callback:
+
             progress_callback(
                 min(
                     index
@@ -207,82 +140,12 @@ def run_backtest(
     )
 
 
-def _find_trifecta_payout(
-    race,
-    actual,
-):
-    """
-    APIの3連単払戻は100円単位。
-
-    例:
-        1-3-5 = 880円
-
-    600円投資なら:
-        880 × 6 = 5,280円
-    """
-
-    if len(actual) < 3:
-        return 0
-
-    result = race.get(
-        "result",
-        {},
-    )
-
-    payouts = result.get(
-        "payouts",
-        {},
-    )
-
-    trifecta_payouts = (
-        payouts.get(
-            "trifecta",
-            [],
-        )
-    )
-
-    actual_combo = "-".join(
-        str(x)
-        for x in actual[:3]
-    )
-
-    for payout in trifecta_payouts:
-
-        if not isinstance(
-            payout,
-            dict,
-        ):
-            continue
-
-        combination = str(
-            payout.get(
-                "combination",
-                "",
-            )
-        )
-
-        if combination != actual_combo:
-            continue
-
-        try:
-            amount = int(
-                payout.get(
-                    "amount",
-                    0,
-                )
-            )
-        except Exception:
-            amount = 0
-
-        return amount
-
-    return 0
-
-
 def _evaluate(races):
+
     total = len(races)
 
     if total == 0:
+
         return {
             "total": 0,
             "results": [],
@@ -307,30 +170,19 @@ def _evaluate(races):
 
     for item in races:
 
+        race = item["race"]
+
         racers = data.get_race_racers(
-            item["race"]
+            race
         )
 
         prediction = ai.tri_ai(
             racers
         )
 
-        main = prediction.get(
-            "main"
-        )
-
-        counter = prediction.get(
-            "counter"
-        )
-
-        hole = prediction.get(
-            "hole"
-        )
-
-        ranking = prediction.get(
-            "ranking",
-            [],
-        )
+        main = prediction["main"]
+        counter = prediction["counter"]
+        hole = prediction["hole"]
 
         actual = item["actual"]
 
@@ -338,54 +190,50 @@ def _evaluate(races):
             actual[:3]
         )
 
-        # 本命1着率
+        # 本命1着
         if (
-            main is not None
-            and len(actual) >= 1
+            len(actual) >= 1
             and main == actual[0]
         ):
             main_win += 1
 
-        # 本命3連対率
-        if (
-            main is not None
-            and main in actual3
-        ):
+        # 本命3連対
+        if main in actual3:
             main_top3 += 1
 
-        # AI上位3艇「全艇」3連対率
-        ai_top3 = ranking[:3]
+        # AI上位3艇が全艇3連対
+        top3 = prediction[
+            "ranking"
+        ][:3]
 
-        if (
-            len(ai_top3) == 3
-            and all(
-                boat in actual3
-                for boat in ai_top3
-            )
+        if all(
+            boat in actual3
+            for boat in top3
         ):
             top3_all_top3 += 1
 
-        # AI3連単完全的中
         predicted = (
             main,
             counter,
             hole,
         )
 
+        # 3連単完全的中
         if (
             len(actual) >= 3
             and predicted
             == tuple(actual[:3])
         ):
+
             trifecta_hit += 1
 
-            # 600円投資
-            # 公式払戻は100円単位
-            race_payout = (
-                _find_trifecta_payout(
-                    item["race"],
-                    actual,
+            # 100円払戻 × 6 = 600円購入分
+            race_payout = int(
+                item["race"].get(
+                    "payout",
+                    0,
                 )
+                or 0
             )
 
             payout += (
@@ -396,69 +244,95 @@ def _evaluate(races):
                 )
             )
 
-        # 1レース600円投資
         investment += BET_AMOUNT
 
-        results.append(
-            {
-                "date": item["date"],
-                "stadium": (
-                    data.get_stadium_name(
-                        item[
-                            "stadium_number"
-                        ]
-                    )
+        results.append({
+            "date":
+                item["date"],
+
+            "stadium":
+                data.get_stadium_name(
+                    item[
+                        "stadium_number"
+                    ]
                 ),
-                "race": item[
-                    "race_number"
-                ],
-                "main": main,
-                "counter": counter,
-                "hole": hole,
-                "actual": actual[:3],
-                "trifecta_hit": (
+
+            "race":
+                item["race_number"],
+
+            "main":
+                main,
+
+            "counter":
+                counter,
+
+            "hole":
+                hole,
+
+            "actual":
+                actual[:3],
+
+            "trifecta_hit":
+                (
                     len(actual) >= 3
                     and predicted
                     == tuple(actual[:3])
                 ),
-                "ai_top3_hit_count": sum(
-                    1
-                    for boat in ai_top3
-                    if boat in actual3
+
+            "ai_top3_hit_count":
+                len(
+                    set(
+                        [
+                            main,
+                            counter,
+                            hole,
+                        ]
+                    )
+                    & actual3
                 ),
-            }
-        )
+        })
 
     recovery = (
-        payout / investment * 100
-        if investment > 0
+        payout
+        / investment
+        * 100.0
+        if investment
         else 0.0
     )
 
     return {
-        "total": total,
-        "results": results,
-        "recovery": recovery,
-        "main_win_rate": (
+        "total":
+            total,
+
+        "results":
+            results,
+
+        "recovery":
+            recovery,
+
+        "main_win_rate":
             main_win
             / total
-            * 100
-        ),
-        "main_top3_rate": (
+            * 100.0,
+
+        "main_top3_rate":
             main_top3
             / total
-            * 100
-        ),
-        "top3_all_top3_rate": (
+            * 100.0,
+
+        "top3_all_top3_rate":
             top3_all_top3
             / total
-            * 100
-        ),
-        "trifecta_hit_rate": (
+            * 100.0,
+
+        "trifecta_hit_rate":
             trifecta_hit
             / total
-            * 100
-        ),
-        "investment": investment,
-        "payout": payout,
-            }
+            * 100.0,
+
+        "investment":
+            investment,
+
+        "payout":
+            payout,
+        }

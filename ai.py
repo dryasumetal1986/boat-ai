@@ -233,11 +233,8 @@ def _ordering_bonus(
     third_score,
 ):
     """
-    第1実験：
-    2着・3着の「役割差」を少しだけ強める。
-
-    軸選択・基本スコア・穴選択は変更しない。
-    現行12.2%版との差を最小限にする。
+    現行12.2%版の2着・3着順調整。
+    ここは変更しない。
     """
 
     second_strength = float(
@@ -248,13 +245,11 @@ def _ordering_bonus(
         third_score[third_boat]
     )
 
-    # その艇自身が「2着向き」か
     second_role = float(
         second_score[second_boat]
         - third_score[second_boat]
     )
 
-    # その艇自身が「3着向き」か
     third_role = float(
         third_score[third_boat]
         - second_score[third_boat]
@@ -276,8 +271,6 @@ def _ordering_bonus(
         )
     )
 
-    # 2着艇の2着適性と
-    # 3着艇の3着適性を評価
     role = (
         second_role
         + third_role
@@ -296,14 +289,9 @@ def _ordering_bonus(
         )
     )
 
-    # 現行12.2%版：
-    # 0.035 * strength_gap
-    # + 0.025 * role
-    #
-    # 第1実験では「役割差」を少しだけ強める。
     return (
         0.035 * strength_gap
-        + 0.032 * role
+        + 0.025 * role
     )
 
 
@@ -314,7 +302,13 @@ def _select_main_counter(
     third_score,
 ):
     """
-    今回12.2%版の本線・対抗ロジックを維持。
+    現行12.2%版を基本維持。
+
+    追加実験：
+    5号艇の1着能力が現在軸にかなり近い場合だけ、
+    5号艇軸を候補として検討する。
+
+    無条件で5号艇を優遇しない。
     """
 
     if not ranked:
@@ -324,8 +318,67 @@ def _select_main_counter(
 
     original_main = ranked[0]
 
-    axis = int(
+    original_axis = int(
         original_main[0][0]
+    )
+
+    # -------------------------------------------------
+    # 5号艇の条件付き救済
+    #
+    # 現在の軸とのfirst_score差が小さい場合だけ検討。
+    # さらに5号艇の最上位組み合わせが、
+    # 現在の本線から大きく離れていない場合だけ採用。
+    # -------------------------------------------------
+
+    candidate_main = original_main
+
+    if original_axis != 5:
+
+        current_axis_score = float(
+            first_score[original_axis]
+        )
+
+        boat5_score = float(
+            first_score[5]
+        )
+
+        axis_gap = (
+            current_axis_score
+            - boat5_score
+        )
+
+        # 5号艇が現在軸から0.025以内なら検討
+        if axis_gap <= 0.025:
+
+            boat5_candidates = [
+                item
+                for item in ranked
+                if int(item[0][0]) == 5
+            ]
+
+            if boat5_candidates:
+
+                best_boat5 = boat5_candidates[0]
+
+                original_raw = float(
+                    original_main[2]
+                )
+
+                boat5_raw = float(
+                    best_boat5[2]
+                )
+
+                # 現在本線とのスコア差が0.035以内
+                if (
+                    boat5_raw
+                    >= original_raw - 0.035
+                ):
+                    candidate_main = (
+                        best_boat5
+                    )
+
+    axis = int(
+        candidate_main[0][0]
     )
 
     same_axis = [
@@ -335,15 +388,16 @@ def _select_main_counter(
     ]
 
     if len(same_axis) < 2:
+
         if len(ranked) >= 2:
             return (
-                original_main,
+                candidate_main,
                 ranked[1]
             )
 
         return (
-            original_main,
-            original_main
+            candidate_main,
+            candidate_main
         )
 
     pool = same_axis[:10]
@@ -398,7 +452,7 @@ def _select_main_counter(
 
     if not counter_candidates:
         return (
-            original_main,
+            candidate_main,
             same_axis[1]
         )
 
@@ -419,14 +473,15 @@ def _select_main_counter(
     )
 
     original_raw_score = float(
-        original_main[2]
+        candidate_main[2]
     )
 
+    # 本線が候補元より大きく下がる場合は元に戻す
     if (
         main_candidate["raw_score"]
         < original_raw_score - 0.045
     ):
-        main = original_main
+        main = candidate_main
 
         fallback = [
             item
@@ -451,8 +506,8 @@ def _select_hole(
     first_score,
 ):
     """
-    前回ベストだった穴ロジック。
-    今回も変更しない。
+    現行12.2%版の穴ロジック。
+    ここは変更しない。
     """
 
     main_combo = main[0]
@@ -672,6 +727,10 @@ def predict(df):
         reverse=True,
     )
 
+    # -----------------------------------------
+    # 本線・対抗
+    # -----------------------------------------
+
     main, counter = (
         _select_main_counter(
             ranked,
@@ -681,12 +740,20 @@ def predict(df):
         )
     )
 
+    # -----------------------------------------
+    # 穴
+    # -----------------------------------------
+
     hole = _select_hole(
         ranked,
         main,
         counter,
         first_score,
     )
+
+    # -----------------------------------------
+    # 最終重複チェック
+    # -----------------------------------------
 
     used = {
         main[0],
@@ -740,6 +807,10 @@ def predict(df):
             counter = unique[1]
             hole = unique[2]
 
+    # -----------------------------------------
+    # 軸評価
+    # -----------------------------------------
+
     first_values = [
         first_score[boat]
         for boat in BOATS
@@ -759,8 +830,21 @@ def predict(df):
         reverse=True,
     )
 
+    # 実際の3点で採用した本線の1着艇を軸として扱う
     axis = int(
-        first_ranking[0][0]
+        main[0][0]
+    )
+
+    axis_rank = [
+        boat
+        for boat, _
+        in first_ranking
+    ]
+
+    axis_position = (
+        axis_rank.index(axis)
+        if axis in axis_rank
+        else 0
     )
 
     axis_top3_probability = float(
@@ -771,6 +855,16 @@ def predict(df):
             in first_ranking[:3]
         )
     )
+
+    if axis_position < 3:
+        axis_top3_probability = float(
+            sum(
+                probability
+                for boat,
+                probability
+                in first_ranking[:3]
+            )
+        )
 
     margin = float(
         first_ranking[0][1]
@@ -789,6 +883,10 @@ def predict(df):
             confidence
         )
     )
+
+    # -----------------------------------------
+    # 3点
+    # -----------------------------------------
 
     tickets = [
         {
@@ -819,4 +917,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+                }

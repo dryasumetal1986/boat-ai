@@ -233,10 +233,11 @@ def _ordering_bonus(
     third_score,
 ):
     """
-    2着・3着の順番を微調整する。
+    第1実験：
+    2着・3着の「役割差」を少しだけ強める。
 
-    今回の12.2%版で結果が良かった部分なので、
-    ここは変更しない。
+    軸選択・基本スコア・穴選択は変更しない。
+    現行12.2%版との差を最小限にする。
     """
 
     second_strength = float(
@@ -247,11 +248,13 @@ def _ordering_bonus(
         third_score[third_boat]
     )
 
+    # その艇自身が「2着向き」か
     second_role = float(
         second_score[second_boat]
         - third_score[second_boat]
     )
 
+    # その艇自身が「3着向き」か
     third_role = float(
         third_score[third_boat]
         - second_score[third_boat]
@@ -273,6 +276,8 @@ def _ordering_bonus(
         )
     )
 
+    # 2着艇の2着適性と
+    # 3着艇の3着適性を評価
     role = (
         second_role
         + third_role
@@ -291,9 +296,14 @@ def _ordering_bonus(
         )
     )
 
+    # 現行12.2%版：
+    # 0.035 * strength_gap
+    # + 0.025 * role
+    #
+    # 第1実験では「役割差」を少しだけ強める。
     return (
         0.035 * strength_gap
-        + 0.025 * role
+        + 0.032 * role
     )
 
 
@@ -304,8 +314,7 @@ def _select_main_counter(
     third_score,
 ):
     """
-    今回12.2%を出した本線・対抗ロジック。
-    ここは変更しない。
+    今回12.2%版の本線・対抗ロジックを維持。
     """
 
     if not ranked:
@@ -442,9 +451,8 @@ def _select_hole(
     first_score,
 ):
     """
-    前回ベストだった穴ロジックへ復元。
-
-    ここだけ今回の実験で変更。
+    前回ベストだった穴ロジック。
+    今回も変更しない。
     """
 
     main_combo = main[0]
@@ -454,22 +462,18 @@ def _select_hole(
         main_combo[0]
     )
 
-    # 本線の軸以外を穴候補にする
     non_axis_boats = [
         boat
         for boat in BOATS
         if boat != main_axis
     ]
 
-    # 1着能力順
     ranked_first = sorted(
         non_axis_boats,
         key=lambda boat: first_score[boat],
         reverse=True,
     )
 
-    # 1号艇が候補上位から外れていても、
-    # 1着能力が僅差なら候補に追加
     if (
         1 != main_axis
         and 1 not in ranked_first
@@ -503,10 +507,8 @@ def _select_hole(
         if not candidates:
             continue
 
-        # その1着候補で最も強い組み合わせ
         best = candidates[0]
 
-        # 前回ベストの穴評価
         candidate_score = (
             0.70
             * float(
@@ -614,10 +616,6 @@ def predict(df):
         )
     )
 
-    # -----------------------------------------
-    # 全120通り
-    # -----------------------------------------
-
     combos = []
 
     for a, b, c in itertools.permutations(
@@ -674,11 +672,6 @@ def predict(df):
         reverse=True,
     )
 
-    # -----------------------------------------
-    # 本線・対抗
-    # 今回12.2%版を維持
-    # -----------------------------------------
-
     main, counter = (
         _select_main_counter(
             ranked,
@@ -688,21 +681,12 @@ def predict(df):
         )
     )
 
-    # -----------------------------------------
-    # 穴
-    # 前回ベスト版へ復元
-    # -----------------------------------------
-
     hole = _select_hole(
         ranked,
         main,
         counter,
         first_score,
     )
-
-    # -----------------------------------------
-    # 最終重複チェック
-    # -----------------------------------------
 
     used = {
         main[0],
@@ -720,7 +704,6 @@ def predict(df):
         if alternatives:
             hole = alternatives[0]
 
-    # 念のため3点を完全に別組み合わせにする
     if (
         main[0] == counter[0]
         or main[0] == hole[0]
@@ -756,10 +739,6 @@ def predict(df):
             main = unique[0]
             counter = unique[1]
             hole = unique[2]
-
-    # -----------------------------------------
-    # 軸評価
-    # -----------------------------------------
 
     first_values = [
         first_score[boat]
@@ -810,10 +789,6 @@ def predict(df):
             confidence
         )
     )
-
-    # -----------------------------------------
-    # 3点
-    # -----------------------------------------
 
     tickets = [
         {

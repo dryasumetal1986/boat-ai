@@ -249,10 +249,10 @@ def _ordering_bonus(
         )
     )
 
-    # 今回の実験変更はここだけ
+    # 今回の実験：strength_gapのみ変更
     return (
-        0.035 * strength_gap
-        + 0.028 * role
+        0.045 * strength_gap
+        + 0.025 * role
     )
 
 

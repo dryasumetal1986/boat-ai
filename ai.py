@@ -318,15 +318,8 @@ def predict(df):
     """
     6艇の出走表から3連単3点を予想する。
 
-    今回の改善点:
-
-    1. 最有力軸と本線1着を一致させる
-    2. 本線・対抗は軸を中心に組み立てる
-    3. 穴は別1着展開を優先する
-    4. 2着・3着の役割を少し明確にする
-    5. 3点が同じような組み合わせになりすぎないようにする
-    6. comboは必ず1〜6号艇
-    7. combo_textとの互換性を維持
+    本線・対抗は安定版と同じ。
+    穴だけ、軸以外の1着候補を再評価する。
     """
 
     # ------------------------------------------------
@@ -395,12 +388,14 @@ def predict(df):
         first_ranking[0][0]
     )
 
-    # 1着候補2位
+    # ------------------------------------------------
+    # 1着候補2位・3位
+    # ------------------------------------------------
+
     second_first_boat = int(
         first_ranking[1][0]
     )
 
-    # 1着候補3位
     third_first_boat = int(
         first_ranking[2][0]
     )
@@ -420,8 +415,6 @@ def predict(df):
         - first_ranking[1][1]
     )
 
-    # 表示上の信頼度。
-    # 95%を超えないようにする。
     confidence = min(
         95.0,
         max(
@@ -432,8 +425,6 @@ def predict(df):
 
     # ------------------------------------------------
     # 全120通りの3連単スコア
-    #
-    # ここでは確率計算用に全組み合わせを評価する。
     # ------------------------------------------------
 
     combinations = []
@@ -449,39 +440,7 @@ def predict(df):
             + 0.58 * third_score[c]
         )
 
-        # ------------------------------------------------
-        # 今回の改善
-        #
-        # 2着候補として強い艇は2着へ、
-        # 3着候補として強い艇は3着へ、
-        # 少しだけ優先する。
-        #
-        # 補正は小さくして、元のAIの順位を
-        # 大きく壊さないようにする。
-        # ------------------------------------------------
-
-        second_role = (
-            second_score[b]
-            - third_score[b]
-        )
-
-        third_role = (
-            third_score[c]
-            - second_score[c]
-        )
-
-        score += (
-            0.055 * second_role
-        )
-
-        score += (
-            0.045 * third_role
-        )
-
-        # ------------------------------------------------
         # 1コースの優位性
-        # ------------------------------------------------
-
         if a == 1:
             score += 0.055
 
@@ -494,18 +453,14 @@ def predict(df):
 
         # ------------------------------------------------
         # 軸との整合性
-        #
-        # 最有力軸を本線の1着候補として優先する。
         # ------------------------------------------------
 
         if a == axis:
             score += 0.065
 
-        # 軸が2着の場合も少し残す
         if b == axis:
             score += 0.018
 
-        # 軸が3着の場合も少し残す
         if c == axis:
             score += 0.008
 
@@ -543,8 +498,7 @@ def predict(df):
             for (
                 combo,
                 score
-            ), prob
-            in zip(
+            ), prob in zip(
                 combinations,
                 probabilities
             )
@@ -563,15 +517,13 @@ def predict(df):
         if item[0][0] == axis
     ]
 
-    # 念のため空にならないようにする
     if not same_axis_candidates:
         same_axis_candidates = ranked
 
     # ------------------------------------------------
     # 本線
     #
-    # 軸を1着固定。
-    # 2着・3着は総合評価の高いもの。
+    # 安定版から変更なし
     # ------------------------------------------------
 
     main = same_axis_candidates[0]
@@ -579,8 +531,7 @@ def predict(df):
     # ------------------------------------------------
     # 対抗
     #
-    # 本線と1着は同じ軸。
-    # ただし2着・3着の組み合わせを変える。
+    # 安定版から変更なし
     # ------------------------------------------------
 
     counter = None
@@ -590,7 +541,6 @@ def predict(df):
         if item[0] == main[0]:
             continue
 
-        # 本線と少なくとも2着か3着が違う
         if (
             item[0][1] != main[0][1]
             or item[0][2] != main[0][2]
@@ -612,19 +562,59 @@ def predict(df):
     # ------------------------------------------------
     # 穴
     #
-    # ここは別展開。
-    # 1着候補2位・3位を優先する。
+    # 今回ここだけ変更。
     #
-    # 「軸が絶対1着」ではないことを考慮し、
-    # 穴だけは軸以外の1着を許可する。
+    # 従来：
+    # 1着候補2位・3位を優先
+    #
+    # 今回：
+    # 軸以外の艇を first_score 順に再評価し、
+    # その艇を1着にした場合の最良3連単を比較する。
     # ------------------------------------------------
 
     hole = None
 
-    alternative_first_boats = [
-        second_first_boat,
-        third_first_boat,
+    non_axis_boats = [
+        b
+        for b in BOATS
+        if b != axis
     ]
+
+    # 軸以外の1着能力をランキング
+    alternative_first_ranking = sorted(
+        non_axis_boats,
+        key=lambda b: first_score[b],
+        reverse=True
+    )
+
+    # 基本は上位3艇
+    alternative_first_boats = (
+        alternative_first_ranking[:3]
+    )
+
+    # 1号艇は特別に確認する。
+    # 軸ではない1号艇が上位候補から僅差なら
+    # 穴の1着候補へ追加する。
+    if 1 in non_axis_boats:
+
+        if 1 not in alternative_first_boats:
+
+            top_score = first_score[
+                alternative_first_boats[0]
+            ]
+
+            boat1_score = first_score[1]
+
+            if boat1_score >= top_score - 0.08:
+
+                alternative_first_boats = (
+                    alternative_first_boats[:2]
+                    + [1]
+                )
+
+    # 各候補艇について、
+    # その艇を1着にした最良の3連単を取得。
+    hole_candidates = []
 
     for alternative_boat in alternative_first_boats:
 
@@ -632,24 +622,36 @@ def predict(df):
             item
             for item in ranked
             if item[0][0] == alternative_boat
+            and item[0] != main[0]
+            and item[0] != counter[0]
         ]
 
-        for item in candidates:
+        if not candidates:
+            continue
 
-            combo = item[0]
+        best = candidates[0]
 
-            # 本線・対抗と同一なら除外
-            if combo == main[0]:
-                continue
+        # 1着能力と3連単総合評価を合わせて評価。
+        hole_score = (
+            0.70 * first_score[alternative_boat]
+            + 0.30 * best[2]
+        )
 
-            if combo == counter[0]:
-                continue
+        hole_candidates.append(
+            (
+                best,
+                float(hole_score)
+            )
+        )
 
-            hole = item
-            break
+    if hole_candidates:
 
-        if hole is not None:
-            break
+        hole_candidates.sort(
+            key=lambda item: item[1],
+            reverse=True
+        )
+
+        hole = hole_candidates[0][0]
 
     # ------------------------------------------------
     # 穴候補が取れない場合の安全処理
@@ -728,19 +730,16 @@ def predict(df):
 
         combo = ticket["combo"]
 
-        # 3連単であること
         if len(combo) != 3:
             raise ValueError(
                 "3連単の組み合わせが不正です。"
             )
 
-        # 同じ艇が重複していないこと
         if len(set(combo)) != 3:
             raise ValueError(
                 "3連単の艇番が重複しています。"
             )
 
-        # 1〜6号艇だけであること
         if not all(
             1 <= int(boat) <= 6
             for boat in combo

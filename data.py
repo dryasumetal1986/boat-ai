@@ -41,115 +41,86 @@ VENUES = {
     "大村": 24,
 }
 
+
 VENUE_BY_ID = {
     v: k
     for k, v in VENUES.items()
 }
 
 
-def _get_json(url):
-    response = requests.get(
+def _json(url):
+    r = requests.get(
         url,
-        timeout=15,
+        timeout=15
     )
-
-    response.raise_for_status()
-
-    return response.json()
+    r.raise_for_status()
+    return r.json()
 
 
 @lru_cache(maxsize=400)
 def get_day_programs(yyyymmdd):
 
-    url = (
-        f"{API_BASE}/"
-        f"{yyyymmdd[:4]}/"
-        f"{yyyymmdd}.json"
-    )
-
     try:
-        return _get_json(url)
+        return _json(
+            f"{API_BASE}/"
+            f"{yyyymmdd[:4]}/"
+            f"{yyyymmdd}.json"
+        )
 
     except Exception:
         return None
 
 
-def _float(value):
+def _val(d, keys, default=""):
+
+    for k in keys:
+
+        if d.get(k) not in (
+            None,
+            ""
+        ):
+            return d[k]
+
+    return default
+
+
+def _float(v):
 
     try:
-        text = str(value)
-
-        text = text.replace(
-            ",",
-            "",
+        return float(
+            str(v)
+            .replace(",", "")
+            .replace("%", "")
+            .replace("％", "")
         )
-
-        text = text.replace(
-            "倍",
-            "",
-        )
-
-        return float(text)
 
     except Exception:
         return 0.0
 
 
-def _value(
-    data,
-    keys,
-    default=0,
-):
-
-    for key in keys:
-
-        if key in data:
-
-            value = data[key]
-
-            if value not in (
-                None,
-                "",
-            ):
-                return value
-
-    return default
-
-
 def get_race(
     date_str,
     venue_name,
-    race_no,
+    race_no
 ):
 
-    yyyymmdd = date_str.replace(
-        "-",
-        "",
+    d = get_day_programs(
+        date_str.replace("-", "")
     )
 
-    venue_id = VENUES.get(
-        venue_name
-    )
+    sid = VENUES.get(venue_name)
 
-    if not venue_id:
-        return None
-
-    data = get_day_programs(
-        yyyymmdd
-    )
-
-    if not data:
+    if not d or not sid:
         return None
 
     stadiums = (
-        data
-        .get("programs", {})
+        d.get("programs", {})
         .get("stadiums", {})
     )
 
     stadium = (
-        stadiums.get(str(venue_id))
-        or stadiums.get(venue_id)
+        stadiums.get(str(sid))
+        or stadiums.get(sid)
     )
 
     if not stadium:
@@ -157,7 +128,7 @@ def get_race(
 
     races = stadium.get(
         "races",
-        {},
+        {}
     )
 
     race = (
@@ -170,188 +141,195 @@ def get_race(
 
     racers = race.get(
         "racers",
-        {},
+        {}
     )
 
-    boats = []
+    items = []
 
-    if isinstance(
-        racers,
-        dict,
-    ):
+    if isinstance(racers, dict):
 
-        for key, value in racers.items():
+        for k, v in racers.items():
 
-            if not isinstance(
-                value,
-                dict,
-            ):
+            if not isinstance(v, dict):
                 continue
 
+            x = dict(v)
+
             try:
-                boat_no = int(key)
+                x["_entry"] = int(k)
 
             except Exception:
                 continue
 
-            boats.append({
-                "boat": boat_no,
+            items.append(x)
+
+    elif isinstance(racers, list):
+
+        items = racers
+
+    items.sort(
+        key=lambda x: x.get(
+            "_entry",
+            99
+        )
+    )
+
+    boats = []
+
+    for i, r in enumerate(
+        items[:6],
+        1
+    ):
+
+        n = int(
+            r.get(
+                "_entry",
+                i
+            )
+        )
+
+        boats.append(
+            {
+                "boat": n,
 
                 "name": str(
-                    _value(
-                        value,
+                    _val(
+                        r,
                         [
                             "name",
                             "racer_name",
                             "player_name",
                         ],
-                        f"{boat_no}号艇",
+                        f"{n}号艇"
+                    )
+                ),
+
+                "class": str(
+                    _val(
+                        r,
+                        [
+                            "class",
+                            "grade",
+                            "racer_class",
+                        ],
+                        ""
                     )
                 ),
 
                 "rate": _float(
-                    _value(
-                        value,
+                    _val(
+                        r,
                         [
                             "national_win_rate",
                             "win_rate",
                             "rate",
                         ],
-                        0,
+                        0
                     )
                 ),
 
                 "local_rate": _float(
-                    _value(
-                        value,
+                    _val(
+                        r,
                         [
                             "local_win_rate",
                             "local_rate",
                         ],
-                        0,
+                        0
                     )
                 ),
 
                 "motor": _float(
-                    _value(
-                        value,
+                    _val(
+                        r,
                         [
                             "motor_2_rate",
                             "motor_rate",
                         ],
-                        0,
+                        0
                     )
                 ),
 
                 "course": _float(
-                    _value(
-                        value,
+                    _val(
+                        r,
                         [
                             "course_1_rate",
                             "course_rate",
                         ],
-                        0,
+                        0
                     )
                 ),
-            })
-
-    boats.sort(
-        key=lambda x: x["boat"]
-    )
+            }
+        )
 
     result = race.get(
-        "result",
-        {},
-    )
+        "result"
+    ) or {}
 
-    result_racers = result.get(
+    rr = result.get(
         "racers",
-        {},
+        {}
     )
 
     actual = []
 
-    temp = []
+    if isinstance(rr, dict):
 
-    if isinstance(
-        result_racers,
-        dict,
-    ):
+        tmp = []
 
-        for key, value in result_racers.items():
+        for k, v in rr.items():
 
-            if not isinstance(
-                value,
-                dict,
-            ):
+            if not isinstance(v, dict):
                 continue
 
             try:
-
-                boat = int(key)
-
-                place = int(
-                    value.get(
-                        "place_number"
-                    )
-                )
-
-                temp.append(
+                tmp.append(
                     (
-                        place,
-                        boat,
+                        int(
+                            v.get(
+                                "place_number"
+                            )
+                        ),
+                        int(k)
                     )
                 )
 
             except Exception:
-                continue
+                pass
 
-    temp.sort()
+        tmp.sort()
 
-    actual = [
-        boat
-        for _, boat in temp[:3]
-    ]
+        actual = [
+            x[1]
+            for x in tmp[:3]
+        ]
 
     payout = 0.0
 
-    payouts = result.get(
-        "payouts",
-        {},
-    )
-
-    trifecta = payouts.get(
-        "trifecta",
-        [],
-    )
-
-    if isinstance(
-        trifecta,
-        list,
+    for x in (
+        result
+        .get("payouts", {})
+        .get("trifecta", [])
+        or []
     ):
 
-        for item in trifecta:
-
-            if not isinstance(
-                item,
-                dict,
-            ):
-                continue
+        if isinstance(x, dict):
 
             payout = _float(
-                item.get(
+                x.get(
                     "amount",
-                    0,
+                    0
                 )
             )
 
-            if payout > 0:
+            if payout:
                 break
 
     return {
         "date": date_str,
         "venue": venue_name,
-        "venue_id": venue_id,
+        "venue_id": sid,
         "race_no": race_no,
         "boats": boats,
         "actual": actual,
@@ -360,317 +338,274 @@ def get_race(
     }
 
 
-# =========================================================
-# オッズ解析
-# =========================================================
-
-
-def _boat(text):
-
-    text = str(text).strip()
-
-    if re.fullmatch(
-        r"[1-6]",
-        text,
-    ):
-        return int(text)
-
-    return None
-
-
-def _odd(text):
-
-    text = str(text).strip()
-
-    text = text.replace(
-        ",",
-        "",
-    )
-
-    text = text.replace(
-        "倍",
-        "",
-    )
-
-    if not re.fullmatch(
-        r"\d+(?:\.\d+)?",
-        text,
-    ):
-        return None
-
-    try:
-        return float(text)
-
-    except Exception:
-        return None
-
-
 def _numeric_tokens_from_row(tr):
 
     tokens = []
 
     for text in tr.stripped_strings:
 
-        value = str(text).strip()
-
-        value = value.replace(
-            ",",
-            "",
-        )
-
-        value = value.replace(
-            "倍",
-            "",
+        value = (
+            str(text)
+            .strip()
+            .replace(",", "")
+            .replace("倍", "")
         )
 
         if re.fullmatch(
             r"\d+(?:\.\d+)?",
-            value,
+            value
         ):
-
             tokens.append(value)
 
     return tokens
-
-
-def _parse_official_odds(html):
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    odds = {}
-
-    # 現在の2着艇
-    current_second = [
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    ]
-
-    for tr in soup.find_all("tr"):
-
-        tokens = (
-            _numeric_tokens_from_row(
-                tr
-            )
-        )
-
-        # 公式3連単表は
-        #
-        # 18個
-        # ↓
-        # 12個
-        # ↓
-        # 12個
-        # ↓
-        # 12個
-        #
-        # を繰り返す
-        if len(tokens) not in (
-            12,
-            18,
-        ):
-            continue
-
-        # -------------------------------------------------
-        # 18個の行
-        #
-        # 2着 / 3着 / オッズ
-        # を6艇分
-        # -------------------------------------------------
-
-        if len(tokens) == 18:
-
-            parsed = []
-
-            new_second = [
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ]
-
-            ok = True
-
-            for i in range(6):
-
-                p = i * 3
-
-                second = _boat(
-                    tokens[p]
-                )
-
-                third = _boat(
-                    tokens[p + 1]
-                )
-
-                odd = _odd(
-                    tokens[p + 2]
-                )
-
-                first = i + 1
-
-                if (
-                    second is None
-                    or third is None
-                    or odd is None
-                ):
-                    ok = False
-                    break
-
-                if len({
-                    first,
-                    second,
-                    third,
-                }) != 3:
-                    ok = False
-                    break
-
-                new_second[i] = second
-
-                parsed.append(
-                    (
-                        (
-                            first,
-                            second,
-                            third,
-                        ),
-                        odd,
-                    )
-                )
-
-            if not ok:
-                continue
-
-            current_second = (
-                new_second
-            )
-
-            for combo, odd in parsed:
-
-                odds[combo] = odd
-
-        # -------------------------------------------------
-        # 12個の行
-        #
-        # 3着 / オッズ
-        # だけが並ぶ
-        #
-        # 2着は直前の18個行から引き継ぐ
-        # -------------------------------------------------
-
-        else:
-
-            if not all(
-                x is not None
-                for x in current_second
-            ):
-                continue
-
-            parsed = []
-
-            ok = True
-
-            for i in range(6):
-
-                p = i * 2
-
-                third = _boat(
-                    tokens[p]
-                )
-
-                odd = _odd(
-                    tokens[p + 1]
-                )
-
-                second = (
-                    current_second[i]
-                )
-
-                first = i + 1
-
-                if (
-                    third is None
-                    or odd is None
-                    or second is None
-                ):
-                    ok = False
-                    break
-
-                if len({
-                    first,
-                    second,
-                    third,
-                }) != 3:
-                    ok = False
-                    break
-
-                parsed.append(
-                    (
-                        (
-                            first,
-                            second,
-                            third,
-                        ),
-                        odd,
-                    )
-                )
-
-            if not ok:
-                continue
-
-            for combo, odd in parsed:
-
-                odds[combo] = odd
-
-    return odds
 
 
 @lru_cache(maxsize=2000)
 def get_trifecta_odds(
     date_str,
     venue_id,
-    race_no,
+    race_no
 ):
-
-    hd = date_str.replace(
-        "-",
-        "",
-    )
-
-    jcd = f"{int(venue_id):02d}"
 
     url = (
         f"{ODDS_URL}"
-        f"?hd={hd}"
-        f"&jcd={jcd}"
+        f"?hd={date_str.replace('-', '')}"
+        f"&jcd={int(venue_id):02d}"
         f"&rno={race_no}"
     )
 
     try:
 
-        response = requests.get(
+        r = requests.get(
             url,
             timeout=15,
             headers={
                 "User-Agent":
-                    "Mozilla/5.0"
-            },
+                "Mozilla/5.0"
+            }
         )
 
-        response.raise_for_status()
+        r.raise_for_status()
 
     except Exception:
-
         return {}
 
-    return _parse_official_odds(
-        response.text
+    soup = BeautifulSoup(
+        r.text,
+        "html.parser"
     )
+
+    out = {}
+
+    current_second = None
+
+    # -----------------------------------------
+    # 公式BOATRACEの3連単オッズ表
+    #
+    # 18数値の行
+    # → 2着・3着・オッズ × 6
+    #
+    # 12数値の行
+    # → 3着・オッズ × 6
+    # -----------------------------------------
+
+    for tr in soup.find_all("tr"):
+
+        tokens = _numeric_tokens_from_row(tr)
+
+        if len(tokens) == 18:
+
+            for i in range(
+                0,
+                18,
+                3
+            ):
+
+                try:
+
+                    second = int(
+                        tokens[i]
+                    )
+
+                    third = int(
+                        tokens[i + 1]
+                    )
+
+                    odd = float(
+                        tokens[i + 2]
+                    )
+
+                except Exception:
+                    continue
+
+                first = (
+                    i // 3
+                ) + 1
+
+                if (
+                    odd > 0
+                    and len(
+                        {
+                            first,
+                            second,
+                            third,
+                        }
+                    ) == 3
+                ):
+
+                    out[
+                        (
+                            first,
+                            second,
+                            third,
+                        )
+                    ] = odd
+
+            seconds = [
+                int(tokens[i])
+                for i in range(
+                    0,
+                    18,
+                    3
+                )
+            ]
+
+            if (
+                len(set(seconds)) == 1
+            ):
+                current_second = (
+                    seconds[0]
+                )
+            else:
+                current_second = None
+
+        elif (
+            len(tokens) == 12
+            and current_second is not None
+        ):
+
+            for i in range(
+                0,
+                12,
+                2
+            ):
+
+                try:
+
+                    third = int(
+                        tokens[i]
+                    )
+
+                    odd = float(
+                        tokens[i + 1]
+                    )
+
+                except Exception:
+                    continue
+
+                first = (
+                    i // 2
+                ) + 1
+
+                if (
+                    odd > 0
+                    and len(
+                        {
+                            first,
+                            current_second,
+                            third,
+                        }
+                    ) == 3
+                ):
+
+                    out[
+                        (
+                            first,
+                            current_second,
+                            third,
+                        )
+                    ] = odd
+
+    # -----------------------------------------
+    # oddsPoint構造からも補完
+    # -----------------------------------------
+
+    for tr in soup.find_all("tr"):
+
+        cells = tr.find_all("td")
+
+        idxs = [
+            i
+            for i, c in enumerate(cells)
+            if "oddsPoint"
+            in c.get("class", [])
+        ]
+
+        if len(idxs) != 6:
+            continue
+
+        for first, idx in enumerate(
+            idxs,
+            1
+        ):
+
+            if idx < 2:
+                continue
+
+            try:
+
+                second = int(
+                    cells[idx - 2]
+                    .get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                third = int(
+                    cells[idx - 1]
+                    .get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                text = cells[idx].get_text(
+                    " ",
+                    strip=True
+                )
+
+                m = re.search(
+                    r"\d+(?:\.\d+)?",
+                    text.replace(",", "")
+                )
+
+                odd = (
+                    float(m.group())
+                    if m
+                    else 0
+                )
+
+            except Exception:
+                continue
+
+            if (
+                odd > 0
+                and len(
+                    {
+                        first,
+                        second,
+                        third,
+                    }
+                ) == 3
+            ):
+
+                out[
+                    (
+                        first,
+                        second,
+                        third,
+                    )
+                ] = odd
+
+    return out

@@ -11,15 +11,6 @@ def combo_text(combo):
     return "-".join(str(int(x)) for x in combo)
 
 
-def _num(value, default=0.0):
-    try:
-        if value is None or value == "":
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _norm_series(series, higher=True):
     x = pd.to_numeric(
         series,
@@ -49,10 +40,6 @@ def _prepare(df):
         .sort_values("boat")
         .reset_index(drop=True)
     )
-
-    # -----------------------------------------
-    # 基本指標
-    # -----------------------------------------
 
     x["win_n"] = _norm_series(
         x["national_win_rate"]
@@ -99,10 +86,6 @@ def _prepare(df):
         higher=False
     )
 
-    # -----------------------------------------
-    # 展示タイム
-    # -----------------------------------------
-
     exhibition = pd.to_numeric(
         x["exhibition_time"],
         errors="coerce"
@@ -130,10 +113,6 @@ def _prepare(df):
         higher=False
     )
 
-    # -----------------------------------------
-    # 進入コース
-    # -----------------------------------------
-
     course = pd.to_numeric(
         x["course_number"],
         errors="coerce"
@@ -154,10 +133,6 @@ def _prepare(df):
         1.0
     )
 
-    # -----------------------------------------
-    # 1着能力
-    # -----------------------------------------
-
     x["first_score"] = (
         0.24 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -170,10 +145,6 @@ def _prepare(df):
         + 0.06 * x["course"]
     )
 
-    # -----------------------------------------
-    # 2着能力
-    # -----------------------------------------
-
     x["second_score"] = (
         0.18 * x["top2_n"]
         + 0.14 * x["top2_l"]
@@ -184,10 +155,6 @@ def _prepare(df):
         + 0.10 * x["boat2"]
         + 0.10 * x["st"]
     )
-
-    # -----------------------------------------
-    # 3着能力
-    # -----------------------------------------
 
     x["third_score"] = (
         0.18 * x["top3_n"]
@@ -242,22 +209,12 @@ def _combo_score(
     second_score,
     third_score,
 ):
-    """
-    基本3連単スコア。
-
-    a = 1着
-    b = 2着
-    c = 3着
-    """
-
     score = (
         1.00 * first_score[a]
         + 0.72 * second_score[b]
         + 0.58 * third_score[c]
     )
 
-    # 1号艇・2号艇を軽く優遇。
-    # 現在のベスト版の考え方を維持。
     if a == 1:
         score += 0.055
     elif a == 2:
@@ -276,11 +233,10 @@ def _ordering_bonus(
     third_score,
 ):
     """
-    本線・対抗の2着3着順を微調整する。
+    2着・3着の順番を微調整する。
 
-    大きな補正は行わず、
-    「この艇は2着向きか3着向きか」
-    という役割差だけを小さく反映する。
+    今回の12.2%版で結果が良かった部分なので、
+    ここは変更しない。
     """
 
     second_strength = float(
@@ -291,13 +247,11 @@ def _ordering_bonus(
         third_score[third_boat]
     )
 
-    # 2着艇自身の「2着向き度」
     second_role = float(
         second_score[second_boat]
         - third_score[second_boat]
     )
 
-    # 3着艇自身の「3着向き度」
     third_role = float(
         third_score[third_boat]
         - second_score[third_boat]
@@ -350,11 +304,8 @@ def _select_main_counter(
     third_score,
 ):
     """
-    同じ軸の候補群から、
-    本線・対抗を2本選ぶ。
-
-    単純なラベル交換ではなく、
-    2着・3着の順序を微調整する。
+    今回12.2%を出した本線・対抗ロジック。
+    ここは変更しない。
     """
 
     if not ranked:
@@ -386,8 +337,6 @@ def _select_main_counter(
             original_main
         )
 
-    # 元ランキング上位だけを候補にする。
-    # 下位候補まで大きく動かさない。
     pool = same_axis[:10]
 
     adjusted = []
@@ -460,7 +409,6 @@ def _select_main_counter(
         counter_candidate["raw_score"],
     )
 
-    # 元の本線を大きく崩さない安全装置。
     original_raw_score = float(
         original_main[2]
     )
@@ -494,13 +442,9 @@ def _select_hole(
     first_score,
 ):
     """
-    現在のベスト版の穴ロジック。
+    前回ベストだった穴ロジックへ復元。
 
-    ・本線軸とは違う艇を候補
-    ・1着能力を重視
-    ・1号艇が僅差なら穴候補に残す
-    ・各候補の最良3連単を取得
-    ・本線/対抗との重複を避ける
+    ここだけ今回の実験で変更。
     """
 
     main_combo = main[0]
@@ -510,20 +454,22 @@ def _select_hole(
         main_combo[0]
     )
 
+    # 本線の軸以外を穴候補にする
     non_axis_boats = [
         boat
         for boat in BOATS
         if boat != main_axis
     ]
 
+    # 1着能力順
     ranked_first = sorted(
         non_axis_boats,
         key=lambda boat: first_score[boat],
         reverse=True,
     )
 
-    # 1号艇が軸ではなく、
-    # 他の穴候補と大差ない場合は候補に追加。
+    # 1号艇が候補上位から外れていても、
+    # 1着能力が僅差なら候補に追加
     if (
         1 != main_axis
         and 1 not in ranked_first
@@ -557,8 +503,10 @@ def _select_hole(
         if not candidates:
             continue
 
+        # その1着候補で最も強い組み合わせ
         best = candidates[0]
 
+        # 前回ベストの穴評価
         candidate_score = (
             0.70
             * float(
@@ -597,6 +545,7 @@ def _select_hole(
     )
 
     for _, candidate in candidate_rows:
+
         if (
             candidate[0] != main_combo
             and candidate[0] != counter_combo
@@ -609,7 +558,7 @@ def _select_hole(
 def predict(df):
     """
     6艇の出走表から
-    本線・対抗・穴の3点を予想する。
+    本線・対抗・穴の3点を予想。
     """
 
     if (
@@ -644,10 +593,6 @@ def predict(df):
 
     x = _prepare(df)
 
-    # -----------------------------------------
-    # スコア辞書
-    # -----------------------------------------
-
     first_score = dict(
         zip(
             x["boat"].astype(int),
@@ -670,7 +615,7 @@ def predict(df):
     )
 
     # -----------------------------------------
-    # 全3連単候補
+    # 全120通り
     # -----------------------------------------
 
     combos = []
@@ -731,6 +676,7 @@ def predict(df):
 
     # -----------------------------------------
     # 本線・対抗
+    # 今回12.2%版を維持
     # -----------------------------------------
 
     main, counter = (
@@ -744,6 +690,7 @@ def predict(df):
 
     # -----------------------------------------
     # 穴
+    # 前回ベスト版へ復元
     # -----------------------------------------
 
     hole = _select_hole(
@@ -773,12 +720,13 @@ def predict(df):
         if alternatives:
             hole = alternatives[0]
 
-    # 万一3点が重複していた場合の安全処理
+    # 念のため3点を完全に別組み合わせにする
     if (
         main[0] == counter[0]
         or main[0] == hole[0]
         or counter[0] == hole[0]
     ):
+
         unique = []
 
         for item in [
@@ -786,6 +734,7 @@ def predict(df):
             counter,
             hole,
         ]:
+
             if item[0] not in [
                 u[0]
                 for u in unique
@@ -793,6 +742,7 @@ def predict(df):
                 unique.append(item)
 
         for item in ranked:
+
             if len(unique) >= 3:
                 break
 
@@ -808,7 +758,7 @@ def predict(df):
             hole = unique[2]
 
     # -----------------------------------------
-    # 軸
+    # 軸評価
     # -----------------------------------------
 
     first_values = [
@@ -843,7 +793,6 @@ def predict(df):
         )
     )
 
-    # 1位と2位の差を信頼度に変換
     margin = float(
         first_ranking[0][1]
         - first_ranking[1][1]
@@ -861,6 +810,10 @@ def predict(df):
             confidence
         )
     )
+
+    # -----------------------------------------
+    # 3点
+    # -----------------------------------------
 
     tickets = [
         {

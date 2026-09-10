@@ -101,15 +101,17 @@ def _prepare(df):
         1.0
     )
 
+    # 今回の実験：
+    # 全国勝率の2%分を展示タイムへ移す
     x["first_score"] = (
-        0.24 * x["win_n"]
+        0.22 * x["win_n"]
         + 0.13 * x["win_l"]
         + 0.13 * x["top2_n"]
         + 0.08 * x["top2_l"]
         + 0.10 * x["motor2"]
         + 0.06 * x["boat2"]
         + 0.12 * x["st"]
-        + 0.08 * x["exh"]
+        + 0.10 * x["exh"]
         + 0.06 * x["course"]
     )
 
@@ -249,7 +251,6 @@ def _ordering_bonus(
         )
     )
 
-    # 今回の実験：strength_gapのみ変更
     return (
         0.045 * strength_gap
         + 0.025 * role

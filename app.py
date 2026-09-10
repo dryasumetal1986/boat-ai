@@ -2,9 +2,19 @@ import streamlit as st
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta, timezone
 
-from data import VENUES, get_race, get_trifecta_odds
-from ai import predict_race, value_candidates
-from backtest import run_backtest, TARGET_RACES
+from data import (
+    VENUES,
+    get_race,
+    get_trifecta_odds,
+)
+from ai import (
+    predict_race,
+    value_candidates,
+)
+from backtest import (
+    run_backtest,
+    TARGET_RACES,
+)
 
 
 st.set_page_config(
@@ -14,7 +24,9 @@ st.set_page_config(
 )
 
 
-JST = timezone(timedelta(hours=9))
+JST = timezone(
+    timedelta(hours=9)
+)
 
 
 def today_jst():
@@ -25,20 +37,18 @@ def today_jst():
 # Session State
 # =========================
 
-if "prediction" not in st.session_state:
-    st.session_state.prediction = None
+defaults = {
+    "prediction": None,
+    "backtest": None,
+    "bt_page": 1,
+    "scroll_request": False,
+    "scroll_token": 0,
+}
 
-if "backtest" not in st.session_state:
-    st.session_state.backtest = None
+for key, value in defaults.items():
 
-if "bt_page" not in st.session_state:
-    st.session_state.bt_page = 1
-
-if "scroll_results" not in st.session_state:
-    st.session_state.scroll_results = False
-
-if "scroll_token" not in st.session_state:
-    st.session_state.scroll_token = 0
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
 # =========================
@@ -55,7 +65,7 @@ st.caption(
 
 
 # =========================
-# 開催場
+# 選択
 # =========================
 
 venue = st.selectbox(
@@ -63,21 +73,16 @@ venue = st.selectbox(
     list(VENUES.keys()),
 )
 
-
-# =========================
-# レース
-# =========================
-
 race_no = st.selectbox(
     "レース",
     range(1, 13),
     format_func=lambda x:
-    f"{x}R",
+        f"{x}R",
 )
 
 
 # =========================
-# AI予想開始
+# AI予想
 # =========================
 
 if st.button(
@@ -106,11 +111,9 @@ if st.button(
 
             status.update(
                 label=(
-                    "❌ レース情報を"
-                    "取得できませんでした"
+                    "❌ レース情報を取得できませんでした"
                 ),
                 state="error",
-                expanded=True,
             )
 
             st.error(
@@ -123,11 +126,9 @@ if st.button(
 
             status.update(
                 label=(
-                    "❌ 6艇のデータを"
-                    "取得できませんでした"
+                    "❌ 6艇のデータを取得できませんでした"
                 ),
                 state="error",
-                expanded=True,
             )
 
             st.error(
@@ -140,7 +141,7 @@ if st.button(
                 "🤖 6艇のAI評価を計算中…"
             )
 
-            prediction = predict_race(
+            pred = predict_race(
                 race
             )
 
@@ -164,17 +165,18 @@ if st.button(
             )
 
             candidates = value_candidates(
-                prediction,
+                pred,
                 odds,
-                min_prob=0.0075,
+                min_prob=0.006,
                 limit=8,
             )
 
             st.session_state.prediction = {
                 "race": race,
-                "pred": prediction,
+                "pred": pred,
                 "odds": odds,
-                "candidates": candidates,
+                "candidates":
+                    candidates,
             }
 
             status.update(
@@ -185,7 +187,7 @@ if st.button(
 
 
 # =========================
-# AI予想結果
+# AI結果
 # =========================
 
 result = st.session_state.prediction
@@ -196,12 +198,14 @@ if result:
     race = result["race"]
     pred = result["pred"]
     odds = result["odds"]
+    candidates = result["candidates"]
 
     y, m, d = race["date"].split("-")
 
     st.subheader(
         f"{y}年{m}月{d}日 "
-        f"{venue} {race_no}R"
+        f"{race['venue']} "
+        f"{race['race_no']}R"
     )
 
     st.write(
@@ -228,9 +232,27 @@ if result:
         f"（{pred['confidence']:.1f}%）"
     )
 
-    # =========================
-    # 3連単
-    # =========================
+    # -------------------------
+    # 本命軸の最有力3連単
+    # -------------------------
+
+    a, b, c = pred[
+        "main_best_combo"
+    ]
+
+    st.markdown(
+        "### 🎯 本命軸の最有力三連単"
+    )
+
+    st.write(
+        f"**{a}-{b}-{c}**　"
+        f"AI確率 "
+        f"{pred['main_best_combo_prob'] * 100:.2f}%"
+    )
+
+    # -------------------------
+    # EV候補
+    # -------------------------
 
     st.markdown(
         "### 💰 期待値の高い三連単"
@@ -241,8 +263,8 @@ if result:
     )
 
     st.caption(
-        "的中率70%＋期待値30%。"
-        "超高配当への偏りを補正しています。"
+        "的中率を最優先し、"
+        "期待値を補助評価しています。"
     )
 
     if len(odds) < 120:
@@ -258,20 +280,20 @@ if result:
             "公式オッズ 120/120通り取得"
         )
 
-    candidates = result["candidates"]
-
     if candidates:
 
         for item in candidates:
 
-            a, b, c = item["combo"]
+            x, y, z = item["combo"]
 
             st.write(
-                f"🔥 **{a}-{b}-{c}**　"
-                f"オッズ {item['odds']:.1f}倍　"
+                f"🔥 **{x}-{y}-{z}**　"
+                f"オッズ "
+                f"{item['odds']:.1f}倍　"
                 f"AI確率 "
                 f"{item['prob'] * 100:.2f}%　"
-                f"EV **+{item['ev'] * 100:.1f}%**"
+                f"EV "
+                f"**+{item['ev'] * 100:.1f}%**"
             )
 
             st.caption(
@@ -287,58 +309,52 @@ if result:
             "条件を満たすプラス期待値の買い目はありません。"
         )
 
-    # =========================
-    # 6艇AI評価
-    # =========================
+    # -------------------------
+    # 6艇
+    # -------------------------
 
     st.markdown(
         "### 🚤 6艇AI評価"
     )
 
-    for boat_no in pred["ranking"]:
+    for no in pred["ranking"]:
 
         probability = (
-            pred["first_probs"][boat_no]
+            pred["first_probs"][no]
         )
 
-        score = pred["scores"][boat_no]
+        score = pred["scores"][no]
 
-        boat_name = next(
+        name = next(
             (
-                boat["name"]
-                for boat in race["boats"]
-                if boat["boat"] == boat_no
+                b["name"]
+                for b in race["boats"]
+                if b["boat"] == no
             ),
-            f"{boat_no}号艇",
+            f"{no}号艇",
         )
 
         st.write(
-            f"**{boat_no}号艇 {boat_name}**　"
+            f"**{no}号艇 {name}**　"
             f"1着AI確率 "
             f"**{probability * 100:.1f}%**　"
             f"AIスコア {score:.2f}"
         )
 
-    # =========================
-    # AI確率ランキング
-    # =========================
-
     st.markdown(
         "### 📊 AI確率ランキング"
     )
 
-    for rank, boat_no in enumerate(
+    for rank, no in enumerate(
         pred["ranking"],
         1,
     ):
 
-        probability = (
-            pred["first_probs"][boat_no]
-        )
+        p = pred["first_probs"][no]
 
         st.write(
-            f"{rank}. {boat_no}号艇　"
-            f"{probability * 100:.1f}%"
+            f"{rank}. {no}号艇　"
+            f"{p * 100:.1f}%"
         )
 
 
@@ -363,13 +379,9 @@ target = st.selectbox(
     "検証レース数",
     TARGET_RACES,
     format_func=lambda x:
-    f"{x}レース",
+        f"{x}レース",
 )
 
-
-# =========================
-# バックテスト開始
-# =========================
 
 if st.button(
     "🔍 バックテスト開始",
@@ -397,21 +409,23 @@ if st.button(
             "📈 的中率・回収率を集計中…"
         )
 
-        backtest_result = run_backtest(
+        bt_result = run_backtest(
             target,
             today_jst(),
         )
 
         st.session_state.backtest = (
-            backtest_result
+            bt_result
         )
 
         st.session_state.bt_page = 1
 
+        st.session_state.scroll_request = False
+
         status.update(
             label=(
                 f"✅ バックテスト完了！ "
-                f"{backtest_result['count']}レースを検証"
+                f"{bt_result['count']}レースを検証"
             ),
             state="complete",
             expanded=False,
@@ -468,9 +482,9 @@ if bt:
         f"**払戻 {bt['return']:,.0f}円**"
     )
 
-    # =========================
-    # 結果アンカー
-    # =========================
+    # =====================
+    # 結果位置
+    # =====================
 
     st.markdown(
         """
@@ -500,8 +514,7 @@ if bt:
             len(rows)
             + per_page
             - 1
-        )
-        // per_page,
+        ) // per_page,
     )
 
     page = min(
@@ -513,39 +526,40 @@ if bt:
     )
 
     start = (
-        (page - 1)
-        * per_page
-    )
+        page - 1
+    ) * per_page
 
-    end = start + per_page
-
-    page_rows = rows[start:end]
+    page_rows = rows[
+        start:start + per_page
+    ]
 
     for row in page_rows:
 
         a, b, c = row["actual"]
 
-        if row["exact_hit"]:
-            result_text = "✅ 3連単的中"
-        else:
-            result_text = "❌ 不的中"
+        result_text = (
+            "✅ 3連単的中"
+            if row["exact_hit"]
+            else "❌ 不的中"
+        )
 
-        box_text = ""
+        box_text = (
+            "　/　AI3艇BOX的中"
+            if row["box_hit"]
+            else ""
+        )
 
-        if row["box_hit"]:
-            box_text = "　/　AI3艇BOX的中"
-
-        predicted = row.get(
+        p = row.get(
             "predicted_combo"
         )
 
-        if predicted:
-            p1, p2, p3 = predicted
-            predicted_text = (
-                f"予想：{p1}-{p2}-{p3}  "
+        if p:
+            predicted = (
+                f"予想："
+                f"{p[0]}-{p[1]}-{p[2]} "
             )
         else:
-            predicted_text = ""
+            predicted = ""
 
         st.markdown(
             f"**{row['date']}　"
@@ -554,7 +568,7 @@ if bt:
             f"AI：🎯{row['main']}号艇　"
             f"🔥{row['counter']}号艇　"
             f"💥{row['hole']}号艇  \n"
-            f"{predicted_text}"
+            f"{predicted}"
             f"結果：🏁 **{a}-{b}-{c}**　"
             f"{result_text}"
             f"{box_text}"
@@ -562,9 +576,9 @@ if bt:
 
     st.write("")
 
-    # =========================
-    # ページ操作
-    # =========================
+    # =====================
+    # ページボタン
+    # =====================
 
     col1, col2, col3 = st.columns(
         [1, 2, 1]
@@ -577,14 +591,14 @@ if bt:
             if st.button(
                 "◀ 前へ",
                 use_container_width=True,
-                key="backtest_prev",
+                key="bt_prev",
             ):
 
                 st.session_state.bt_page = (
                     page - 1
                 )
 
-                st.session_state.scroll_results = True
+                st.session_state.scroll_request = True
 
                 st.session_state.scroll_token += 1
 
@@ -612,44 +626,39 @@ if bt:
             if st.button(
                 "次へ ▶",
                 use_container_width=True,
-                key="backtest_next",
+                key="bt_next",
             ):
 
                 st.session_state.bt_page = (
                     page + 1
                 )
 
-                st.session_state.scroll_results = True
+                st.session_state.scroll_request = True
 
                 st.session_state.scroll_token += 1
 
                 st.rerun()
 
-    # =========================
+    # =====================
     # ページ変更後スクロール
-    #
-    # ページ番号をHTMLに含めることで
-    # 毎回別のiframeとして再描画させる
-    # =========================
+    # =====================
 
-    if st.session_state.scroll_results:
+    if st.session_state.scroll_request:
 
         token = (
             st.session_state.scroll_token
         )
 
-        st.session_state.scroll_results = False
+        st.session_state.scroll_request = False
 
         components.html(
             f"""
-            <div id="scroll-token-{token}"></div>
-
             <script>
-            (function() {{
+            (() => {{
 
                 const token = "{token}";
 
-                function go() {{
+                function scrollResult() {{
 
                     try {{
 
@@ -675,30 +684,41 @@ if bt:
                             active.blur();
                         }}
 
-                        const rect =
-                            target.getBoundingClientRect();
-
-                        const top =
-                            rect.top +
-                            window.parent.scrollY -
-                            12;
-
-                        window.parent.scrollTo({{
-                            top: top,
-                            behavior: "smooth"
+                        target.scrollIntoView({{
+                            behavior: "smooth",
+                            block: "start"
                         }});
 
                     }} catch(e) {{}}
-
                 }}
 
-                setTimeout(go, 150);
-                setTimeout(go, 500);
-                setTimeout(go, 1000);
-                setTimeout(go, 1800);
+                setTimeout(
+                    scrollResult,
+                    100
+                );
+
+                setTimeout(
+                    scrollResult,
+                    300
+                );
+
+                setTimeout(
+                    scrollResult,
+                    700
+                );
+
+                setTimeout(
+                    scrollResult,
+                    1200
+                );
+
+                setTimeout(
+                    scrollResult,
+                    1800
+                );
 
             }})();
             </script>
             """,
             height=1,
-)
+    )

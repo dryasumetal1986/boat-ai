@@ -1,429 +1,408 @@
 import re
-import unicodedata
-import requests
-
-from bs4 import BeautifulSoup
 from functools import lru_cache
 
+import requests
+from bs4 import BeautifulSoup
 
-BASE_URL = "https://www.boatrace.jp/owpc/pc"
+
+API_BASE = "https://boatraceopenapi.github.io/api/v1"
+
+ODDS_URL = "https://www.boatrace.jp/owpc/pc/race/odds3t"
 
 
-STADIUMS = {
-    1: "桐生",
-    2: "戸田",
-    3: "江戸川",
-    4: "平和島",
-    5: "多摩川",
-    6: "浜名湖",
-    7: "蒲郡",
-    8: "常滑",
-    9: "津",
-    10: "三国",
-    11: "びわこ",
-    12: "住之江",
-    13: "尼崎",
-    14: "鳴門",
-    15: "丸亀",
-    16: "児島",
-    17: "宮島",
-    18: "徳山",
-    19: "下関",
-    20: "若松",
-    21: "芦屋",
-    22: "福岡",
-    23: "唐津",
-    24: "大村",
+# 全国24場
+VENUES = {
+    "桐生": 1,
+    "戸田": 2,
+    "江戸川": 3,
+    "平和島": 4,
+    "多摩川": 5,
+    "浜名湖": 6,
+    "蒲郡": 7,
+    "常滑": 8,
+    "津": 9,
+    "三国": 10,
+    "びわこ": 11,
+    "住之江": 12,
+    "尼崎": 13,
+    "鳴門": 14,
+    "丸亀": 15,
+    "児島": 16,
+    "宮島": 17,
+    "徳山": 18,
+    "下関": 19,
+    "若松": 20,
+    "芦屋": 21,
+    "福岡": 22,
+    "唐津": 23,
+    "大村": 24,
 }
 
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/140.0 Safari/537.36"
-    )
-}
+VENUE_BY_ID = {v: k for k, v in VENUES.items()}
 
 
-def _normalize(text):
-    return unicodedata.normalize(
-        "NFKC",
-        str(text or ""),
-    ).strip()
+def _get_json(url):
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    return response.json()
 
 
-@lru_cache(maxsize=512)
-def _get(url):
+@lru_cache(maxsize=400)
+def get_day_programs(yyyymmdd):
+    """
+    Boatrace Open APIから1日分のデータを取得
+    """
+
+    url = f"{API_BASE}/{yyyymmdd[:4]}/{yyyymmdd}.json"
+
     try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
-        )
+        return _get_json(url)
+    except Exception:
+        return None
 
-        response.raise_for_status()
 
-        response.encoding = (
-            response.apparent_encoding
-            or "utf-8"
-        )
+def _get_value(data, keys, default=""):
+    for key in keys:
+        value = data.get(key)
 
-        return response.text
+        if value not in (None, ""):
+            return value
+
+    return default
+
+
+def _to_float(value):
+    try:
+        text = str(value)
+        text = text.replace(",", "")
+        text = text.replace("%", "")
+        text = text.replace("％", "")
+
+        return float(text)
 
     except Exception:
-        return ""
+        return 0.0
 
 
-def get_data(date):
+def get_race(date_str, venue_name, race_no):
     """
-    日付情報。
+    指定日の指定場・指定レースを取得
     """
-    return {
-        "date": str(date),
-    }
 
+    yyyymmdd = date_str.replace("-", "")
 
-# ============================================================
-# レースデータ
-# ============================================================
+    data = get_day_programs(yyyymmdd)
 
-def get_race(
-    raw,
-    stadium_number,
-    race_number,
-):
-    if not raw:
+    venue_id = VENUES.get(venue_name)
+
+    if not data or not venue_id:
         return None
 
-    date = str(raw["date"])
-
-    url = (
-        f"{BASE_URL}/race/racelist"
-        f"?hd={date}"
-        f"&jcd={int(stadium_number):02d}"
-        f"&rno={int(race_number)}"
+    stadiums = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
     )
 
-    html = _get(url)
+    stadium = (
+        stadiums.get(str(venue_id))
+        or stadiums.get(venue_id)
+    )
 
-    if not html:
+    if not stadium:
         return None
 
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
+    races = stadium.get("races", {})
+
+    race = (
+        races.get(str(race_no))
+        or races.get(race_no)
     )
 
-    racers = _parse_racers(soup)
-
-    if len(racers) != 6:
-        racers = _dummy_racers()
-
-    return {
-        "date": date,
-        "stadium_number": int(stadium_number),
-        "race_number": int(race_number),
-        "racers": racers,
-        "html": soup,
-    }
-
-
-def get_race_racers(race):
     if not race:
-        return []
+        return None
 
-    racers = race.get("racers")
+    # -------------------------
+    # 選手データ
+    # -------------------------
 
-    if racers:
-        return racers
+    racers = race.get("racers", {})
 
-    return _dummy_racers()
+    items = []
 
+    if isinstance(racers, dict):
 
-def _parse_float_lines(text):
-    text = _normalize(text)
+        for key, value in racers.items():
 
-    lines = [
-        _normalize(x)
-        for x in text.splitlines()
-    ]
+            if not isinstance(value, dict):
+                continue
 
-    values = []
+            racer = dict(value)
 
-    for line in lines:
+            try:
+                racer["_entry"] = int(key)
+            except Exception:
+                continue
 
-        if not re.fullmatch(
-            r"-?\d+(?:\.\d+)?",
-            line,
-        ):
-            continue
+            items.append(racer)
 
-        try:
-            values.append(float(line))
-        except Exception:
-            pass
+    else:
+        items = racers
 
-    return values
+    items.sort(
+        key=lambda x: x.get("_entry", 99)
+    )
 
+    boats = []
 
-def _parse_racers(soup):
-    racers = {}
+    for i, racer in enumerate(items[:6], 1):
 
-    for tr in soup.find_all("tr"):
-
-        cells = tr.find_all(
-            "td",
-            recursive=False,
+        boat_no = int(
+            racer.get("_entry", i)
         )
 
-        if not cells:
-            continue
+        boats.append({
+            "boat": boat_no,
 
-        texts = [
-            _normalize(
-                cell.get_text(
-                    " ",
-                    strip=True,
+            "name": str(
+                _get_value(
+                    racer,
+                    [
+                        "name",
+                        "racer_name",
+                        "player_name",
+                    ],
+                    f"{boat_no}号艇",
                 )
-            )
-            for cell in cells
+            ),
+
+            "class": str(
+                _get_value(
+                    racer,
+                    [
+                        "class",
+                        "grade",
+                        "racer_class",
+                    ],
+                    "",
+                )
+            ),
+
+            "rate": _to_float(
+                _get_value(
+                    racer,
+                    [
+                        "national_win_rate",
+                        "win_rate",
+                        "rate",
+                    ],
+                    0,
+                )
+            ),
+
+            "local_rate": _to_float(
+                _get_value(
+                    racer,
+                    [
+                        "local_win_rate",
+                        "local_rate",
+                    ],
+                    0,
+                )
+            ),
+
+            "motor": _to_float(
+                _get_value(
+                    racer,
+                    [
+                        "motor_2_rate",
+                        "motor_rate",
+                    ],
+                    0,
+                )
+            ),
+
+            "course": _to_float(
+                _get_value(
+                    racer,
+                    [
+                        "course_1_rate",
+                        "course_rate",
+                    ],
+                    0,
+                )
+            ),
+        })
+
+    # -------------------------
+    # 結果
+    # -------------------------
+
+    result = race.get("result") or {}
+
+    result_racers = result.get(
+        "racers",
+        {}
+    )
+
+    actual = []
+
+    if isinstance(result_racers, dict):
+
+        temp = []
+
+        for key, value in result_racers.items():
+
+            if not isinstance(value, dict):
+                continue
+
+            try:
+                place = int(
+                    value.get("place_number")
+                )
+
+                boat = int(key)
+
+                temp.append(
+                    (place, boat)
+                )
+
+            except Exception:
+                continue
+
+        temp.sort()
+
+        actual = [
+            boat
+            for _, boat in temp[:3]
         ]
 
-        # 行全体
-        row_text = " ".join(texts)
+    # -------------------------
+    # 3連単払戻
+    # -------------------------
 
-        # A1/B1/B2等がない行は選手行ではない
-        if not re.search(
-            r"\b[ABC][12]\b",
-            row_text,
-        ):
-            continue
+    payout = 0.0
 
-        number = None
+    payouts = result.get(
+        "payouts",
+        {}
+    )
 
-        for text in texts[:3]:
+    trifecta = payouts.get(
+        "trifecta",
+        []
+    )
 
-            m = re.fullmatch(
-                r"[1-6]",
-                text,
+    if isinstance(trifecta, list):
+
+        for item in trifecta:
+
+            if not isinstance(item, dict):
+                continue
+
+            payout = _to_float(
+                item.get("amount", 0)
             )
 
-            if m:
-                number = int(text)
+            if payout:
                 break
 
-        if number is None:
-            continue
-
-        # すでに取得済みならスキップ
-        if number in racers:
-            continue
-
-        # 統計セルを探す
-        stat_groups = []
-
-        for text in texts:
-
-            values = _parse_float_lines(
-                text
-            )
-
-            if len(values) >= 3:
-                stat_groups.append(
-                    values[:3]
-                )
-
-        # 通常は
-        # 全国 / 当地 / モーター / ボート
-        # の4グループ
-        if len(stat_groups) < 4:
-            continue
-
-        national = stat_groups[0]
-        local = stat_groups[1]
-        motor = stat_groups[2]
-        boat = stat_groups[3]
-
-        racers[number] = {
-            "number": number,
-            "raw": {
-                "national_win_rate":
-                    national[0],
-                "national_top_2_percent":
-                    national[1],
-                "national_top_3_percent":
-                    national[2],
-
-                "local_win_rate":
-                    local[0],
-                "local_top_2_percent":
-                    local[1],
-                "local_top_3_percent":
-                    local[2],
-
-                "motor_top_2_percent":
-                    motor[1],
-                "motor_top_3_percent":
-                    motor[2],
-
-                "boat_top_2_percent":
-                    boat[1],
-                "boat_top_3_percent":
-                    boat[2],
-            },
-        }
-
-    if len(racers) != 6:
-        return []
-
-    return [
-        racers[i]
-        for i in range(1, 7)
-    ]
-
-
-def _dummy_racers():
-    return [
-        {
-            "number": i,
-            "raw": {
-                "national_win_rate": 0.0,
-                "national_top_2_percent": 0.0,
-                "national_top_3_percent": 0.0,
-                "local_win_rate": 0.0,
-                "local_top_2_percent": 0.0,
-                "local_top_3_percent": 0.0,
-                "motor_top_2_percent": 0.0,
-                "motor_top_3_percent": 0.0,
-                "boat_top_2_percent": 0.0,
-                "boat_top_3_percent": 0.0,
-            },
-        }
-        for i in range(1, 7)
-    ]
-
-
-# ============================================================
-# 3連単オッズ
-# ============================================================
-
-def _boat_number(text):
-    text = _normalize(text)
-
-    if not re.fullmatch(
-        r"[1-6]",
-        text,
-    ):
-        return None
-
-    return int(text)
+    return {
+        "date": date_str,
+        "venue": venue_name,
+        "venue_id": venue_id,
+        "race_no": race_no,
+        "boats": boats,
+        "actual": actual,
+        "payout": payout,
+        "raw": race,
+    }
 
 
 def _parse_odds(text):
-    text = _normalize(text)
+    """
+    オッズ文字列から数値だけ取得
+    """
 
-    text = text.replace(
-        ",",
-        "",
-    )
+    text = text.replace(",", "")
 
-    text = text.replace(
-        "倍",
-        "",
-    )
-
-    if not text:
-        return None
-
-    if text in (
-        "-",
-        "－",
-        "—",
-        "―",
-    ):
-        return None
-
-    m = re.search(
+    match = re.search(
         r"\d+(?:\.\d+)?",
         text,
     )
 
-    if not m:
+    if not match:
         return None
 
     try:
-        value = float(m.group())
-
-        if value <= 0:
-            return None
-
-        return value
+        return float(match.group())
 
     except Exception:
         return None
 
 
+@lru_cache(maxsize=2000)
 def get_trifecta_odds(
-    stadium_number,
-    race_number,
-    date,
+    date_str,
+    venue_id,
+    race_no,
 ):
     """
-    BOAT RACE公式3連単オッズ。
+    BOATRACE公式3連単オッズを取得。
 
-    公式HTMLはrowspan構造になっており、
+    公式ページは、
 
-    1行目:
-        2着 / 3着 / オッズ
+    2着 | 3着 | オッズ
 
-    続く行:
-        3着 / オッズ
+    の3セルが6組並ぶ構造。
 
-    となる。
-
-    2着を列ごとに保持しながら解析する。
+    oddsPointセルの直前2セルを
+    2着・3着として取得する。
     """
 
+    hd = date_str.replace("-", "")
+
+    jcd = f"{int(venue_id):02d}"
+
     url = (
-        f"{BASE_URL}/race/odds3t"
-        f"?hd={date}"
-        f"&jcd={int(stadium_number):02d}"
-        f"&rno={int(race_number)}"
+        f"{ODDS_URL}"
+        f"?hd={hd}"
+        f"&jcd={jcd}"
+        f"&rno={race_no}"
     )
 
-    html = _get(url)
+    try:
 
-    if not html:
+        response = requests.get(
+            url,
+            timeout=15,
+            headers={
+                "User-Agent":
+                    "Mozilla/5.0"
+            },
+        )
+
+        response.raise_for_status()
+
+    except Exception:
         return {}
 
     soup = BeautifulSoup(
-        html,
+        response.text,
         "html.parser",
     )
 
     odds = {}
 
-    # 各1着艇の現在の2着艇
-    second_cache = {
-        i: None
-        for i in range(1, 7)
-    }
+    # -------------------------
+    # 公式オッズ表を解析
+    # -------------------------
 
-    for tr in soup.find_all("tr"):
+    for tr in soup.select("tr"):
 
-        cells = tr.find_all(
-            "td",
-            recursive=False,
-        )
+        cells = tr.find_all("td")
 
-        if not cells:
-            continue
-
-        # oddsPointを6個含む行だけ
-        odds_positions = []
+        odds_indices = []
 
         for index, cell in enumerate(cells):
 
@@ -433,354 +412,68 @@ def get_trifecta_odds(
             )
 
             if "oddsPoint" in classes:
-                odds_positions.append(index)
+                odds_indices.append(index)
 
-        if len(odds_positions) != 6:
+        # 1行に6艇分なければ対象外
+        if len(odds_indices) != 6:
             continue
 
-        groups = []
-        current = []
+        for first, index in enumerate(
+            odds_indices,
+            1,
+        ):
 
-        for cell in cells:
-
-            classes = cell.get(
-                "class",
-                [],
-            )
-
-            is_odds = (
-                "oddsPoint"
-                in classes
-            )
-
-            text = _normalize(
-                cell.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            if is_odds:
-
-                current.append(text)
-
-                groups.append(
-                    current
-                )
-
-                current = []
-
-            else:
-                current.append(text)
-
-        if len(groups) != 6:
-            continue
-
-        for first in range(1, 7):
-
-            group = groups[first - 1]
-
-            if len(group) < 2:
+            if index < 2:
                 continue
 
-            odd = _parse_odds(
-                group[-1]
-            )
+            try:
 
-            if odd is None:
+                second = int(
+                    cells[index - 2]
+                    .get_text(
+                        " ",
+                        strip=True,
+                    )
+                )
+
+                third = int(
+                    cells[index - 1]
+                    .get_text(
+                        " ",
+                        strip=True,
+                    )
+                )
+
+                odd = _parse_odds(
+                    cells[index]
+                    .get_text(
+                        " ",
+                        strip=True,
+                    )
+                )
+
+            except Exception:
                 continue
 
-            values = group[:-1]
-
-            second = None
-            third = None
-
-            # ------------------------------------------------
-            # 3セル構造
-            # [2着, 3着, オッズ]
-            # ------------------------------------------------
-
-            if len(values) >= 2:
-
-                possible_second = (
-                    _boat_number(
-                        values[-2]
-                    )
-                )
-
-                possible_third = (
-                    _boat_number(
-                        values[-1]
-                    )
-                )
-
-                if (
-                    possible_second
-                    is not None
-                    and
-                    possible_third
-                    is not None
-                ):
-                    second = (
-                        possible_second
-                    )
-
-                    third = (
-                        possible_third
-                    )
-
-                    second_cache[
-                        first
-                    ] = second
-
-            # ------------------------------------------------
-            # 2セル構造
-            # [3着, オッズ]
-            # ------------------------------------------------
-
-            elif len(values) == 1:
-
-                second = (
-                    second_cache[first]
-                )
-
-                third = _boat_number(
-                    values[0]
-                )
-
+            # 正常な3連単だけ保存
             if (
-                second is None
-                or third is None
-            ):
-                continue
-
-            if (
-                first == second
-                or first == third
-                or second == third
-            ):
-                continue
-
-            odds[
-                (
+                odd
+                and 1 <= first <= 6
+                and 1 <= second <= 6
+                and 1 <= third <= 6
+                and len({
                     first,
                     second,
                     third,
-                )
-            ] = odd
+                }) == 3
+            ):
+
+                odds[
+                    (
+                        first,
+                        second,
+                        third,
+                    )
+                ] = odd
 
     return odds
-
-
-# ============================================================
-# バックテスト用 結果一覧
-# ============================================================
-
-@lru_cache(maxsize=128)
-def _resultlist_html(
-    date,
-    stadium_number,
-):
-    url = (
-        f"{BASE_URL}/race/resultlist"
-        f"?hd={date}"
-        f"&jcd={int(stadium_number):02d}"
-    )
-
-    return _get(url)
-
-
-def all_races_for_date(raw):
-    """
-    その日に完了している全レース。
-    """
-
-    if not raw:
-        return []
-
-    date = str(raw["date"])
-
-    result = []
-
-    for stadium_number in range(1, 25):
-
-        html = _resultlist_html(
-            date,
-            stadium_number,
-        )
-
-        if not html:
-            continue
-
-        races = _parse_resultlist(
-            html
-        )
-
-        for race in races:
-
-            result.append(
-                (
-                    stadium_number,
-                    race["race_number"],
-                    race,
-                )
-            )
-
-    # R順を維持
-    result.sort(
-        key=lambda x: (
-            x[1],
-            x[0],
-        )
-    )
-
-    return result
-
-
-def _parse_resultlist(html):
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    results = []
-
-    for tr in soup.find_all("tr"):
-
-        cells = tr.find_all(
-            ["th", "td"],
-            recursive=False,
-        )
-
-        if not cells:
-            continue
-
-        texts = [
-            _normalize(
-                cell.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-            for cell in cells
-        ]
-
-        if not texts:
-            continue
-
-        m_race = re.match(
-            r"^(\d{1,2})R$",
-            texts[0],
-        )
-
-        if not m_race:
-            continue
-
-        race_number = int(
-            m_race.group(1)
-        )
-
-        row_text = " ".join(texts)
-
-        m_combo = re.search(
-            r"([1-6])\s*-\s*"
-            r"([1-6])\s*-\s*"
-            r"([1-6])",
-            row_text,
-        )
-
-        if not m_combo:
-            continue
-
-        actual = [
-            int(m_combo.group(1)),
-            int(m_combo.group(2)),
-            int(m_combo.group(3)),
-        ]
-
-        # 払戻金
-        amounts = re.findall(
-            r"¥\s*([0-9,]+)",
-            row_text,
-        )
-
-        payout = 0
-
-        if amounts:
-            try:
-                payout = int(
-                    amounts[0].replace(
-                        ",",
-                        "",
-                    )
-                )
-            except Exception:
-                payout = 0
-
-        results.append({
-            "race_number": race_number,
-            "actual": actual,
-            "payout": payout,
-        })
-
-    return results
-
-
-def get_actual_order(race):
-    if not race:
-        return []
-
-    actual = race.get(
-        "actual",
-        [],
-    )
-
-    return [
-        int(x)
-        for x in actual
-        if str(x).isdigit()
-    ][:6]
-
-
-def get_payouts(race):
-    if not race:
-        return {}
-
-    combo = race.get(
-        "actual",
-        [],
-    )
-
-    payout = int(
-        race.get(
-            "payout",
-            0,
-        )
-        or 0
-    )
-
-    if len(combo) < 3:
-        return {}
-
-    actual_combo = "-".join(
-        str(x)
-        for x in combo[:3]
-    )
-
-    return {
-        "trifecta": [
-            {
-                "combination":
-                    actual_combo,
-                "amount":
-                    payout,
-            }
-        ]
-    }
-
-
-def get_stadium_name(number):
-    return STADIUMS.get(
-        int(number),
-        str(number),
-    )

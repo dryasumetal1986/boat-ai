@@ -1,237 +1,267 @@
-from datetime import datetime, timedelta
-
-import pandas as pd
+from datetime import timedelta
 
 from data import (
     get_all_races,
-    race_to_df,
     get_result,
     get_payout,
+    race_to_df,
 )
-from ai import predict
+from ai import predict, combo_text
 
 
 def collect_races(start_date, target_count):
     """
     start_dateから過去へ遡り、
-    結果のあるレースをtarget_count件集める。
+    結果が存在するレースをtarget_count件集める。
+
+    開催場は指定しない。
+    全24場を自動対象にする。
     """
-
     collected = []
-    current = datetime.strptime(
-        start_date,
-        "%Y%m%d"
-    )
 
-    max_days = 120
+    current = start_date
 
-    for _ in range(max_days):
+    # 1000レースなら通常数日～十数日なので
+    # 十分余裕を持たせる。
+    for _ in range(120):
+        races = get_all_races(current)
 
-        date_str = current.strftime("%Y%m%d")
-        daily = get_all_races(date_str)
-
-        for item in daily:
-
+        for item in races:
             race = item["race"]
+
             result = get_result(race)
 
+            # 結果が正しく1～6の3艇でないものは除外
             if not result:
                 continue
 
-            item["result"] = result
+            if len(result) != 3:
+                continue
+
+            if len(set(result)) != 3:
+                continue
+
+            if not all(
+                1 <= int(x) <= 6
+                for x in result
+            ):
+                continue
+
+            item = dict(item)
+            item["result_order"] = result
+
             collected.append(item)
 
             if len(collected) >= target_count:
-                return collected
+                return collected[:target_count]
 
         current -= timedelta(days=1)
 
-    return collected
+    return collected[:target_count]
 
 
-def run_backtest(
-    start_date,
-    target_count,
-    progress_callback=None
-):
+def run_backtest(start_date, target_count):
+    """
+    AI予想と全く同じpredict()を使って検証。
+    """
     races = collect_races(
         start_date,
-        target_count
+        target_count,
     )
 
     if not races:
         return {
-            "records": pd.DataFrame(),
+            "requested": target_count,
+            "valid": 0,
+            "rows": [],
             "stats": {},
         }
 
-    records = []
-    total = len(races)
+    rows = []
 
-    for i, item in enumerate(races):
+    main_hits = 0
+    counter_hits = 0
+    hole_hits = 0
+    total_hits = 0
 
+    axis_first_hits = 0
+    axis_top3_hits = 0
+    box_hits = 0
+
+    investment = 0
+    payout_total = 0
+
+    for item in races:
         race = item["race"]
+
         df = race_to_df(race)
 
-        if len(df) != 6:
+        if df.empty or len(df) != 6:
             continue
 
-        try:
-            pred = predict(df)
-        except Exception:
+        pred = predict(df)
+
+        if not pred:
             continue
 
-        main = tuple(
-            pred["tickets"]["main"]["combo"]
+        tickets = pred["tickets"]
+
+        result = item["result_order"]
+
+        result_tuple = tuple(
+            int(x)
+            for x in result
         )
 
-        counter = tuple(
-            pred["tickets"]["counter"]["combo"]
-        )
-
-        hole = tuple(
-            pred["tickets"]["hole"]["combo"]
-        )
-
-        result = tuple(item["result"])
-
-        hit_main = result == main
-        hit_counter = result == counter
-        hit_hole = result == hole
-        hit3 = (
-            hit_main or
-            hit_counter or
-            hit_hole
-        )
-
-        payout = get_payout(
-            race,
-            result
-        )
-
-        top1 = pred["ranking"][0]["boat"]
-
-        top3_boats = [
-            x["boat"]
-            for x in pred["ranking"][:3]
+        ticket_tuples = [
+            tuple(
+                int(x)
+                for x in t["combo"]
+            )
+            for t in tickets
         ]
 
-        records.append({
-            "date": item["date"],
+        hit_main = (
+            len(ticket_tuples) >= 1
+            and ticket_tuples[0] == result_tuple
+        )
+
+        hit_counter = (
+            len(ticket_tuples) >= 2
+            and ticket_tuples[1] == result_tuple
+        )
+
+        hit_hole = (
+            len(ticket_tuples) >= 3
+            and ticket_tuples[2] == result_tuple
+        )
+
+        hit_any = (
+            hit_main
+            or hit_counter
+            or hit_hole
+        )
+
+        if hit_main:
+            main_hits += 1
+
+        if hit_counter:
+            counter_hits += 1
+
+        if hit_hole:
+            hole_hits += 1
+
+        if hit_any:
+            total_hits += 1
+
+        # AI最上位艇
+        ranking = pred.get(
+            "ranking",
+            [],
+        )
+
+        if ranking:
+            axis = int(
+                ranking[0]["boat"]
+            )
+
+            if result_tuple[0] == axis:
+                axis_first_hits += 1
+
+            if axis in result_tuple:
+                axis_top3_hits += 1
+
+            top3 = set(
+                int(x["boat"])
+                for x in ranking[:3]
+            )
+
+            if set(result_tuple) == top3:
+                box_hits += 1
+
+        payout = get_payout(race)
+
+        investment += 300
+
+        if hit_any:
+            payout_total += int(
+                payout or 0
+            )
+
+        rows.append({
+            "date": item["date"].strftime(
+                "%Y%m%d"
+            ),
             "stadium": item["stadium"],
-            "race_no": item["race_no"],
+            "race": item["race_no"],
 
-            "main": main,
-            "counter": counter,
-            "hole": hole,
+            "main": combo_text(
+                tickets[0]["combo"]
+            ),
 
-            "result": result,
-            "payout": payout,
+            "counter": combo_text(
+                tickets[1]["combo"]
+            ),
 
-            "hit_main": hit_main,
-            "hit_counter": hit_counter,
-            "hit_hole": hit_hole,
-            "hit3": hit3,
+            "hole": combo_text(
+                tickets[2]["combo"]
+            ),
 
-            "first_pred": top1,
-            "first_hit": top1 == result[0],
+            "result": combo_text(
+                result_tuple
+            ),
 
-            "top3_hit": top1 in result,
+            "hit": "⭕" if hit_any else "❌",
 
-            "ai_top3_all": all(
-                x in result
-                for x in top3_boats
+            "payout": int(
+                payout or 0
             ),
         })
 
-        if progress_callback:
-            progress_callback(
-                (i + 1) / total
-            )
+    valid = len(rows)
 
-    if not records:
+    if valid == 0:
         return {
-            "records": pd.DataFrame(),
+            "requested": target_count,
+            "valid": 0,
+            "rows": [],
             "stats": {},
         }
 
-    result_df = pd.DataFrame(records)
-
-    n = len(result_df)
-
-    hits = int(
-        result_df["hit3"].sum()
-    )
-
-    main_hits = int(
-        result_df["hit_main"].sum()
-    )
-
-    counter_hits = int(
-        result_df["hit_counter"].sum()
-    )
-
-    hole_hits = int(
-        result_df["hit_hole"].sum()
-    )
-
-    first_hits = int(
-        result_df["first_hit"].sum()
-    )
-
-    top3_hits = int(
-        result_df["top3_hit"].sum()
-    )
-
-    box_hits = int(
-        result_df["ai_top3_all"].sum()
-    )
-
-    investment = n * 300
-
-    payout = int(
-        result_df.loc[
-            result_df["hit3"],
-            "payout"
-        ].sum()
-    )
-
     stats = {
-        "races": n,
-
-        "three_bet_hit_rate":
-            hits / n,
-
-        "main_hit_rate":
-            main_hits / n,
-
-        "counter_hit_rate":
-            counter_hits / n,
-
-        "hole_hit_rate":
-            hole_hits / n,
-
-        "first_hit_rate":
-            first_hits / n,
-
-        "top3_hit_rate":
-            top3_hits / n,
-
-        "box_hit_rate":
-            box_hits / n,
-
-        "investment":
-            investment,
-
-        "payout":
-            payout,
-
-        "return_rate":
-            payout / investment
-            if investment else 0,
+        "total_hit_rate": (
+            total_hits / valid * 100
+        ),
+        "main_hit_rate": (
+            main_hits / valid * 100
+        ),
+        "counter_hit_rate": (
+            counter_hits / valid * 100
+        ),
+        "hole_hit_rate": (
+            hole_hits / valid * 100
+        ),
+        "axis_first_rate": (
+            axis_first_hits / valid * 100
+        ),
+        "axis_top3_rate": (
+            axis_top3_hits / valid * 100
+        ),
+        "box_rate": (
+            box_hits / valid * 100
+        ),
+        "investment": investment,
+        "payout": payout_total,
+        "recovery": (
+            payout_total / investment * 100
+            if investment > 0
+            else 0
+        ),
     }
 
     return {
-        "records": result_df,
+        "requested": target_count,
+        "valid": valid,
+        "rows": rows,
         "stats": stats,
     }

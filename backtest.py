@@ -1,338 +1,359 @@
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 
-import ai
-import data
-
-
-START_DATE = "20260101"
-
-BET_AMOUNT = 600
-BET_UNIT = 100
+from ai import predict_race
+from data import VENUE_BY_ID, get_race
 
 
-def _dates_backwards(end_date):
-    """
-    当日は除外。
-    前日からSTART_DATEまで。
-    """
+# 1レースあたり600円投資
+INVEST_PER_RACE = 600
 
-    current = (
-        datetime.strptime(
-            end_date,
-            "%Y%m%d",
-        )
-        - timedelta(days=1)
-    )
-
-    minimum = datetime.strptime(
-        START_DATE,
-        "%Y%m%d",
-    )
-
-    while current >= minimum:
-
-        yield current.strftime(
-            "%Y%m%d"
-        )
-
-        current -= timedelta(days=1)
-
-
-def _completed_races(target_date):
-    raw = data.get_data(
-        target_date
-    )
-
-    if not raw:
-        return []
-
-    result = []
-
-    for (
-        stadium_number,
-        race_number,
-        race,
-    ) in data.all_races_for_date(
-        raw
-    ):
-
-        actual = data.get_actual_order(
-            race
-        )
-
-        if len(actual) < 3:
-            continue
-
-        result.append({
-            "date": target_date,
-            "stadium_number":
-                stadium_number,
-            "race_number":
-                race_number,
-            "race": race,
-            "actual": actual,
-        })
-
-    result.sort(
-        key=lambda x: (
-            x["stadium_number"],
-            x["race_number"],
-        )
-    )
-
-    return result
+# 選択できる検証レース数
+TARGET_RACES = [
+    100,
+    300,
+    500,
+    1000,
+]
 
 
 def run_backtest(
-    end_date,
     target_count,
-    progress_callback=None,
+    end_date=None,
 ):
-    races = []
+    """
+    全国24場を対象にバックテスト。
 
-    dates = list(
-        _dates_backwards(
-            end_date
-        )
+    現在日のレースは使用せず、
+    前日から2026-01-01まで
+    遡って完成済みレースを集める。
+    """
+
+    if end_date is None:
+        end_date = date.today()
+
+    # 当日を除外して「前日」から開始
+    cursor = (
+        end_date
+        - timedelta(days=1)
     )
 
-    total_dates = max(
-        len(dates),
+    start_date = date(
+        2026,
+        1,
         1,
     )
 
-    for index, date in enumerate(
-        dates,
-        start=1,
+    rows = []
+
+    # -------------------------
+    # 集計
+    # -------------------------
+
+    total_investment = 0.0
+    total_return = 0.0
+
+    main_win_count = 0
+    main_top3_count = 0
+
+    top3_all_top3_count = 0
+
+    box_hit_count = 0
+    exact_hit_count = 0
+
+    # -------------------------
+    # 日付を遡る
+    # -------------------------
+
+    while (
+        cursor >= start_date
+        and len(rows) < target_count
     ):
 
-        daily = _completed_races(
-            date
+        date_str = (
+            cursor.isoformat()
         )
 
-        for item in daily:
+        # 全国24場
+        for venue_id in range(
+            1,
+            25,
+        ):
 
-            races.append(item)
+            if len(rows) >= target_count:
+                break
 
-            if len(races) >= target_count:
+            venue_name = VENUE_BY_ID[
+                venue_id
+            ]
 
-                if progress_callback:
-                    progress_callback(
-                        1.0
+            # 1R～12R
+            for race_no in range(
+                1,
+                13,
+            ):
+
+                if len(rows) >= target_count:
+                    break
+
+                race = get_race(
+                    date_str,
+                    venue_name,
+                    race_no,
+                )
+
+                # データがないレースは除外
+                if not race:
+                    continue
+
+                # 6艇揃っていない場合は除外
+                if len(
+                    race.get(
+                        "boats",
+                        [],
+                    )
+                ) != 6:
+                    continue
+
+                # 結果がないレースは除外
+                actual = race.get(
+                    "actual",
+                    [],
+                )
+
+                if len(actual) < 3:
+                    continue
+
+                # -------------------------
+                # AI予想
+                # -------------------------
+
+                prediction = predict_race(
+                    race
+                )
+
+                ranking = prediction[
+                    "ranking"
+                ]
+
+                main = ranking[0]
+                counter = ranking[1]
+                hole = ranking[2]
+
+                # AIが選んだ3艇
+                selected_boats = {
+                    main,
+                    counter,
+                    hole,
+                }
+
+                # 実際の3着
+                actual_top3 = tuple(
+                    actual[:3]
+                )
+
+                # -------------------------
+                # 投資
+                # -------------------------
+
+                total_investment += (
+                    INVEST_PER_RACE
+                )
+
+                # -------------------------
+                # 本命1着
+                # -------------------------
+
+                main_win = (
+                    actual_top3[0]
+                    == main
+                )
+
+                if main_win:
+                    main_win_count += 1
+
+                # -------------------------
+                # 本命3連対
+                # -------------------------
+
+                main_top3 = (
+                    main
+                    in actual_top3
+                )
+
+                if main_top3:
+                    main_top3_count += 1
+
+                # -------------------------
+                # AI上位3艇
+                # 全艇が3着以内
+                # -------------------------
+
+                top3_all_top3 = all(
+                    boat in actual_top3
+                    for boat in ranking[:3]
+                )
+
+                if top3_all_top3:
+                    top3_all_top3_count += 1
+
+                # -------------------------
+                # AI選出3艇BOX的中
+                #
+                # 順番は問わず
+                # 3艇すべてが実着3艇と一致
+                # -------------------------
+
+                box_hit = (
+                    selected_boats
+                    == set(actual_top3)
+                )
+
+                if box_hit:
+                    box_hit_count += 1
+
+                # -------------------------
+                # 3連単完全的中
+                # -------------------------
+
+                predicted_combo = (
+                    main,
+                    counter,
+                    hole,
+                )
+
+                exact_hit = (
+                    actual_top3
+                    == predicted_combo
+                )
+
+                if exact_hit:
+                    exact_hit_count += 1
+
+                    # 公式払戻は100円券の金額。
+                    #
+                    # このバックテストでは
+                    # 1点に600円投資するため、
+                    # 払戻を6倍する。
+                    payout = float(
+                        race.get(
+                            "payout",
+                            0,
+                        )
                     )
 
-                return _evaluate(
-                    races[:target_count]
-                )
-
-        if progress_callback:
-
-            progress_callback(
-                min(
-                    index
-                    / total_dates,
-                    0.99,
-                )
-            )
-
-    return _evaluate(
-        races[:target_count]
-    )
-
-
-def _evaluate(races):
-
-    total = len(races)
-
-    if total == 0:
-
-        return {
-            "total": 0,
-            "results": [],
-            "recovery": 0.0,
-            "main_win_rate": 0.0,
-            "main_top3_rate": 0.0,
-            "top3_all_top3_rate": 0.0,
-            "trifecta_hit_rate": 0.0,
-            "investment": 0,
-            "payout": 0,
-        }
-
-    results = []
-
-    main_win = 0
-    main_top3 = 0
-    top3_all_top3 = 0
-    trifecta_hit = 0
-
-    investment = 0
-    payout = 0
-
-    for item in races:
-
-        race = item["race"]
-
-        racers = data.get_race_racers(
-            race
-        )
-
-        prediction = ai.tri_ai(
-            racers
-        )
-
-        main = prediction["main"]
-        counter = prediction["counter"]
-        hole = prediction["hole"]
-
-        actual = item["actual"]
-
-        actual3 = set(
-            actual[:3]
-        )
-
-        # 本命1着
-        if (
-            len(actual) >= 1
-            and main == actual[0]
-        ):
-            main_win += 1
-
-        # 本命3連対
-        if main in actual3:
-            main_top3 += 1
-
-        # AI上位3艇が全艇3連対
-        top3 = prediction[
-            "ranking"
-        ][:3]
-
-        if all(
-            boat in actual3
-            for boat in top3
-        ):
-            top3_all_top3 += 1
-
-        predicted = (
-            main,
-            counter,
-            hole,
-        )
-
-        # 3連単完全的中
-        if (
-            len(actual) >= 3
-            and predicted
-            == tuple(actual[:3])
-        ):
-
-            trifecta_hit += 1
-
-            # 100円払戻 × 6 = 600円購入分
-            race_payout = int(
-                item["race"].get(
-                    "payout",
-                    0,
-                )
-                or 0
-            )
-
-            payout += (
-                race_payout
-                * (
-                    BET_AMOUNT
-                    // BET_UNIT
-                )
-            )
-
-        investment += BET_AMOUNT
-
-        results.append({
-            "date":
-                item["date"],
-
-            "stadium":
-                data.get_stadium_name(
-                    item[
-                        "stadium_number"
-                    ]
-                ),
-
-            "race":
-                item["race_number"],
-
-            "main":
-                main,
-
-            "counter":
-                counter,
-
-            "hole":
-                hole,
-
-            "actual":
-                actual[:3],
-
-            "trifecta_hit":
-                (
-                    len(actual) >= 3
-                    and predicted
-                    == tuple(actual[:3])
-                ),
-
-            "ai_top3_hit_count":
-                len(
-                    set(
-                        [
-                            main,
-                            counter,
-                            hole,
-                        ]
+                    total_return += (
+                        payout * 6
                     )
-                    & actual3
-                ),
-        })
 
-    recovery = (
-        payout
-        / investment
-        * 100.0
-        if investment
-        else 0.0
-    )
+                # -------------------------
+                # 検証結果
+                # -------------------------
+
+                rows.append({
+                    "date": date_str,
+
+                    "venue": venue_name,
+
+                    "race_no": race_no,
+
+                    "main": main,
+
+                    "counter": counter,
+
+                    "hole": hole,
+
+                    "actual": actual_top3,
+
+                    "main_win": main_win,
+
+                    "main_top3": main_top3,
+
+                    "box_hit": box_hit,
+
+                    "exact_hit": exact_hit,
+                })
+
+        # 1日前へ
+        cursor -= timedelta(
+            days=1
+        )
+
+    # -------------------------
+    # 集計
+    # -------------------------
+
+    race_count = len(rows)
+
+    if race_count > 0:
+
+        recovery_rate = (
+            total_return
+            / total_investment
+            * 100
+        )
+
+        main_win_rate = (
+            main_win_count
+            / race_count
+            * 100
+        )
+
+        main_top3_rate = (
+            main_top3_count
+            / race_count
+            * 100
+        )
+
+        top3_all_top3_rate = (
+            top3_all_top3_count
+            / race_count
+            * 100
+        )
+
+        box_hit_rate = (
+            box_hit_count
+            / race_count
+            * 100
+        )
+
+        exact_hit_rate = (
+            exact_hit_count
+            / race_count
+            * 100
+        )
+
+    else:
+
+        recovery_rate = 0.0
+        main_win_rate = 0.0
+        main_top3_rate = 0.0
+        top3_all_top3_rate = 0.0
+        box_hit_rate = 0.0
+        exact_hit_rate = 0.0
 
     return {
-        "total":
-            total,
+        "rows": rows,
 
-        "results":
-            results,
+        "count": race_count,
 
-        "recovery":
-            recovery,
+        "investment": total_investment,
+
+        "return": total_return,
+
+        "recovery": recovery_rate,
 
         "main_win_rate":
-            main_win
-            / total
-            * 100.0,
+            main_win_rate,
 
         "main_top3_rate":
-            main_top3
-            / total
-            * 100.0,
+            main_top3_rate,
 
         "top3_all_top3_rate":
-            top3_all_top3
-            / total
-            * 100.0,
+            top3_all_top3_rate,
 
-        "trifecta_hit_rate":
-            trifecta_hit
-            / total
-            * 100.0,
+        "box_hit_rate":
+            box_hit_rate,
 
-        "investment":
-            investment,
-
-        "payout":
-            payout,
-        }
+        "exact_hit_rate":
+            exact_hit_rate,
+    }

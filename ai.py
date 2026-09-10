@@ -1,361 +1,633 @@
 import itertools
 import math
 
+import numpy as np
 
-def _norm(values):
-    arr = []
-    for value in values:
-        try:
-            value = float(value)
-        except Exception:
-            value = 0.0
-        if not math.isfinite(value):
-            value = 0.0
-        arr.append(max(value, 0.0))
 
-    total = sum(arr)
+def _clip(value, low=0.0, high=1.0):
+    return max(
+        low,
+        min(
+            high,
+            float(value),
+        ),
+    )
+
+
+def _softmax(values, temperature=1.0):
+    arr = np.asarray(
+        values,
+        dtype=float,
+    )
+
+    arr = np.nan_to_num(
+        arr,
+        nan=0.0,
+        posinf=20.0,
+        neginf=-20.0,
+    )
+
+    temperature = max(
+        0.10,
+        float(temperature),
+    )
+
+    arr = arr / temperature
+
+    arr -= np.max(arr)
+
+    exp = np.exp(
+        np.clip(
+            arr,
+            -30,
+            30,
+        )
+    )
+
+    total = exp.sum()
 
     if total <= 0:
-        return [1.0 / len(arr)] * len(arr)
+        return np.ones(
+            len(arr)
+        ) / len(arr)
 
-    return [x / total for x in arr]
-
-
-def _safe_float(value, default=0.0):
-    try:
-        value = float(value)
-        if math.isfinite(value):
-            return value
-    except Exception:
-        pass
-    return default
+    return exp / total
 
 
-def predict_race(race):
+def _relative_low(
+    value,
+    values,
+    default=0.5,
+):
     """
-    6艇の強さを計算し、
-    1着確率と120通りの3連単確率を作る。
+    小さいほど良い指標を
+    0〜1へ変換。
 
-    今回は「期待値」ではなく
-    AI的中確率を中心にする。
+    ST・展示タイム用。
     """
 
-    boats = race.get("boats", [])
+    vals = [
+        float(x)
+        for x in values
+        if float(x) > 0
+    ]
 
-    if len(boats) < 6:
-        boats = list(boats)
+    value = float(value)
 
-    scores = {}
+    if value <= 0 or not vals:
+        return default
 
-    for b in boats:
-        boat = int(b.get("boat", 0))
+    lo = min(vals)
+    hi = max(vals)
 
-        if boat < 1 or boat > 6:
+    if hi <= lo:
+        return default
+
+    score = (
+        (hi - value)
+        / (hi - lo)
+    )
+
+    return _clip(score)
+
+
+def _boat_score(
+    boat,
+    boats,
+):
+    """
+    1艇の総合スコア。
+
+    的中率重視なので、
+    実績データを中心にする。
+
+    EVはここでは一切使わない。
+    """
+
+    course = _clip(
+        boat.get(
+            "course_score",
+            0.5,
+        )
+    )
+
+    national_win = _clip(
+        boat.get(
+            "national_win_rate",
+            0.0,
+        ) / 10.0
+    )
+
+    national_top2 = _clip(
+        boat.get(
+            "national_top2",
+            0.0,
+        ) / 100.0
+    )
+
+    national_top3 = _clip(
+        boat.get(
+            "national_top3",
+            0.0,
+        ) / 100.0
+    )
+
+    local_win = _clip(
+        boat.get(
+            "local_win_rate",
+            0.0,
+        ) / 10.0
+    )
+
+    local_top2 = _clip(
+        boat.get(
+            "local_top2",
+            0.0,
+        ) / 100.0
+    )
+
+    local_top3 = _clip(
+        boat.get(
+            "local_top3",
+            0.0,
+        ) / 100.0
+    )
+
+    motor_top2 = _clip(
+        boat.get(
+            "motor_top2",
+            0.0,
+        ) / 100.0
+    )
+
+    motor_top3 = _clip(
+        boat.get(
+            "motor_top3",
+            0.0,
+        ) / 100.0
+    )
+
+    boat_top2 = _clip(
+        boat.get(
+            "boat_top2",
+            0.0,
+        ) / 100.0
+    )
+
+    boat_top3 = _clip(
+        boat.get(
+            "boat_top3",
+            0.0,
+        ) / 100.0
+    )
+
+    avg_st = boat.get(
+        "average_start",
+        0.0,
+    )
+
+    start_values = [
+        x.get(
+            "average_start",
+            0.0,
+        )
+        for x in boats
+    ]
+
+    st_score = _relative_low(
+        avg_st,
+        start_values,
+        default=0.5,
+    )
+
+    exhibition = boat.get(
+        "exhibition_time",
+        0.0,
+    )
+
+    exhibition_values = [
+        x.get(
+            "exhibition_time",
+            0.0,
+        )
+        for x in boats
+    ]
+
+    exhibition_score = _relative_low(
+        exhibition,
+        exhibition_values,
+        default=0.5,
+    )
+
+    direct_start = boat.get(
+        "start_timing",
+        0.0,
+    )
+
+    direct_values = [
+        x.get(
+            "start_timing",
+            0.0,
+        )
+        for x in boats
+    ]
+
+    direct_score = _relative_low(
+        direct_start,
+        direct_values,
+        default=0.5,
+    )
+
+    flying = boat.get(
+        "flying_count",
+        0,
+    )
+
+    late = boat.get(
+        "late_count",
+        0,
+    )
+
+    risk_penalty = (
+        min(flying, 2) * 0.015
+        + min(late, 2) * 0.010
+    )
+
+    score = (
+        course * 0.22
+        + national_win * 0.18
+        + national_top2 * 0.11
+        + national_top3 * 0.08
+        + local_win * 0.10
+        + local_top2 * 0.06
+        + local_top3 * 0.04
+        + motor_top2 * 0.06
+        + motor_top3 * 0.04
+        + boat_top2 * 0.025
+        + boat_top3 * 0.015
+        + st_score * 0.025
+        + direct_score * 0.015
+        + exhibition_score * 0.025
+        - risk_penalty
+    )
+
+    return max(
+        0.01,
+        score * 10.0,
+    )
+
+
+def _plackett_luce(
+    scores,
+):
+    """
+    1着→2着→3着を順番に選ぶ
+    Plackett-Luce型の3連単確率。
+
+    単純な
+    P1 × P2 × P3
+    より順位関係を自然に扱える。
+    """
+
+    boats = sorted(
+        scores.keys()
+    )
+
+    joint = {}
+
+    for a, b, c in itertools.permutations(
+        boats,
+        3,
+    ):
+        remaining1 = [
+            x
+            for x in boats
+            if x != a
+        ]
+
+        denom1 = sum(
+            scores[x]
+            for x in boats
+        )
+
+        if denom1 <= 0:
             continue
 
-        win_rate = _safe_float(
-            b.get("win_rate", 0.0)
+        p1 = (
+            scores[a]
+            / denom1
         )
 
-        local_rate = _safe_float(
-            b.get("local_rate", 0.0)
+        denom2 = sum(
+            scores[x]
+            for x in remaining1
         )
 
-        motor_rate = _safe_float(
-            b.get("motor_rate", 0.0)
+        if denom2 <= 0:
+            continue
+
+        p2 = (
+            scores[b]
+            / denom2
         )
 
-        course_score = _safe_float(
-            b.get("course_score", 0.0)
+        remaining2 = [
+            x
+            for x in remaining1
+            if x != b
+        ]
+
+        denom3 = sum(
+            scores[x]
+            for x in remaining2
         )
 
-        # --------------------------------
-        # 基本AIスコア
-        # --------------------------------
-        #
-        # 全国成績を中心に、
-        # 当地・モーター・コースを加味。
-        #
-        score = (
-            win_rate * 0.55
-            + local_rate * 0.20
-            + motor_rate * 0.10
-            + course_score * 0.15
+        if denom3 <= 0:
+            continue
+
+        p3 = (
+            scores[c]
+            / denom3
         )
 
-        scores[boat] = score
-
-    # 6艇すべて無い場合
-    for boat in range(1, 7):
-        if boat not in scores:
-            scores[boat] = 0.0
-
-    # 全艇ほぼ0なら
-    # 1号艇を少し有利にする基本モデル
-    if max(scores.values()) <= 0:
-        scores = {
-            1: 7.0,
-            2: 4.5,
-            3: 4.0,
-            4: 3.5,
-            5: 3.0,
-            6: 2.5,
-        }
-
-    # --------------------------------
-    # 1着確率
-    # --------------------------------
-
-    raw_first = []
-
-    for boat in range(1, 7):
-        score = scores[boat]
-
-        # スコア差を極端にしない
-        z = min(
-            max(score / 10.0, -20.0),
-            20.0,
+        joint[
+            (a, b, c)
+        ] = (
+            p1 * p2 * p3
         )
 
-        raw_first.append(
-            math.exp(z)
-        )
+    total = sum(
+        joint.values()
+    )
 
-    first_array = _norm(raw_first)
+    if total > 0:
+        for combo in joint:
+            joint[combo] /= total
 
-    first_probs = {
-        boat: float(first_array[boat - 1])
-        for boat in range(1, 7)
-    }
+    return joint
 
-    ranking = sorted(
-        range(1, 7),
-        key=lambda b: first_probs[b],
+
+def _confidence(
+    first_probs,
+):
+    ordered = sorted(
+        first_probs.values(),
         reverse=True,
     )
 
-    main = ranking[0]
-    counter = ranking[1]
-    hole = ranking[2]
-
-    # --------------------------------
-    # 3連単120通り
-    # --------------------------------
-    #
-    # 1着・2着・3着の確率を組み合わせる。
-    #
-    # 同じ艇を重複させない。
-    #
-
-    combos = list(
-        itertools.permutations(
-            range(1, 7),
-            3,
-        )
-    )
-
-    joint_raw = []
-
-    for a, b, c in combos:
-        pa = first_probs[a]
-        pb = first_probs[b]
-        pc = first_probs[c]
-
-        # 1着をやや強く評価
-        value = (
-            pa ** 1.00
-            * pb ** 0.92
-            * pc ** 0.86
-        )
-
-        joint_raw.append(
-            max(value, 1e-15)
-        )
-
-    joint_array = _norm(joint_raw)
-
-    joint = {
-        combo: float(prob)
-        for combo, prob in zip(
-            combos,
-            joint_array,
-        )
-    }
-
-    # --------------------------------
-    # 3連単ランキング
-    # --------------------------------
-
-    combo_ranking = sorted(
-        joint.items(),
-        key=lambda x: x[1],
-        reverse=True,
-    )
-
-    # --------------------------------
-    # 信頼度
-    # --------------------------------
-
-    top = first_probs[ranking[0]]
-    second = first_probs[ranking[1]]
+    top = ordered[0]
+    second = ordered[1]
 
     gap = max(
         0.0,
         top - second,
     )
 
-    confidence = (
-        55.0
-        + top * 60.0
-        + gap * 80.0
+    entropy = 0.0
+
+    for p in ordered:
+        if p > 0:
+            entropy -= (
+                p * math.log(p)
+            )
+
+    max_entropy = math.log(6)
+
+    concentration = (
+        1.0
+        - entropy
+        / max_entropy
     )
 
-    confidence = max(
+    value = (
+        55.0
+        + top * 35.0
+        + gap * 80.0
+        + concentration * 25.0
+    )
+
+    return max(
         55.0,
         min(
             95.0,
-            confidence,
+            value,
         ),
     )
 
-    return {
-        "main": main,
-        "counter": counter,
-        "hole": hole,
-        "confidence": float(confidence),
-        "first_probs": first_probs,
-        "ranking": ranking,
-        "scores": scores,
-        "joint": joint,
-        "combo_ranking": combo_ranking,
-    }
 
-
-def _pick_three_bets(prediction):
+def _select_three_tickets(
+    joint,
+    ranking,
+):
     """
-    的中率重視で3点を選ぶ。
+    3点を的中率優先で選ぶ。
 
-    1. 本線
-       → AI確率1位
+    本線:
+        AI確率1位
 
-    2. 対抗
-       → 本線と異なる組み合わせから高確率
+    対抗:
+        AI確率2位
 
-    3. 穴
-       → 低順位艇を絡めつつ、
-          AI確率が比較的高いもの
+    穴:
+        4〜6位の艇を最低1艇含む中で
+        最も確率の高い組み合わせ
 
-    EVは一切使わない。
+    EVは使用しない。
     """
 
-    ranking = prediction["ranking"]
-    joint = prediction["joint"]
-
-    combo_ranking = prediction.get(
-        "combo_ranking"
+    ordered = sorted(
+        joint.items(),
+        key=lambda x: x[1],
+        reverse=True,
     )
 
-    if not combo_ranking:
-        combo_ranking = sorted(
-            joint.items(),
-            key=lambda x: x[1],
-            reverse=True,
-        )
+    if not ordered:
+        return []
 
-    # --------------------------------
-    # 本線
-    # --------------------------------
+    main = ordered[0][0]
 
-    main_combo = combo_ranking[0][0]
+    counter = None
 
-    # --------------------------------
-    # 対抗
-    # --------------------------------
-    #
-    # 本線と違う組み合わせの中から
-    # 最もAI確率が高いもの。
-    #
-
-    counter_combo = None
-
-    for combo, prob in combo_ranking:
-        if combo != main_combo:
-            counter_combo = combo
+    for combo, prob in ordered:
+        if combo != main:
+            counter = combo
             break
 
-    if counter_combo is None:
-        counter_combo = main_combo
+    hole = None
 
-    # --------------------------------
-    # 穴
-    # --------------------------------
-    #
-    # AI順位4～6位の艇を最低1艇絡める。
-    # ただし確率が低すぎる場合は
-    # 無理に穴を作らない。
-    #
-
-    low_boats = set(
+    lower_boats = set(
         ranking[3:]
     )
 
-    hole_candidates = []
-
-    for combo, prob in combo_ranking:
-        if combo == main_combo:
+    for combo, prob in ordered:
+        if combo in {
+            main,
+            counter,
+        }:
             continue
 
-        if combo == counter_combo:
-            continue
-
-        if any(
-            boat in low_boats
-            for boat in combo
+        if lower_boats.intersection(
+            combo
         ):
-            hole_candidates.append(
-                (combo, prob)
-            )
+            hole = combo
+            break
 
-    if hole_candidates:
-        # 上位確率を優先
-        hole_combo = hole_candidates[0][0]
-    else:
-        # 万一候補がなければ3位
-        hole_combo = None
+    selected = []
 
-        for combo, prob in combo_ranking:
-            if combo not in {
-                main_combo,
-                counter_combo,
-            }:
-                hole_combo = combo
-                break
+    if main:
+        selected.append(main)
 
-        if hole_combo is None:
-            hole_combo = main_combo
+    if counter:
+        selected.append(counter)
 
-    return [
-        main_combo,
-        counter_combo,
-        hole_combo,
-    ]
+    if hole:
+        selected.append(hole)
+
+    for combo, prob in ordered:
+        if len(selected) >= 3:
+            break
+
+        if combo not in selected:
+            selected.append(combo)
+
+    return selected[:3]
 
 
-def recommend_bets(prediction, odds=None):
-    """
-    的中率重視のおすすめ3点。
-
-    oddsを渡した場合は表示用に付加するだけ。
-    買い目順位にはEVを使用しない。
-    """
-
-    combos = _pick_three_bets(
-        prediction
+def predict_race(race):
+    boats = race.get(
+        "boats",
+        []
     )
 
-    joint = prediction["joint"]
+    if len(boats) != 6:
+        return {
+            "main": 1,
+            "counter": 2,
+            "hole": 3,
+            "confidence": 55.0,
+            "first_probs": {
+                i: 1 / 6
+                for i in range(1, 7)
+            },
+            "ranking": list(
+                range(1, 7)
+            ),
+            "scores": {
+                i: 1.0
+                for i in range(1, 7)
+            },
+            "joint": {},
+            "tickets": [],
+        }
 
-    result = []
+    scores = {}
+
+    for boat in boats:
+        number = int(
+            boat["boat"]
+        )
+
+        scores[number] = (
+            _boat_score(
+                boat,
+                boats,
+            )
+        )
+
+    raw_probs = _softmax(
+        list(
+            scores.values()
+        ),
+        temperature=0.75,
+    )
+
+    numbers = list(
+        scores.keys()
+    )
+
+    first_probs = {
+        boat: float(
+            raw_probs[i]
+        )
+        for i, boat in enumerate(
+            numbers
+        )
+    }
+
+    ranking = sorted(
+        numbers,
+        key=lambda x: first_probs[x],
+        reverse=True,
+    )
+
+    joint = _plackett_luce(
+        scores
+    )
+
+    tickets = _select_three_tickets(
+        joint,
+        ranking,
+    )
+
+    main = (
+        tickets[0]
+        if len(tickets) > 0
+        else (ranking[0], ranking[1], ranking[2])
+    )
+
+    counter = (
+        tickets[1]
+        if len(tickets) > 1
+        else main
+    )
+
+    hole = (
+        tickets[2]
+        if len(tickets) > 2
+        else main
+    )
+
+    confidence = _confidence(
+        first_probs
+    )
+
+    return {
+        "main": main[0],
+        "counter": counter[0],
+        "hole": hole[0],
+
+        "confidence": float(
+            confidence
+        ),
+
+        "first_probs": first_probs,
+
+        "ranking": ranking,
+
+        "scores": scores,
+
+        "joint": joint,
+
+        "tickets": tickets,
+    }
+
+
+def recommend_bets(
+    prediction,
+    odds=None,
+):
+    """
+    本線・対抗・穴の3点。
+
+    AI確率が最優先。
+    オッズは表示用の補助情報だけ。
+
+    EVで買い目を入れ替えない。
+    """
+
+    odds = odds or {}
+
+    rows = []
 
     labels = [
         "本線",
@@ -363,70 +635,83 @@ def recommend_bets(prediction, odds=None):
         "穴",
     ]
 
-    for label, combo in zip(
-        labels,
-        combos,
+    tickets = prediction.get(
+        "tickets",
+        [],
+    )
+
+    for i, combo in enumerate(
+        tickets[:3]
     ):
-        row = {
-            "label": label,
-            "combo": combo,
-            "prob": float(
-                joint.get(combo, 0.0)
-            ),
-            "odds": None,
-            "market_prob": None,
-            "edge": None,
-        }
+        prob = float(
+            prediction["joint"].get(
+                combo,
+                0.0,
+            )
+        )
 
-        if odds:
-            odd = odds.get(combo)
+        odd = float(
+            odds.get(
+                combo,
+                0.0,
+            )
+        )
 
-            if odd is not None:
-                try:
-                    odd = float(odd)
+        market_prob = (
+            1.0 / odd
+            if odd > 0
+            else 0.0
+        )
 
-                    if odd > 0:
-                        row["odds"] = odd
-                        row["market_prob"] = (
-                            1.0 / odd
-                        )
-                        row["edge"] = (
-                            row["prob"]
-                            - row["market_prob"]
-                        )
-                except Exception:
-                    pass
+        ev = (
+            prob * odd - 1.0
+            if odd > 0
+            else 0.0
+        )
 
-        result.append(row)
+        rows.append(
+            {
+                "label": labels[i],
+                "combo": combo,
+                "prob": prob,
+                "odds": odd,
+                "market_prob": market_prob,
+                "ev": ev,
+            }
+        )
 
-    return result
+    return rows
 
 
 def value_candidates(
     prediction,
     odds,
-    min_prob=0.006,
+    min_prob=0.0,
     limit=8,
 ):
     """
-    旧UIとの互換用。
+    互換用。
 
-    ただし現在はEVを主軸にせず、
+    旧UIから呼ばれても、
     AI確率順で返す。
 
-    既存コードから呼ばれても
-    動くように残している。
+    EVは選定条件にしない。
     """
-
-    if not odds:
-        return []
-
-    joint = prediction["joint"]
 
     rows = []
 
-    for combo, odd in odds.items():
-        if combo not in joint:
+    for combo, odd in (
+        odds or {}
+    ).items():
+
+        prob = float(
+            prediction["joint"].get(
+                combo,
+                0.0,
+            )
+        )
+
+        if prob < min_prob:
             continue
 
         try:
@@ -437,42 +722,26 @@ def value_candidates(
         if odd <= 0:
             continue
 
-        prob = float(
-            joint[combo]
-        )
-
-        if prob < min_prob:
-            continue
-
-        market_prob = 1.0 / odd
-
-        ev = (
-            prob * odd
-            - 1.0
-        )
-
-        edge = (
-            prob
-            - market_prob
-        )
-
         rows.append(
             {
                 "combo": combo,
                 "odds": odd,
                 "prob": prob,
-                "market_prob": market_prob,
-                "ev": ev,
-                "edge": edge,
+                "market_prob": 1.0 / odd,
+                "ev": (
+                    prob * odd
+                    - 1.0
+                ),
+                "edge": (
+                    prob
+                    - 1.0 / odd
+                ),
                 "score": prob,
             }
         )
 
     rows.sort(
-        key=lambda x: (
-            x["prob"],
-            x["edge"],
-        ),
+        key=lambda x: x["prob"],
         reverse=True,
     )
 

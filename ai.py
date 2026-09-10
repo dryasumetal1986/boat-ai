@@ -3,343 +3,821 @@ import numpy as np
 import pandas as pd
 
 
-def combo_text(c):
-    return "-".join(map(str, c))
+BOATS = (1, 2, 3, 4, 5, 6)
 
 
-def _norm(df, col):
-    if col not in df.columns:
-        return pd.Series(0.0, index=df.index)
-    s = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    if len(s) == 0:
-        return s
-    lo, hi = s.quantile(.05), s.quantile(.95)
-    s = s.clip(lo, hi)
-    if hi - lo < 1e-9:
-        return pd.Series(.5, index=df.index)
-    return (s - s.min()) / (s.max() - s.min())
+def combo_text(combo):
+    """3連単の組み合わせを表示用文字列にする。"""
+    return "-".join(str(int(x)) for x in combo)
+
+
+def _norm_series(series, higher=True):
+    x = pd.to_numeric(
+        series,
+        errors="coerce"
+    ).fillna(0.0).astype(float)
+
+    lo = float(x.min())
+    hi = float(x.max())
+
+    if hi - lo < 1e-12:
+        return pd.Series(0.5, index=x.index)
+
+    z = (x - lo) / (hi - lo)
+
+    if higher:
+        return z
+
+    return 1.0 - z
 
 
 def _prepare(df):
-    x = pd.DataFrame(index=df.index)
-    cols = [
-        "national_win_rate", "national_top_2_percent",
-        "national_top_3_percent", "local_win_rate",
-        "local_top_2_percent", "local_top_3_percent",
-        "motor_top_2_percent", "motor_top_3_percent",
-        "boat_top_2_percent", "boat_top_3_percent",
-        "start_timing", "exhibition_time", "course_number"
+    x = (
+        df.copy()
+        .sort_values("boat")
+        .reset_index(drop=True)
+    )
+
+    x["win_n"] = _norm_series(x["national_win_rate"])
+    x["win_l"] = _norm_series(x["local_win_rate"])
+    x["top2_n"] = _norm_series(x["national_top_2_percent"])
+    x["top3_n"] = _norm_series(x["national_top_3_percent"])
+    x["top2_l"] = _norm_series(x["local_top_2_percent"])
+    x["top3_l"] = _norm_series(x["local_top_3_percent"])
+    x["motor2"] = _norm_series(x["motor_top_2_percent"])
+    x["motor3"] = _norm_series(x["motor_top_3_percent"])
+    x["boat2"] = _norm_series(x["boat_top_2_percent"])
+    x["boat3"] = _norm_series(x["boat_top_3_percent"])
+
+    x["st"] = _norm_series(
+        x["average_start_timing"],
+        higher=False
+    )
+
+    exhibition = pd.to_numeric(
+        x["exhibition_time"],
+        errors="coerce"
+    )
+
+    valid_exhibition = exhibition[
+        exhibition > 0
     ]
-    for c in cols:
-        x[c] = _norm(df, c)
-    x["st"] = 1 - x["start_timing"]
-    x["exh"] = 1 - x["exhibition_time"]
+
+    if len(valid_exhibition) > 0:
+        exhibition_median = float(
+            valid_exhibition.median()
+        )
+    else:
+        exhibition_median = 1.0
+
+    exhibition = (
+        exhibition
+        .replace(0, np.nan)
+        .fillna(exhibition_median)
+    )
+
+    x["exh"] = _norm_series(
+        exhibition,
+        higher=False
+    )
+
+    course = pd.to_numeric(
+        x["course_number"],
+        errors="coerce"
+    )
+
+    course = course.fillna(
+        pd.to_numeric(
+            x["boat"],
+            errors="coerce"
+        )
+    )
+
+    x["course"] = (
+        1.0
+        - (course - 1.0) / 10.0
+    ).clip(
+        0.4,
+        1.0
+    )
+
+    x["first_score"] = (
+        0.24 * x["win_n"]
+        + 0.13 * x["win_l"]
+        + 0.13 * x["top2_n"]
+        + 0.08 * x["top2_l"]
+        + 0.10 * x["motor2"]
+        + 0.06 * x["boat2"]
+        + 0.12 * x["st"]
+        + 0.08 * x["exh"]
+        + 0.06 * x["course"]
+    )
+
+    x["second_score"] = (
+        0.18 * x["top2_n"]
+        + 0.14 * x["top2_l"]
+        + 0.16 * x["top3_n"]
+        + 0.10 * x["top3_l"]
+        + 0.14 * x["motor2"]
+        + 0.08 * x["motor3"]
+        + 0.10 * x["boat2"]
+        + 0.10 * x["st"]
+    )
+
+    x["third_score"] = (
+        0.18 * x["top3_n"]
+        + 0.14 * x["top3_l"]
+        + 0.16 * x["motor3"]
+        + 0.12 * x["boat3"]
+        + 0.12 * x["top2_n"]
+        + 0.10 * x["top2_l"]
+        + 0.10 * x["st"]
+        + 0.08 * x["exh"]
+    )
+
     return x
 
 
-def _soft(v, t=.075):
-    v = np.asarray(v, dtype=float)
-    z = v / max(t, .001)
-    z -= z.max()
-    e = np.exp(z)
-    return e / e.sum()
+def _softmax(values, temperature=0.075):
+    values = np.asarray(
+        values,
+        dtype=float
+    )
+
+    if len(values) == 0:
+        return np.array([])
+
+    temperature = max(
+        float(temperature),
+        0.001
+    )
+
+    scaled = values / temperature
+    scaled -= np.max(scaled)
+
+    exp_values = np.exp(scaled)
+    total = exp_values.sum()
+
+    if total <= 0:
+        return np.ones(
+            len(values)
+        ) / len(values)
+
+    return exp_values / total
 
 
-def _scores(x):
-    f, s, t = {}, {}, {}
+def _combo_score(
+    a,
+    b,
+    c,
+    first_score,
+    second_score,
+    third_score,
+):
+    score = (
+        1.00 * first_score[a]
+        + 0.72 * second_score[b]
+        + 0.58 * third_score[c]
+    )
 
-    for i in range(6):
-        r = x.iloc[i]
-        b = i + 1
-
-        f[b] = (
-            .24*r.national_win_rate +
-            .13*r.local_win_rate +
-            .13*r.national_top_2_percent +
-            .08*r.local_top_2_percent +
-            .10*r.motor_top_2_percent +
-            .06*r.boat_top_2_percent +
-            .12*r.st + .08*r.exh +
-            .06*r.course_number
-        )
-
-        s[b] = (
-            .18*r.national_top_2_percent +
-            .14*r.local_top_2_percent +
-            .16*r.national_top_3_percent +
-            .10*r.local_top_3_percent +
-            .14*r.motor_top_2_percent +
-            .08*r.motor_top_3_percent +
-            .10*r.boat_top_2_percent +
-            .10*r.st
-        )
-
-        t[b] = (
-            .18*r.national_top_3_percent +
-            .14*r.local_top_3_percent +
-            .16*r.motor_top_3_percent +
-            .12*r.boat_top_3_percent +
-            .12*r.national_top_2_percent +
-            .10*r.local_top_2_percent +
-            .10*r.st + .08*r.exh
-        )
-
-    return f, s, t
-
-
-def _raw(a, b, c, f, s, t):
-    v = f[a] + .72*s[b] + .58*t[c]
     if a == 1:
-        v += .055
+        score += 0.055
     elif a == 2:
-        v += .025
+        score += 0.025
+
     if b == 1:
-        v += .020
-    return float(v)
+        score += 0.020
+
+    return float(score)
 
 
-def _bonus(b, c, s, t, axis):
+def _ordering_bonus(
+    second_boat,
+    third_boat,
+    second_score,
+    third_score,
+):
+    second_strength = float(
+        second_score[second_boat]
+    )
+
+    third_strength = float(
+        third_score[third_boat]
+    )
+
+    second_role = float(
+        second_score[second_boat]
+        - third_score[second_boat]
+    )
+
+    third_role = float(
+        third_score[third_boat]
+        - second_score[third_boat]
+    )
+
+    second_role = float(
+        np.clip(
+            second_role,
+            -0.30,
+            0.30
+        )
+    )
+
+    third_role = float(
+        np.clip(
+            third_role,
+            -0.30,
+            0.30
+        )
+    )
+
     role = (
-        np.clip(s[b] - t[b], -.30, .30) +
-        np.clip(t[c] - s[c], -.30, .30)
-    ) / 2
-    gap = np.clip(s[b] - t[c], -.30, .30)
-    weight = .025
-    if axis == 5:
-        weight = .031
-    return .035 * gap + weight * role
+        second_role
+        + third_role
+    ) / 2.0
+
+    strength_gap = (
+        second_strength
+        - third_strength
+    )
+
+    strength_gap = float(
+        np.clip(
+            strength_gap,
+            -0.30,
+            0.30
+        )
+    )
+
+    # 今回の実験変更はここだけ
+    return (
+        0.035 * strength_gap
+        + 0.028 * role
+    )
 
 
-def _main_counter(ranked, f, s, t):
-    original = ranked[0]
-    original_axis = original[0][0]
-    candidate_axis = original_axis
+def _select_main_counter(
+    ranked,
+    first_score,
+    second_score,
+    third_score,
+):
+    if not ranked:
+        raise ValueError(
+            "予想候補がありません。"
+        )
 
-    # 5号艇救済
+    original_main = ranked[0]
+
+    original_axis = int(
+        original_main[0][0]
+    )
+
+    candidate_main = original_main
+
     if original_axis != 5:
-        if f[original_axis] - f[5] <= .025:
-            b5 = next(
-                (x for x in ranked if x[0][0] == 5),
-                None
-            )
-            if b5 and b5[1] >= original[1] - .035:
-                candidate_axis = 5
 
-    pool = [
-        x for x in ranked[:10]
-        if x[0][0] == candidate_axis
+        current_axis_score = float(
+            first_score[original_axis]
+        )
+
+        boat5_score = float(
+            first_score[5]
+        )
+
+        axis_gap = (
+            current_axis_score
+            - boat5_score
+        )
+
+        if axis_gap <= 0.025:
+
+            boat5_candidates = [
+                item
+                for item in ranked
+                if int(item[0][0]) == 5
+            ]
+
+            if boat5_candidates:
+
+                best_boat5 = boat5_candidates[0]
+
+                original_raw = float(
+                    original_main[2]
+                )
+
+                boat5_raw = float(
+                    best_boat5[2]
+                )
+
+                if (
+                    boat5_raw
+                    >= original_raw - 0.035
+                ):
+                    candidate_main = best_boat5
+
+    axis = int(
+        candidate_main[0][0]
+    )
+
+    same_axis = [
+        item
+        for item in ranked
+        if int(item[0][0]) == axis
     ]
 
-    if not pool:
-        pool = [
-            x for x in ranked
-            if x[0][0] == candidate_axis
-        ]
+    if len(same_axis) < 2:
 
-    adj = sorted(
-        pool,
-        key=lambda x: x[1] + _bonus(
-            x[0][1],
-            x[0][2],
-            s,
-            t,
-            candidate_axis
+        if len(ranked) >= 2:
+            return (
+                candidate_main,
+                ranked[1]
+            )
+
+        return (
+            candidate_main,
+            candidate_main
+        )
+
+    pool = same_axis[:10]
+
+    adjusted = []
+
+    for combo, probability, raw_score in pool:
+
+        _, second_boat, third_boat = combo
+
+        bonus = _ordering_bonus(
+            second_boat,
+            third_boat,
+            second_score,
+            third_score,
+        )
+
+        adjusted_score = (
+            float(raw_score)
+            + float(bonus)
+        )
+
+        adjusted.append(
+            {
+                "combo": combo,
+                "prob": float(probability),
+                "raw_score": float(raw_score),
+                "adjusted_score": adjusted_score,
+            }
+        )
+
+    adjusted.sort(
+        key=lambda item: (
+            item["adjusted_score"],
+            item["raw_score"],
         ),
         reverse=True
     )
 
-    main = adj[0]
-    counter = next(
-        (x for x in adj if x[0] != main[0]),
-        None
+    main_candidate = adjusted[0]
+
+    counter_candidates = [
+        item
+        for item in adjusted
+        if item["combo"]
+        != main_candidate["combo"]
+    ]
+
+    if not counter_candidates:
+        return (
+            candidate_main,
+            same_axis[1]
+        )
+
+    counter_candidate = (
+        counter_candidates[0]
     )
 
-    # 本線が弱くなりすぎたら元へ戻す
-    if main[1] < original[1] - .045:
-        main = original
+    main = (
+        main_candidate["combo"],
+        main_candidate["prob"],
+        main_candidate["raw_score"],
+    )
 
-        # ★重要：
-        # 戻した場合は「元の軸」の候補から対抗を選ぶ
-        original_pool = [
-            x for x in ranked[:10]
-            if x[0][0] == original_axis
-            and x[0] != original[0]
+    counter = (
+        counter_candidate["combo"],
+        counter_candidate["prob"],
+        counter_candidate["raw_score"],
+    )
+
+    original_raw_score = float(
+        candidate_main[2]
+    )
+
+    if (
+        main_candidate["raw_score"]
+        < original_raw_score - 0.045
+    ):
+        main = candidate_main
+
+        fallback = [
+            item
+            for item in ranked
+            if item[0] != main[0]
+            and int(item[0][0]) == axis
         ]
 
-        if not original_pool:
-            original_pool = [
-                x for x in ranked
-                if x[0][0] == original_axis
-                and x[0] != original[0]
+        if fallback:
+            counter = fallback[0]
+
+    return (
+        main,
+        counter
+    )
+
+
+def _select_hole(
+    ranked,
+    main,
+    counter,
+    first_score,
+):
+    main_combo = main[0]
+    counter_combo = counter[0]
+
+    main_axis = int(
+        main_combo[0]
+    )
+
+    non_axis_boats = [
+        boat
+        for boat in BOATS
+        if boat != main_axis
+    ]
+
+    ranked_first = sorted(
+        non_axis_boats,
+        key=lambda boat: first_score[boat],
+        reverse=True,
+    )
+
+    if (
+        1 != main_axis
+        and 1 not in ranked_first
+        and ranked_first
+    ):
+        top_score = float(
+            first_score[
+                ranked_first[0]
             ]
+        )
 
-        counter = original_pool[0] if original_pool else None
+        if (
+            float(first_score[1])
+            >= top_score - 0.08
+        ):
+            ranked_first.append(1)
 
-    return main, counter
+    candidate_rows = []
 
+    for alternative_axis in ranked_first[:4]:
 
-def _hole(ranked, main, counter, f):
-    axis = ranked[0][0][0]
-    used = {main[0]}
+        candidates = [
+            item
+            for item in ranked
+            if int(item[0][0])
+            == int(alternative_axis)
+            and item[0] != main_combo
+            and item[0] != counter_combo
+        ]
 
-    if counter:
-        used.add(counter[0])
+        if not candidates:
+            continue
 
-    boats = sorted(
-        [b for b in range(1, 7) if b != axis],
-        key=lambda b: f[b],
+        best = candidates[0]
+
+        candidate_score = (
+            0.70
+            * float(
+                first_score[
+                    alternative_axis
+                ]
+            )
+            + 0.30
+            * float(best[2])
+        )
+
+        candidate_rows.append(
+            (
+                candidate_score,
+                best,
+            )
+        )
+
+    if not candidate_rows:
+
+        fallback = [
+            item
+            for item in ranked
+            if item[0] != main_combo
+            and item[0] != counter_combo
+        ]
+
+        if fallback:
+            return fallback[0]
+
+        return ranked[1]
+
+    candidate_rows.sort(
+        key=lambda item: item[0],
         reverse=True
     )
 
-    if axis != 1:
-        top = f[boats[0]] if boats else 0
-        if f[1] >= top - .08:
-            boats.append(1)
+    for _, candidate in candidate_rows:
 
-    candidates = []
+        if (
+            candidate[0] != main_combo
+            and candidate[0] != counter_combo
+        ):
+            return candidate
 
-    for a in boats[:4]:
-        best = next(
-            (
-                x for x in ranked
-                if x[0][0] == a
-                and x[0] not in used
-            ),
-            None
-        )
-
-        if best:
-            score = .70*f[a] + .30*best[1]
-            candidates.append((score, best))
-
-    if not candidates:
-        return None
-
-    return max(
-        candidates,
-        key=lambda x: x[0]
-    )[1]
+    return candidate_rows[0][1]
 
 
 def predict(df):
-    if len(df) != 6:
-        raise ValueError("予想には6艇のデータが必要です。")
 
-    x = _prepare(df)
-    f, s, t = _scores(x)
-
-    raw = [
-        (
-            (a, b, c),
-            _raw(a, b, c, f, s, t)
+    if (
+        not isinstance(
+            df,
+            pd.DataFrame
         )
-        for a, b, c in itertools.permutations(
-            range(1, 7), 3
+        or len(df) != 6
+    ):
+        raise ValueError(
+            "6艇分の出走表が必要です。"
         )
-    ]
 
-    raw.sort(key=lambda x: x[1], reverse=True)
-    probs = _soft([x[1] for x in raw])
-
-    ranked = [
-        (x[0], x[1], float(probs[i]))
-        for i, x in enumerate(raw)
-    ]
-
-    main, counter = _main_counter(
-        ranked, f, s, t
+    boats = pd.to_numeric(
+        df["boat"],
+        errors="coerce"
     )
 
-    if counter is None:
-        counter = next(
-            x for x in ranked
-            if x[0] != main[0]
-            and x[0][0] == main[0][0]
+    if boats.isna().any():
+        raise ValueError(
+            "艇番データが不正です。"
         )
 
-    hole = _hole(
+    boats = set(
+        boats.astype(int)
+    )
+
+    if boats != set(BOATS):
+        raise ValueError(
+            "艇番が1〜6になっていません。"
+        )
+
+    x = _prepare(df)
+
+    first_score = dict(
+        zip(
+            x["boat"].astype(int),
+            x["first_score"].astype(float),
+        )
+    )
+
+    second_score = dict(
+        zip(
+            x["boat"].astype(int),
+            x["second_score"].astype(float),
+        )
+    )
+
+    third_score = dict(
+        zip(
+            x["boat"].astype(int),
+            x["third_score"].astype(float),
+        )
+    )
+
+    combos = []
+
+    for a, b, c in itertools.permutations(
+        BOATS,
+        3
+    ):
+        score = _combo_score(
+            a,
+            b,
+            c,
+            first_score,
+            second_score,
+            third_score,
+        )
+
+        combos.append(
+            (
+                (a, b, c),
+                score,
+            )
+        )
+
+    raw_scores = np.array(
+        [
+            score
+            for _, score in combos
+        ],
+        dtype=float,
+    )
+
+    probabilities = _softmax(
+        raw_scores,
+        temperature=0.075,
+    )
+
+    ranked = sorted(
+        [
+            (
+                combo,
+                float(probability),
+                float(score),
+            )
+            for (
+                combo,
+                score
+            ), probability
+            in zip(
+                combos,
+                probabilities
+            )
+        ],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    main, counter = (
+        _select_main_counter(
+            ranked,
+            first_score,
+            second_score,
+            third_score,
+        )
+    )
+
+    hole = _select_hole(
         ranked,
         main,
         counter,
-        f
+        first_score,
     )
 
-    if hole is None:
-        hole = next(
-            x for x in ranked
-            if x[0] not in {
-                main[0],
-                counter[0]
-            }
+    used = {
+        main[0],
+        counter[0],
+    }
+
+    if hole[0] in used:
+
+        alternatives = [
+            item
+            for item in ranked
+            if item[0] not in used
+        ]
+
+        if alternatives:
+            hole = alternatives[0]
+
+    if (
+        main[0] == counter[0]
+        or main[0] == hole[0]
+        or counter[0] == hole[0]
+    ):
+
+        unique = []
+
+        for item in [
+            main,
+            counter,
+            hole,
+        ]:
+
+            if item[0] not in [
+                u[0]
+                for u in unique
+            ]:
+                unique.append(item)
+
+        for item in ranked:
+
+            if len(unique) >= 3:
+                break
+
+            if item[0] not in [
+                u[0]
+                for u in unique
+            ]:
+                unique.append(item)
+
+        if len(unique) >= 3:
+            main = unique[0]
+            counter = unique[1]
+            hole = unique[2]
+
+    first_values = [
+        first_score[boat]
+        for boat in BOATS
+    ]
+
+    first_probabilities = _softmax(
+        first_values,
+        temperature=0.10,
+    )
+
+    first_ranking = sorted(
+        zip(
+            BOATS,
+            first_probabilities
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    axis = int(
+        main[0][0]
+    )
+
+    axis_rank = [
+        boat
+        for boat, _
+        in first_ranking
+    ]
+
+    axis_position = (
+        axis_rank.index(axis)
+        if axis in axis_rank
+        else 0
+    )
+
+    axis_top3_probability = float(
+        sum(
+            probability
+            for _,
+            probability
+            in first_ranking[:3]
         )
+    )
+
+    if axis_position < 3:
+        axis_top3_probability = float(
+            sum(
+                probability
+                for boat,
+                probability
+                in first_ranking[:3]
+            )
+        )
+
+    margin = float(
+        first_ranking[0][1]
+        - first_ranking[1][1]
+    )
+
+    confidence = (
+        62.0
+        + margin * 220.0
+    )
+
+    confidence = min(
+        95.0,
+        max(
+            55.0,
+            confidence
+        )
+    )
 
     tickets = [
         {
             "label": "本線",
             "combo": main[0],
-            "score": float(main[1]),
-            "probability": float(main[2])
+            "prob": float(main[1]),
         },
         {
             "label": "対抗",
             "combo": counter[0],
-            "score": float(counter[1]),
-            "probability": float(counter[2])
+            "prob": float(counter[1]),
         },
         {
             "label": "穴",
             "combo": hole[0],
-            "score": float(hole[1]),
-            "probability": float(hole[2])
-        }
+            "prob": float(hole[1]),
+        },
     ]
 
-    # 軸は1着スコア1位
-    fr = sorted(
-        f.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    axis = int(fr[0][0])
-
-    axis_probs = _soft(
-        [f[b] for b in range(1, 7)],
-        .10
-    )
-
-    axis_first = axis_probs[axis - 1]
-
-    top3 = sum(
-        axis_probs[b - 1]
-        for b, _ in fr[:3]
-    )
-
-    gap = (
-        ranked[0][1] - ranked[1][1]
-        if len(ranked) > 1
-        else 0
-    )
-
-    confidence = np.clip(
-        50 + gap * 100,
-        0,
-        99
-    )
-
     return {
-        "axis": axis,
-        "axis_first_probability": round(
-            float(axis_first) * 100,
-            2
-        ),
-        "axis_top3_probability": round(
-            float(top3) * 100,
-            2
-        ),
+        "tickets": tickets,
+        "ranking": ranked,
         "confidence": round(
-            float(confidence),
-            2
+            confidence,
+            1
         ),
-        "tickets": tickets
-        }
+        "axis": axis,
+        "axis_top3": axis_top3_probability,
+        "all_combos": ranked,
+        "df": x,
+    }

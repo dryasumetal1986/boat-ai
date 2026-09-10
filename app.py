@@ -6,12 +6,20 @@ from ai import predict
 from backtest import run_backtest
 
 
+# =========================================================
+# ページ設定
+# =========================================================
+
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想 PRO",
     page_icon="🎯",
     layout="centered"
 )
 
+
+# =========================================================
+# デザイン
+# =========================================================
 
 st.markdown("""
 <style>
@@ -36,27 +44,76 @@ h1{
 """, unsafe_allow_html=True)
 
 
-st.title("やっちゃんの競艇AI予想 PRO")
-st.caption("AI的中率重視 × 実データ × 3連単3点")
+# =========================================================
+# 起動時の初期化
+# =========================================================
+#
+# 新しいStreamlitセッションで最初に1回だけ実行。
+# 前回の開催場・レース・日付などを引き継がず、
+# 毎回「初期状態」からスタートする。
+#
+# =========================================================
 
+if "app_initialized" not in st.session_state:
 
-st.header("🎯 AI予想")
+    # 既存セッションに残っている選択状態を削除
+    st.session_state.pop("race_day", None)
+    st.session_state.pop("venue", None)
+    st.session_state.pop("race", None)
+    st.session_state.pop("bt_day", None)
+
+    # 初期値
+    today = date.today()
+
+    st.session_state["race_day"] = today
+    st.session_state["venue"] = "選択してください"
+    st.session_state["race"] = "選択してください"
+    st.session_state["bt_day"] = today - timedelta(days=1)
+
+    # バックテスト件数も初期化
+    st.session_state["count"] = 100
+
+    # 初期化済みフラグ
+    st.session_state["app_initialized"] = True
 
 
 today = date.today()
 
+
+# =========================================================
+# タイトル
+# =========================================================
+
+st.title("やっちゃんの競艇AI予想 PRO")
+st.caption("AI的中率重視 × 実データ × 3連単3点")
+
+
+# =========================================================
+# AI予想
+# =========================================================
+
+st.header("🎯 AI予想")
+
+
+# ---------------------------------------------------------
+# 開催日
+# ---------------------------------------------------------
+
 race_day = st.date_input(
     "開催日",
-    value=today,
+    value=st.session_state["race_day"],
     max_value=today,
     key="race_day"
 )
 
 
+# ---------------------------------------------------------
+# 開催場
+# ---------------------------------------------------------
+
 venue_names = [
     "選択してください"
 ] + list(data.STADIUM_BY_NAME.keys())
-
 
 venue_name = st.selectbox(
     "開催場",
@@ -65,31 +122,30 @@ venue_name = st.selectbox(
 )
 
 
+# ---------------------------------------------------------
+# レース
+# ---------------------------------------------------------
+
 if venue_name != "選択してください":
 
-    venue_no = data.STADIUM_BY_NAME[
-        venue_name
-    ]
+    venue_no = data.STADIUM_BY_NAME[venue_name]
 
     try:
-
         race_numbers = data.get_races_for_stadium(
             race_day,
             venue_no
         )
 
     except Exception as e:
-
         race_numbers = []
 
         st.error(
             f"出走表データの取得に失敗しました。\n\n{e}"
         )
 
-    race_options = (
-        ["選択してください"]
-        + [str(x) for x in race_numbers]
-    )
+    race_options = [
+        "選択してください"
+    ] + [str(x) for x in race_numbers]
 
 else:
 
@@ -107,15 +163,16 @@ race_choice = st.selectbox(
 )
 
 
+# =========================================================
+# AI予想実行
+# =========================================================
+
 if st.button(
     "🎯 AI予想を実行",
     use_container_width=True
 ):
 
-    if (
-        venue_no is None
-        or race_choice == "選択してください"
-    ):
+    if venue_no is None or race_choice == "選択してください":
 
         st.warning(
             "開催場とレースを選択してください。"
@@ -129,9 +186,7 @@ if st.button(
 
             try:
 
-                race_no = int(
-                    race_choice
-                )
+                race_no = int(race_choice)
 
                 race = data.get_race(
                     race_day,
@@ -139,20 +194,14 @@ if st.button(
                     race_no
                 )
 
-                df = data.race_to_df(
-                    race
-                )
+                df = data.race_to_df(race)
 
                 if df.empty or len(df) != 6:
-
                     raise ValueError(
                         "6艇分の出走表データを正しく取得できませんでした。"
                     )
 
-                if set(
-                    df["boat"].astype(int)
-                ) != set(range(1, 7)):
-
+                if set(df["boat"].astype(int)) != set(range(1, 7)):
                     raise ValueError(
                         "艇番が1〜6として取得できていません。"
                     )
@@ -167,6 +216,10 @@ if st.button(
                 )
 
             else:
+
+                # -------------------------------------------------
+                # レース情報
+                # -------------------------------------------------
 
                 st.success(
                     f"{race_day:%Y年%m月%d日} "
@@ -186,6 +239,10 @@ if st.button(
                 )
 
 
+                # -------------------------------------------------
+                # 3連単3点
+                # -------------------------------------------------
+
                 for ticket in pred["tickets"]:
 
                     combo = "-".join(
@@ -204,9 +261,11 @@ if st.button(
                     )
 
 
-                with st.expander(
-                    "出走表を確認"
-                ):
+                # -------------------------------------------------
+                # 出走表
+                # -------------------------------------------------
+
+                with st.expander("出走表を確認"):
 
                     cols = [
                         "boat",
@@ -243,40 +302,65 @@ if st.button(
                     )
 
 
+                # -------------------------------------------------
+                # オッズ
+                # -------------------------------------------------
+
                 st.info(
                     "公式オッズは現在のv1データに含まれないため、"
                     "この版ではAI確率のみ表示しています。"
                 )
 
 
+# =========================================================
+# 区切り
+# =========================================================
+
 st.divider()
 
 
+# =========================================================
+# バックテスト
+# =========================================================
+
 st.header("📈 バックテスト")
 
+
+# ---------------------------------------------------------
+# バックテスト日
+# ---------------------------------------------------------
 
 bt_default = today - timedelta(days=1)
 
 bt_day = st.date_input(
     "バックテスト日",
-    value=bt_default,
+    value=st.session_state["bt_day"],
     max_value=bt_default,
     key="bt_day"
 )
 
 
+# ---------------------------------------------------------
+# 検証レース数
+# ---------------------------------------------------------
+
 count = st.selectbox(
     "検証レース数",
     [100, 200, 300, 500, 1000],
-    index=0
+    index=0,
+    key="count"
 )
 
 
 st.caption(
-    "昨日を起点に、必要なレース数に達するまで過去へ自動的に遡ります。"
-    "全24場を対象にします。"
+    "昨日を起点に、必要なレース数に達するまで"
+    "過去へ自動的に遡ります。全24場を対象にします。"
 )
 
+
+# =========================================================
+# バックテスト開始
+# =========================================================
 
 if st.button(
     "🚀 バックテスト開始",
@@ -284,7 +368,6 @@ if st.button(
 ):
 
     progress_bar = st.progress(0)
-
     status = st.empty()
 
 
@@ -296,10 +379,7 @@ if st.button(
     ):
 
         progress_bar.progress(
-            min(
-                day_no / max_days,
-                1.0
-            )
+            min(day_no / max_days, 1.0)
         )
 
         status.write(
@@ -327,7 +407,6 @@ if st.button(
     else:
 
         progress_bar.progress(1.0)
-
         status.empty()
 
 
@@ -340,10 +419,18 @@ if st.button(
 
         else:
 
+            # -------------------------------------------------
+            # 結果タイトル
+            # -------------------------------------------------
+
             st.subheader(
                 f"検証結果：{summary['検証数']}レース"
             )
 
+
+            # -------------------------------------------------
+            # 基本的中率
+            # -------------------------------------------------
 
             c1, c2, c3 = st.columns(3)
 
@@ -363,6 +450,10 @@ if st.button(
             )
 
 
+            # -------------------------------------------------
+            # 各チケット
+            # -------------------------------------------------
+
             c4, c5, c6 = st.columns(3)
 
             c4.metric(
@@ -380,6 +471,10 @@ if st.button(
                 f"{summary['穴的中率']:.1f}%"
             )
 
+
+            # -------------------------------------------------
+            # 回収関連
+            # -------------------------------------------------
 
             c7, c8, c9 = st.columns(3)
 
@@ -399,8 +494,12 @@ if st.button(
             )
 
 
+            # -------------------------------------------------
+            # 詳細結果
+            # -------------------------------------------------
+
             st.dataframe(
                 rows,
                 hide_index=True,
                 use_container_width=True
-)
+            )

@@ -4,393 +4,451 @@ import numpy as np
 import pandas as pd
 
 
-def _norm(v):
-    v = np.asarray(v, dtype=float)
-
-    if len(v) == 0:
-        return v
-
-    lo = np.nanmin(v)
-    hi = np.nanmax(v)
-
-    if hi - lo < 1e-9:
-        return np.ones(len(v)) * 0.5
-
-    return (v - lo) / (hi - lo)
+def _safe(v):
+    try:
+        x = float(v)
+        if math.isnan(x) or math.isinf(x):
+            return 0.0
+        return x
+    except Exception:
+        return 0.0
 
 
-def _softmax(scores, temp=1.0):
-    x = np.asarray(scores, dtype=float) / temp
-    x = x - np.max(x)
+def _norm(series):
+    s = pd.to_numeric(
+        series,
+        errors="coerce",
+    ).fillna(0.0)
 
-    e = np.exp(x)
-    total = e.sum()
+    if len(s) == 0:
+        return s
+
+    mn = s.min()
+    mx = s.max()
+
+    if mx - mn < 1e-9:
+        return pd.Series(
+            np.full(len(s), 0.5),
+            index=s.index,
+        )
+
+    return (s - mn) / (mx - mn)
+
+
+def _softmax(values):
+    arr = np.array(values, dtype=float)
+
+    if len(arr) == 0:
+        return arr
+
+    arr = arr - np.max(arr)
+    exp = np.exp(arr)
+
+    total = exp.sum()
 
     if total <= 0:
-        return np.ones(len(x)) / len(x)
+        return np.ones(len(arr)) / len(arr)
 
-    return e / total
-
-
-def _col(df, name):
-    if name not in df:
-        return np.zeros(len(df))
-
-    return (
-        pd.to_numeric(
-            df[name],
-            errors="coerce"
-        )
-        .fillna(0)
-        .values
-    )
+    return exp / total
 
 
-def _prepare(df):
-    d = df.copy().reset_index(drop=True)
+def _feature_scores(df):
+    d = df.copy()
 
+    # 数値化
     cols = [
-        "win_rate", "top2", "top3",
-        "local_rate", "local_top2", "local_top3",
-        "motor_top2", "motor_top3",
-        "boat_top2", "boat_top3",
-        "start", "exhibition",
+        "average_start_timing",
+        "national_win_rate",
+        "national_top_2_percent",
+        "national_top_3_percent",
+        "local_win_rate",
+        "local_top_2_percent",
+        "local_top_3_percent",
+        "motor_top_2_percent",
+        "motor_top_3_percent",
+        "boat_top_2_percent",
+        "boat_top_3_percent",
+        "flying_count",
+        "late_count",
+        "start_timing",
+        "exhibition_time",
     ]
 
     for c in cols:
-        if c in d:
-            d[c] = pd.to_numeric(
-                d[c],
-                errors="coerce"
-            ).fillna(0)
+        if c not in d.columns:
+            d[c] = 0.0
 
-    # パーセント表記を0～1へ
-    for c in [
-        "top2", "top3",
-        "local_top2", "local_top3",
-        "motor_top2", "motor_top3",
-        "boat_top2", "boat_top3",
-    ]:
-        if c in d and d[c].max() > 1.5:
-            d[c] = d[c] / 100.0
+        d[c] = pd.to_numeric(
+            d[c],
+            errors="coerce",
+        ).fillna(0.0)
+
+    # 艇番1の基本優位
+    lane_bonus = {
+        1: 1.00,
+        2: 0.82,
+        3: 0.70,
+        4: 0.56,
+        5: 0.43,
+        6: 0.32,
+    }
+
+    d["lane_bonus"] = d["boat"].map(
+        lane_bonus
+    ).fillna(0.3)
+
+    # 各指標を0～1化
+    d["n_win"] = _norm(
+        d["national_win_rate"]
+    )
+    d["n_top2"] = _norm(
+        d["national_top_2_percent"]
+    )
+    d["n_top3"] = _norm(
+        d["national_top_3_percent"]
+    )
+
+    d["l_win"] = _norm(
+        d["local_win_rate"]
+    )
+    d["l_top2"] = _norm(
+        d["local_top_2_percent"]
+    )
+    d["l_top3"] = _norm(
+        d["local_top_3_percent"]
+    )
+
+    d["m_top2"] = _norm(
+        d["motor_top_2_percent"]
+    )
+    d["m_top3"] = _norm(
+        d["motor_top_3_percent"]
+    )
+
+    d["b_top2"] = _norm(
+        d["boat_top_2_percent"]
+    )
+    d["b_top3"] = _norm(
+        d["boat_top_3_percent"]
+    )
+
+    d["start"] = _norm(
+        d["start_timing"]
+    )
+
+    # 展示タイムは速いほど良い
+    ex = pd.to_numeric(
+        d["exhibition_time"],
+        errors="coerce",
+    ).fillna(0.0)
+
+    if ex.max() > ex.min():
+        d["exhibition"] = 1 - (
+            (ex - ex.min()) /
+            (ex.max() - ex.min())
+        )
+    else:
+        d["exhibition"] = 0.5
+
+    # F/Lは少ないほど良い
+    penalty = (
+        d["flying_count"] * 0.08
+        + d["late_count"] * 0.05
+    )
+
+    # 1着向けスコア
+    d["first_score"] = (
+        d["lane_bonus"] * 1.55
+        + d["n_win"] * 1.30
+        + d["n_top2"] * 0.65
+        + d["l_win"] * 0.95
+        + d["l_top2"] * 0.45
+        + d["m_top2"] * 0.70
+        + d["m_top3"] * 0.40
+        + d["b_top2"] * 0.40
+        + d["start"] * 0.55
+        + d["exhibition"] * 0.35
+        - penalty
+    )
+
+    # 2・3着向けスコア
+    d["second_score"] = (
+        d["lane_bonus"] * 0.75
+        + d["n_top2"] * 1.05
+        + d["n_top3"] * 0.90
+        + d["l_top2"] * 0.75
+        + d["l_top3"] * 0.75
+        + d["m_top2"] * 0.70
+        + d["m_top3"] * 0.65
+        + d["b_top2"] * 0.35
+        + d["b_top3"] * 0.35
+        + d["start"] * 0.35
+        + d["exhibition"] * 0.30
+        - penalty * 0.65
+    )
+
+    d["third_score"] = (
+        d["lane_bonus"] * 0.45
+        + d["n_top3"] * 0.95
+        + d["l_top3"] * 0.85
+        + d["m_top3"] * 0.80
+        + d["b_top3"] * 0.45
+        + d["n_top2"] * 0.35
+        + d["l_top2"] * 0.35
+        + d["start"] * 0.25
+        + d["exhibition"] * 0.25
+        - penalty * 0.45
+    )
 
     return d
 
 
 def predict(df):
     """
-    1着・2着・3着を別々に評価し、
-    120通りの3連単を直接スコアリングする。
-    """
+    3連単3点を返す。
 
-    d = _prepare(df)
+    本線:
+        最も総合評価の高い組み合わせ
+
+    対抗:
+        本線と1着を共有しつつ、
+        2・3着を入れ替え
+
+    穴:
+        別の1着シナリオも許可
+
+    重要:
+        ここで使う番号は必ず1～6号艇。
+    """
+    if df is None or df.empty:
+        return None
+
+    d = _feature_scores(df)
+
+    # 艇番を1～6に矯正
+    d["boat"] = pd.to_numeric(
+        d["boat"],
+        errors="coerce",
+    )
+
+    d = d[
+        d["boat"].between(1, 6)
+    ].copy()
 
     if len(d) != 6:
-        raise ValueError("6艇のデータが必要です")
+        return None
 
-    # -----------------------------
-    # 基本データ
-    # -----------------------------
-    win = _col(d, "win_rate")
-    local = _col(d, "local_rate")
-    top2 = _col(d, "top2")
-    top3 = _col(d, "top3")
+    d = d.sort_values(
+        "boat"
+    ).reset_index(drop=True)
 
-    local2 = _col(d, "local_top2")
-    local3 = _col(d, "local_top3")
+    boats = d["boat"].astype(int).tolist()
 
-    motor2 = _col(d, "motor_top2")
-    motor3 = _col(d, "motor_top3")
-
-    boat2 = _col(d, "boat_top2")
-    boat3 = _col(d, "boat_top3")
-
-    start = _col(d, "start")
-    exhibition = _col(d, "exhibition")
-
-    # -----------------------------
-    # 0～1化
-    # -----------------------------
-    win_s = _norm(win)
-    local_s = _norm(local)
-
-    top2_s = _norm(top2)
-    top3_s = _norm(top3)
-
-    local2_s = _norm(local2)
-    local3_s = _norm(local3)
-
-    motor2_s = _norm(motor2)
-    motor3_s = _norm(motor3)
-
-    boat2_s = _norm(boat2)
-    boat3_s = _norm(boat3)
-
-    start_s = (
-        1 - _norm(start)
-        if np.any(start > 0)
-        else np.ones(6) * 0.5
+    first_map = dict(
+        zip(
+            d["boat"].astype(int),
+            d["first_score"],
+        )
     )
 
-    exhibition_s = (
-        1 - _norm(exhibition)
-        if np.any(exhibition > 0)
-        else np.ones(6) * 0.5
+    second_map = dict(
+        zip(
+            d["boat"].astype(int),
+            d["second_score"],
+        )
     )
 
-    # -----------------------------
-    # コース補正
-    # -----------------------------
-    course_bonus = np.array([
-        1.00,
-        0.62,
-        0.45,
-        0.31,
-        0.21,
-        0.14
-    ])
-
-    # -----------------------------
-    # ① 1着モデル
-    # -----------------------------
-    first_score = (
-        2.00 * win_s +
-        0.90 * local_s +
-        0.80 * top2_s +
-        0.55 * top3_s +
-        0.70 * start_s +
-        0.40 * exhibition_s +
-        course_bonus
+    third_map = dict(
+        zip(
+            d["boat"].astype(int),
+            d["third_score"],
+        )
     )
 
-    p1 = _softmax(
-        first_score,
-        temp=0.72
-    )
-
-    # -----------------------------
-    # ② 2着モデル
-    # -----------------------------
-    second_score = (
-        0.65 * win_s +
-        0.85 * top2_s +
-        0.55 * top3_s +
-        0.65 * local2_s +
-        0.45 * local3_s +
-        0.50 * motor2_s +
-        0.35 * boat2_s +
-        0.35 * start_s +
-        0.20 * exhibition_s +
-        0.42 * course_bonus
-    )
-
-    # -----------------------------
-    # ③ 3着モデル
-    # -----------------------------
-    third_score = (
-        0.30 * win_s +
-        0.50 * top2_s +
-        0.80 * top3_s +
-        0.55 * local2_s +
-        0.75 * local3_s +
-        0.45 * motor2_s +
-        0.65 * motor3_s +
-        0.30 * boat2_s +
-        0.55 * boat3_s +
-        0.25 * start_s +
-        0.20 * exhibition_s +
-        0.32 * course_bonus
-    )
-
-    # -----------------------------
-    # ④ 120通りを計算
-    # -----------------------------
     combos = []
 
-    for a, b, c in itertools.permutations(range(6), 3):
-
-        # 1着
-        pa = p1[a]
-
-        # 2着
-        s2 = second_score.copy()
-        s2[a] = -999
-
-        # 1着艇が外なら1号艇の2着残りも少し評価
-        if a != 0:
-            s2[0] += 0.10
-
-        # 1号艇が1着なら2～4号艇の2着を少し評価
-        if a == 0:
-            s2[1:4] += 0.06
-
-        p2 = _softmax(
-            s2,
-            temp=0.82
+    for a, b, c in itertools.permutations(
+        boats,
+        3,
+    ):
+        # 1着を強く評価
+        score = (
+            first_map[a] * 0.52
+            + second_map[b] * 0.28
+            + third_map[c] * 0.20
         )
 
-        pb = p2[b]
+        # 1号艇は基本的にやや優位
+        if a == 1:
+            score += 0.22
 
-        # 3着
-        s3 = third_score.copy()
-        s3[a] = -999
-        s3[b] = -999
+        # 2号艇は差し候補
+        if a == 2:
+            score += 0.10
 
-        # 波乱時の1号艇残り目
-        if a != 0 and b != 0:
-            s3[0] += 0.08
+        # 3～6の1着は少し抑える
+        if a >= 4:
+            score -= 0.05
 
-        # 中間艇の3着残り目
-        if c in (1, 2, 3):
-            s3[c] += 0.035
+        # 2着・3着の入れ替えを少し許容
+        if b == 1:
+            score += 0.08
 
-        p3 = _softmax(
-            s3,
-            temp=0.88
-        )
-
-        pc = p3[c]
-
-        probability = pa * pb * pc
+        if c == 1:
+            score += 0.04
 
         combos.append({
-            "combo": (
-                int(d.iloc[a]["boat"]),
-                int(d.iloc[b]["boat"]),
-                int(d.iloc[c]["boat"]),
-            ),
-            "prob": float(probability),
-            "first_prob": float(pa),
+            "combo": (a, b, c),
+            "score": float(score),
         })
 
-    # -----------------------------
-    # ⑤ 全120通りを正規化
-    # -----------------------------
-    total = sum(x["prob"] for x in combos)
+    combo_scores = np.array([
+        x["score"] for x in combos
+    ])
 
-    if total > 0:
-        for x in combos:
-            x["prob"] /= total
+    probs = _softmax(
+        combo_scores * 1.15
+    )
+
+    for i, p in enumerate(probs):
+        combos[i]["prob"] = float(p)
 
     combos.sort(
         key=lambda x: x["prob"],
-        reverse=True
+        reverse=True,
     )
 
-    # -----------------------------
-    # ⑥ 本線
-    # -----------------------------
+    # まず本線
     main = combos[0]
 
-    # -----------------------------
-    # ⑦ 対抗
-    # 本線と完全に同じ展開に偏らない
-    # -----------------------------
-    counter = None
+    # 対抗:
+    # 本線と1着を共有し、順序を変える
+    counter_candidates = [
+        x for x in combos
+        if x["combo"][0] == main["combo"][0]
+        and x["combo"] != main["combo"]
+    ]
 
-    for x in combos[1:]:
-        same_first = (
-            x["combo"][0] ==
-            main["combo"][0]
-        )
-
-        same_second = (
-            x["combo"][1] ==
-            main["combo"][1]
-        )
-
-        if not (same_first and same_second):
-            counter = x
-            break
-
-    if counter is None:
-        counter = combos[1]
-
-    # -----------------------------
-    # ⑧ 穴
-    # 別1着艇を優先
-    # -----------------------------
-    hole = None
-
-    threshold = main["prob"] * 0.40
-
-    for x in combos:
-        if x["combo"] == main["combo"]:
-            continue
-
-        if x["combo"] == counter["combo"]:
-            continue
-
-        different_first = (
-            x["combo"][0] !=
-            main["combo"][0]
-        )
-
-        if (
-            different_first
-            and x["prob"] >= threshold
-        ):
-            hole = x
-            break
-
-    # 別1着候補が低すぎる場合は、
-    # 4～6号艇を含む現実的な穴を採用
-    if hole is None:
-        for x in combos:
-            if x["combo"] in (
-                main["combo"],
-                counter["combo"]
-            ):
-                continue
-
-            if max(x["combo"]) >= 4:
-                hole = x
-                break
-
-    if hole is None:
-        hole = combos[2]
-
-    # -----------------------------
-    # ⑨ 1着ランキング
-    # -----------------------------
-    order = np.argsort(
-        -p1
+    counter = (
+        counter_candidates[0]
+        if counter_candidates
+        else combos[1]
     )
+
+    # 穴:
+    # 本線と違う1着を優先
+    hole_candidates = [
+        x for x in combos
+        if x["combo"][0] != main["combo"][0]
+        and x["combo"] != counter["combo"]
+    ]
+
+    # 上位の別1着から選ぶ
+    hole = (
+        hole_candidates[0]
+        if hole_candidates
+        else combos[2]
+    )
+
+    tickets = [
+        {
+            "label": "本線",
+            "mark": "◎",
+            "combo": main["combo"],
+            "prob": main["prob"],
+        },
+        {
+            "label": "対抗",
+            "mark": "○",
+            "combo": counter["combo"],
+            "prob": counter["prob"],
+        },
+        {
+            "label": "穴",
+            "mark": "▲",
+            "combo": hole["combo"],
+            "prob": hole["prob"],
+        },
+    ]
+
+    # 重複防止
+    unique = []
+    seen = set()
+
+    for t in tickets:
+        if t["combo"] not in seen:
+            unique.append(t)
+            seen.add(t["combo"])
+
+    # 万一3点未満なら上位から補充
+    for x in combos:
+        if len(unique) >= 3:
+            break
+
+        if x["combo"] not in seen:
+            unique.append({
+                "label": "追加",
+                "mark": "・",
+                "combo": x["combo"],
+                "prob": x["prob"],
+            })
+            seen.add(x["combo"])
+
+    tickets = unique[:3]
+
+    # 1着ランキング
+    ranking_df = d.sort_values(
+        "first_score",
+        ascending=False,
+    ).copy()
 
     ranking = []
 
-    for idx in order:
+    first_values = ranking_df[
+        "first_score"
+    ].values
+
+    first_probs = _softmax(
+        first_values * 1.35
+    )
+
+    for (_, row), prob in zip(
+        ranking_df.iterrows(),
+        first_probs,
+    ):
         ranking.append({
-            "boat": int(d.iloc[idx]["boat"]),
-            "name": d.iloc[idx]["name"],
-            "prob": float(p1[idx]),
-            "score": float(first_score[idx]),
+            "boat": int(row["boat"]),
+            "name": row["name"],
+            "prob": float(prob),
+            "score": float(
+                row["first_score"]
+            ),
         })
 
-    # -----------------------------
-    # ⑩ 信頼度
-    # -----------------------------
-    top_p = p1[order[0]]
-    second_p = p1[order[1]]
+    # 信頼度
+    top_prob = ranking[0]["prob"]
 
     confidence = (
-        50 +
-        (top_p - second_p) * 250
+        60
+        + top_prob * 80
     )
 
     confidence = max(
-        45,
-        min(95, confidence)
+        55,
+        min(95, confidence),
     )
 
     return {
-        "tickets": {
-            "main": main,
-            "counter": counter,
-            "hole": hole,
-        },
+        "tickets": tickets,
         "ranking": ranking,
-        "probabilities": p1,
-        "confidence": float(confidence),
+        "confidence": confidence,
         "all_combos": combos,
-            }
+        "df": d,
+    }
+
+
+def combo_text(combo):
+    return "-".join(
+        str(int(x))
+        for x in combo
+    )

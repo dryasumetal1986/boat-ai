@@ -18,12 +18,6 @@ def run_backtest(
     target_count,
     end_date=None,
 ):
-    """
-    全国24場バックテスト。
-
-    当日を除外し、
-    前日から2026-01-01まで遡る。
-    """
 
     if end_date is None:
         end_date = date.today()
@@ -62,7 +56,9 @@ def run_backtest(
             if len(rows) >= target_count:
                 break
 
-            venue_name = VENUE_BY_ID[venue_id]
+            venue_name = VENUE_BY_ID[
+                venue_id
+            ]
 
             for race_no in range(1, 13):
 
@@ -79,10 +75,7 @@ def run_backtest(
                     continue
 
                 if len(
-                    race.get(
-                        "boats",
-                        [],
-                    )
+                    race.get("boats", [])
                 ) != 6:
                     continue
 
@@ -94,9 +87,13 @@ def run_backtest(
                 if len(actual) < 3:
                     continue
 
-                prediction = predict_race(race)
+                prediction = predict_race(
+                    race
+                )
 
-                ranking = prediction["ranking"]
+                ranking = prediction[
+                    "ranking"
+                ]
 
                 main = ranking[0]
                 counter = ranking[1]
@@ -116,6 +113,7 @@ def run_backtest(
                     INVEST_PER_RACE
                 )
 
+                # 本命1着
                 main_win = (
                     actual_top3[0]
                     == main
@@ -124,6 +122,7 @@ def run_backtest(
                 if main_win:
                     main_win_count += 1
 
+                # 本命3連対
                 main_top3 = (
                     main
                     in actual_top3
@@ -132,6 +131,7 @@ def run_backtest(
                 if main_top3:
                     main_top3_count += 1
 
+                # AI上位3艇が全員3連対
                 top3_all_top3 = all(
                     boat in actual_top3
                     for boat in ranking[:3]
@@ -140,6 +140,7 @@ def run_backtest(
                 if top3_all_top3:
                     top3_all_top3_count += 1
 
+                # 3艇BOX
                 box_hit = (
                     selected_boats
                     == set(actual_top3)
@@ -149,12 +150,14 @@ def run_backtest(
                     box_hit_count += 1
 
                 # -------------------------
-                # 的中確率最高の3連単を
-                # バックテストの1点予想にする
+                # 本命1着を優先した
+                # 3連単予想
                 # -------------------------
 
                 predicted_combo = (
-                    prediction["best_combo"]
+                    prediction[
+                        "main_best_combo"
+                    ]
                 )
 
                 exact_hit = (
@@ -187,19 +190,23 @@ def run_backtest(
                     "predicted_combo":
                         predicted_combo,
                     "actual": actual_top3,
-                    "main_win": main_win,
-                    "main_top3": main_top3,
-                    "box_hit": box_hit,
-                    "exact_hit": exact_hit,
+                    "main_win":
+                        main_win,
+                    "main_top3":
+                        main_top3,
+                    "box_hit":
+                        box_hit,
+                    "exact_hit":
+                        exact_hit,
                 })
 
         cursor -= timedelta(days=1)
 
-    race_count = len(rows)
+    count = len(rows)
 
-    if race_count > 0:
+    if count:
 
-        recovery_rate = (
+        recovery = (
             total_return
             / total_investment
             * 100
@@ -207,37 +214,37 @@ def run_backtest(
 
         main_win_rate = (
             main_win_count
-            / race_count
+            / count
             * 100
         )
 
         main_top3_rate = (
             main_top3_count
-            / race_count
+            / count
             * 100
         )
 
         top3_all_top3_rate = (
             top3_all_top3_count
-            / race_count
+            / count
             * 100
         )
 
         box_hit_rate = (
             box_hit_count
-            / race_count
+            / count
             * 100
         )
 
         exact_hit_rate = (
             exact_hit_count
-            / race_count
+            / count
             * 100
         )
 
     else:
 
-        recovery_rate = 0.0
+        recovery = 0.0
         main_win_rate = 0.0
         main_top3_rate = 0.0
         top3_all_top3_rate = 0.0
@@ -246,16 +253,21 @@ def run_backtest(
 
     return {
         "rows": rows,
-        "count": race_count,
-        "investment": total_investment,
-        "return": total_return,
-        "recovery": recovery_rate,
-        "main_win_rate": main_win_rate,
-        "main_top3_rate": main_top3_rate,
+        "count": count,
+        "investment":
+            total_investment,
+        "return":
+            total_return,
+        "recovery":
+            recovery,
+        "main_win_rate":
+            main_win_rate,
+        "main_top3_rate":
+            main_top3_rate,
         "top3_all_top3_rate":
             top3_all_top3_rate,
         "box_hit_rate":
             box_hit_rate,
         "exact_hit_rate":
             exact_hit_rate,
-    }
+                }

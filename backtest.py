@@ -1,6 +1,4 @@
 from datetime import timedelta
-import re
-
 import pandas as pd
 import streamlit as st
 
@@ -36,17 +34,25 @@ def get_trifecta_payout(race, actual_order):
     if len(actual_order) < 3:
         return 0
 
-    target = f"{actual_order[0]}-{actual_order[1]}-{actual_order[2]}"
+    target = (
+        f"{actual_order[0]}-"
+        f"{actual_order[1]}-"
+        f"{actual_order[2]}"
+    )
 
     for item in trifecta:
         if not isinstance(item, dict):
             continue
 
-        combination = str(item.get("combination", "")).strip()
+        combination = str(
+            item.get("combination", "")
+        ).strip()
 
         if combination == target:
             try:
-                return int(item.get("amount", 0))
+                return int(
+                    item.get("amount", 0)
+                )
             except (TypeError, ValueError):
                 return 0
 
@@ -90,8 +96,10 @@ def normalize_ranking(result):
         else:
             try:
                 boat = int(item)
+
                 if 1 <= boat <= 6:
                     output.append(boat)
+
             except (TypeError, ValueError):
                 pass
 
@@ -121,18 +129,28 @@ def make_ai_bets(main, counter, hole):
 def analyze_race(stadium_no, race_no, race):
     rows = data.get_race_rows(race)
 
-    if not rows:
+    # DataFrame / list 両対応
+    if rows is None:
         return None
+
+    if isinstance(rows, pd.DataFrame):
+        if rows.empty:
+            return None
+    else:
+        if not rows:
+            return None
 
     history = pd.DataFrame()
 
     try:
         race_date = race.get("date")
+
         history = data.history14(
             stadium_no,
             race_no,
             race_date,
         )
+
     except Exception:
         history = pd.DataFrame()
 
@@ -142,6 +160,7 @@ def analyze_race(stadium_no, race_no, race):
             history,
             stadium_no,
         )
+
     except Exception:
         return None
 
@@ -153,6 +172,7 @@ def analyze_race(stadium_no, race_no, race):
         main = int(main)
         counter = int(counter)
         hole = int(hole)
+
     except (TypeError, ValueError):
         return None
 
@@ -166,7 +186,9 @@ def analyze_race(stadium_no, race_no, race):
         actual_order,
     )
 
-    ranking = normalize_ranking(ai_result)
+    ranking = normalize_ranking(
+        ai_result
+    )
 
     top3 = ranking[:3]
 
@@ -176,9 +198,13 @@ def analyze_race(stadium_no, race_no, race):
         hole,
     )
 
-    actual_trifecta = tuple(actual_order[:3])
+    actual_trifecta = tuple(
+        actual_order[:3]
+    )
 
-    ai_hit = actual_trifecta in ai_bets
+    ai_hit = (
+        actual_trifecta in ai_bets
+    )
 
     main_win = (
         actual_order[0] == main
@@ -195,13 +221,18 @@ def analyze_race(stadium_no, race_no, race):
 
     return {
         "日付": race.get("date", ""),
-        "場": data.stadium_name(stadium_no),
+        "場": data.stadium_name(
+            stadium_no
+        ),
         "R": f"{race_no}R",
         "本命": main,
         "対抗": counter,
         "穴": hole,
         "実着順": "-".join(
-            map(str, actual_order[:3])
+            map(
+                str,
+                actual_order[:3],
+            )
         ),
         "3連単配当": payout,
         "本命1着": main_win,
@@ -214,19 +245,30 @@ def analyze_race(stadium_no, race_no, race):
 # =========================================================
 # 指定日の全開催レース取得
 # =========================================================
-def get_completed_races_for_date(target_date):
+def get_completed_races_for_date(
+    target_date
+):
     raw = data.get_data(target_date)
 
     if not raw:
         return []
 
-    races = data.all_races_for_date(raw)
+    races = data.all_races_for_date(
+        raw
+    )
 
     completed = []
 
-    for stadium_no, race_no, race in races:
+    for (
+        stadium_no,
+        race_no,
+        race,
+    ) in races:
+
         try:
-            actual_order = get_actual_order(race)
+            actual_order = (
+                get_actual_order(race)
+            )
 
             if len(actual_order) >= 3:
                 completed.append(
@@ -236,6 +278,7 @@ def get_completed_races_for_date(target_date):
                         race,
                     )
                 )
+
         except Exception:
             continue
 
@@ -246,9 +289,15 @@ def get_completed_races_for_date(target_date):
 # バックテスト本体
 # 全国24場
 # =========================================================
-def run_backtest(target_count, start_date=None):
+def run_backtest(
+    target_count,
+    start_date=None,
+):
     if start_date is None:
-        start_date = data.jst_today() - timedelta(days=1)
+        start_date = (
+            data.jst_today()
+            - timedelta(days=1)
+        )
 
     current_date = start_date
 
@@ -258,11 +307,19 @@ def run_backtest(target_count, start_date=None):
         current_date >= START_DATE
         and len(results) < target_count
     ):
-        races = get_completed_races_for_date(
-            current_date
+
+        races = (
+            get_completed_races_for_date(
+                current_date
+            )
         )
 
-        for stadium_no, race_no, race in races:
+        for (
+            stadium_no,
+            race_no,
+            race,
+        ) in races:
+
             if len(results) >= target_count:
                 break
 
@@ -273,9 +330,13 @@ def run_backtest(target_count, start_date=None):
             )
 
             if analyzed is not None:
-                results.append(analyzed)
+                results.append(
+                    analyzed
+                )
 
-        current_date -= timedelta(days=1)
+        current_date -= timedelta(
+            days=1
+        )
 
     if not results:
         return pd.DataFrame()
@@ -301,8 +362,10 @@ def calculate_metrics(df):
 
     race_count = len(df)
 
-    # 1レース6点買い
-    investment = race_count * 6 * 100
+    # 1レース6点買い × 100円
+    investment = (
+        race_count * 6 * 100
+    )
 
     payout = int(
         df.loc[
@@ -326,7 +389,8 @@ def calculate_metrics(df):
     )
 
     ai_top3_rate = (
-        df["AI上位3艇3連対"].mean() * 100
+        df["AI上位3艇3連対"].mean()
+        * 100
     )
 
     ai_hit_rate = (
@@ -352,17 +416,23 @@ def calculate_metrics(df):
 # 10レースずつ
 # =========================================================
 def show_result_cards(df):
-    if df.empty:
+    if df is None or df.empty:
         return
 
     total_pages = max(
         1,
-        (len(df) + PAGE_SIZE - 1)
-        // PAGE_SIZE,
+        (
+            len(df) + PAGE_SIZE - 1
+        ) // PAGE_SIZE,
     )
 
-    if "backtest_result_page" not in st.session_state:
-        st.session_state["backtest_result_page"] = 0
+    if (
+        "backtest_result_page"
+        not in st.session_state
+    ):
+        st.session_state[
+            "backtest_result_page"
+        ] = 0
 
     page = st.session_state[
         "backtest_result_page"
@@ -370,33 +440,48 @@ def show_result_cards(df):
 
     page = max(
         0,
-        min(page, total_pages - 1),
+        min(
+            page,
+            total_pages - 1,
+        ),
     )
 
     start = page * PAGE_SIZE
+
     end = min(
         start + PAGE_SIZE,
         len(df),
     )
 
-    page_df = df.iloc[start:end]
+    page_df = df.iloc[
+        start:end
+    ]
 
-    # -----------------------------------------------------
-    # 検証結果の先頭位置
-    # -----------------------------------------------------
+    # =====================================================
+    # 検証結果の先頭アンカー
+    # =====================================================
     st.markdown(
         '<div id="backtest-results-top"></div>',
         unsafe_allow_html=True,
     )
 
-    st.subheader("📋 検証結果")
-
-    st.caption(
-        f"{start + 1}〜{end} / {len(df)}レース"
+    st.subheader(
+        "📋 検証結果"
     )
 
+    st.caption(
+        f"{start + 1}〜{end} / "
+        f"{len(df)}レース"
+    )
+
+    # =====================================================
+    # レースカード
+    # =====================================================
     for _, row in page_df.iterrows():
-        date_text = str(row.get("日付", ""))
+
+        date_text = str(
+            row.get("日付", "")
+        )
 
         stadium = str(
             row.get("場", "")
@@ -406,26 +491,51 @@ def show_result_cards(df):
             row.get("R", "")
         )
 
-        main = row.get("本命", "")
-        counter = row.get("対抗", "")
-        hole = row.get("穴", "")
+        main = row.get(
+            "本命",
+            "",
+        )
+
+        counter = row.get(
+            "対抗",
+            "",
+        )
+
+        hole = row.get(
+            "穴",
+            "",
+        )
 
         actual = str(
-            row.get("実着順", "")
+            row.get(
+                "実着順",
+                "",
+            )
         )
 
         payout = int(
-            row.get("3連単配当", 0)
+            row.get(
+                "3連単配当",
+                0,
+            )
             or 0
         )
 
         ai_hit = bool(
-            row.get("AI買い的中", False)
+            row.get(
+                "AI買い的中",
+                False,
+            )
         )
 
-        with st.container(border=True):
+        with st.container(
+            border=True
+        ):
+
             st.markdown(
-                f"**{date_text}｜{stadium}｜{race_no}**"
+                f"**{date_text}｜"
+                f"{stadium}｜"
+                f"{race_no}**"
             )
 
             st.write(
@@ -457,21 +567,24 @@ def show_result_cards(df):
                     "AI買い：ハズレ"
                 )
 
-    # -----------------------------------------------------
+    # =====================================================
     # ページ切り替え
-    # -----------------------------------------------------
+    # =====================================================
     if total_pages > 1:
+
         st.divider()
 
         col1, col2 = st.columns(2)
 
         with col1:
+
             if st.button(
                 "◀ 前へ",
                 disabled=(page <= 0),
                 use_container_width=True,
                 key="backtest_prev",
             ):
+
                 st.session_state[
                     "backtest_result_page"
                 ] = page - 1
@@ -483,12 +596,17 @@ def show_result_cards(df):
                 st.rerun()
 
         with col2:
+
             if st.button(
                 "次へ ▶",
-                disabled=(page >= total_pages - 1),
+                disabled=(
+                    page >=
+                    total_pages - 1
+                ),
                 use_container_width=True,
                 key="backtest_next",
             ):
+
                 st.session_state[
                     "backtest_result_page"
                 ] = page + 1
@@ -500,16 +618,18 @@ def show_result_cards(df):
                 st.rerun()
 
         st.caption(
-            f"ページ {page + 1} / {total_pages}"
+            f"ページ {page + 1} / "
+            f"{total_pages}"
         )
 
-    # -----------------------------------------------------
-    # ページ切り替え後に検証結果の先頭へ移動
-    # -----------------------------------------------------
+    # =====================================================
+    # ページ切り替え後に自動スクロール
+    # =====================================================
     if st.session_state.get(
         "backtest_scroll_results",
         False,
     ):
+
         st.session_state[
             "backtest_scroll_results"
         ] = False
@@ -540,10 +660,14 @@ def show_result_cards(df):
 # =========================================================
 # バックテスト画面
 # =========================================================
-def render_backtest(stadium_no=None):
+def render_backtest(
+    stadium_no=None
+):
     st.divider()
 
-    st.subheader("📊 AI予想バックテスト")
+    st.subheader(
+        "📊 AI予想バックテスト"
+    )
 
     st.caption(
         "🌎 全国24場を対象に、"
@@ -557,11 +681,15 @@ def render_backtest(stadium_no=None):
         key="backtest_count",
     )
 
+    # =====================================================
+    # バックテスト開始
+    # =====================================================
     if st.button(
         "🚀 バックテスト開始",
         use_container_width=True,
         key="backtest_start",
     ):
+
         st.session_state[
             "backtest_result_page"
         ] = 0
@@ -574,7 +702,9 @@ def render_backtest(stadium_no=None):
             "backtest_df"
         ] = None
 
-        progress = st.progress(0)
+        progress = st.progress(
+            0
+        )
 
         status = st.empty()
 
@@ -586,12 +716,17 @@ def render_backtest(stadium_no=None):
             int(count)
         )
 
-        progress.progress(1.0)
+        progress.progress(
+            1.0
+        )
 
         if df.empty:
+
             status.error(
-                "検証できるレースが見つかりませんでした。"
+                "検証できるレースが"
+                "見つかりませんでした。"
             )
+
             return
 
         st.session_state[
@@ -603,13 +738,14 @@ def render_backtest(stadium_no=None):
         ] = 0
 
         status.success(
-            f"🎉 {len(df)}レースの検証が完了しました！"
+            f"🎉 {len(df)}レースの"
+            "検証が完了しました！"
         )
 
-    # -----------------------------------------------------
-    # 保存済みバックテスト結果
-    # ページ切り替え時も再実行しない
-    # -----------------------------------------------------
+    # =====================================================
+    # 保存済み結果
+    # ページ変更では再バックテストしない
+    # =====================================================
     df = st.session_state.get(
         "backtest_df"
     )
@@ -618,10 +754,16 @@ def render_backtest(stadium_no=None):
         return
 
     st.write(
-        f"**{len(df)} / {len(df)} レース**"
+        f"**{len(df)} / "
+        f"{len(df)} レース**"
     )
 
-    metrics = calculate_metrics(df)
+    # =====================================================
+    # 指標
+    # =====================================================
+    metrics = calculate_metrics(
+        df
+    )
 
     st.metric(
         "💰 回収率",
@@ -663,4 +805,9 @@ def render_backtest(stadium_no=None):
         f"**{metrics['perfect_rate']:.1f}%**"
     )
 
-    show_result_cards(df)
+    # =====================================================
+    # 検証結果
+    # =====================================================
+    show_result_cards(
+        df
+    )

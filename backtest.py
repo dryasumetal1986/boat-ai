@@ -4,10 +4,8 @@ from ai import predict_race
 from data import VENUE_BY_ID, get_race
 
 
-# 1レースあたり600円投資
 INVEST_PER_RACE = 600
 
-# 選択できる検証レース数
 TARGET_RACES = [
     100,
     300,
@@ -21,17 +19,15 @@ def run_backtest(
     end_date=None,
 ):
     """
-    全国24場を対象にバックテスト。
+    全国24場バックテスト。
 
-    現在日のレースは使用せず、
-    前日から2026-01-01まで
-    遡って完成済みレースを集める。
+    当日を除外し、
+    前日から2026-01-01まで遡る。
     """
 
     if end_date is None:
         end_date = date.today()
 
-    # 当日を除外して「前日」から開始
     cursor = (
         end_date
         - timedelta(days=1)
@@ -45,52 +41,30 @@ def run_backtest(
 
     rows = []
 
-    # -------------------------
-    # 集計
-    # -------------------------
-
     total_investment = 0.0
     total_return = 0.0
 
     main_win_count = 0
     main_top3_count = 0
-
     top3_all_top3_count = 0
-
     box_hit_count = 0
     exact_hit_count = 0
-
-    # -------------------------
-    # 日付を遡る
-    # -------------------------
 
     while (
         cursor >= start_date
         and len(rows) < target_count
     ):
 
-        date_str = (
-            cursor.isoformat()
-        )
+        date_str = cursor.isoformat()
 
-        # 全国24場
-        for venue_id in range(
-            1,
-            25,
-        ):
+        for venue_id in range(1, 25):
 
             if len(rows) >= target_count:
                 break
 
-            venue_name = VENUE_BY_ID[
-                venue_id
-            ]
+            venue_name = VENUE_BY_ID[venue_id]
 
-            # 1R～12R
-            for race_no in range(
-                1,
-                13,
-            ):
+            for race_no in range(1, 13):
 
                 if len(rows) >= target_count:
                     break
@@ -101,11 +75,9 @@ def run_backtest(
                     race_no,
                 )
 
-                # データがないレースは除外
                 if not race:
                     continue
 
-                # 6艇揃っていない場合は除外
                 if len(
                     race.get(
                         "boats",
@@ -114,7 +86,6 @@ def run_backtest(
                 ) != 6:
                     continue
 
-                # 結果がないレースは除外
                 actual = race.get(
                     "actual",
                     [],
@@ -123,45 +94,27 @@ def run_backtest(
                 if len(actual) < 3:
                     continue
 
-                # -------------------------
-                # AI予想
-                # -------------------------
+                prediction = predict_race(race)
 
-                prediction = predict_race(
-                    race
-                )
-
-                ranking = prediction[
-                    "ranking"
-                ]
+                ranking = prediction["ranking"]
 
                 main = ranking[0]
                 counter = ranking[1]
                 hole = ranking[2]
 
-                # AIが選んだ3艇
                 selected_boats = {
                     main,
                     counter,
                     hole,
                 }
 
-                # 実際の3着
                 actual_top3 = tuple(
                     actual[:3]
                 )
 
-                # -------------------------
-                # 投資
-                # -------------------------
-
                 total_investment += (
                     INVEST_PER_RACE
                 )
-
-                # -------------------------
-                # 本命1着
-                # -------------------------
 
                 main_win = (
                     actual_top3[0]
@@ -171,10 +124,6 @@ def run_backtest(
                 if main_win:
                     main_win_count += 1
 
-                # -------------------------
-                # 本命3連対
-                # -------------------------
-
                 main_top3 = (
                     main
                     in actual_top3
@@ -183,11 +132,6 @@ def run_backtest(
                 if main_top3:
                     main_top3_count += 1
 
-                # -------------------------
-                # AI上位3艇
-                # 全艇が3着以内
-                # -------------------------
-
                 top3_all_top3 = all(
                     boat in actual_top3
                     for boat in ranking[:3]
@@ -195,13 +139,6 @@ def run_backtest(
 
                 if top3_all_top3:
                     top3_all_top3_count += 1
-
-                # -------------------------
-                # AI選出3艇BOX的中
-                #
-                # 順番は問わず
-                # 3艇すべてが実着3艇と一致
-                # -------------------------
 
                 box_hit = (
                     selected_boats
@@ -212,13 +149,12 @@ def run_backtest(
                     box_hit_count += 1
 
                 # -------------------------
-                # 3連単完全的中
+                # 的中確率最高の3連単を
+                # バックテストの1点予想にする
                 # -------------------------
 
                 predicted_combo = (
-                    main,
-                    counter,
-                    hole,
+                    prediction["best_combo"]
                 )
 
                 exact_hit = (
@@ -227,13 +163,9 @@ def run_backtest(
                 )
 
                 if exact_hit:
+
                     exact_hit_count += 1
 
-                    # 公式払戻は100円券の金額。
-                    #
-                    # このバックテストでは
-                    # 1点に600円投資するため、
-                    # 払戻を6倍する。
                     payout = float(
                         race.get(
                             "payout",
@@ -245,42 +177,23 @@ def run_backtest(
                         payout * 6
                     )
 
-                # -------------------------
-                # 検証結果
-                # -------------------------
-
                 rows.append({
                     "date": date_str,
-
                     "venue": venue_name,
-
                     "race_no": race_no,
-
                     "main": main,
-
                     "counter": counter,
-
                     "hole": hole,
-
+                    "predicted_combo":
+                        predicted_combo,
                     "actual": actual_top3,
-
                     "main_win": main_win,
-
                     "main_top3": main_top3,
-
                     "box_hit": box_hit,
-
                     "exact_hit": exact_hit,
                 })
 
-        # 1日前へ
-        cursor -= timedelta(
-            days=1
-        )
-
-    # -------------------------
-    # 集計
-    # -------------------------
+        cursor -= timedelta(days=1)
 
     race_count = len(rows)
 
@@ -333,27 +246,16 @@ def run_backtest(
 
     return {
         "rows": rows,
-
         "count": race_count,
-
         "investment": total_investment,
-
         "return": total_return,
-
         "recovery": recovery_rate,
-
-        "main_win_rate":
-            main_win_rate,
-
-        "main_top3_rate":
-            main_top3_rate,
-
+        "main_win_rate": main_win_rate,
+        "main_top3_rate": main_top3_rate,
         "top3_all_top3_rate":
             top3_all_top3_rate,
-
         "box_hit_rate":
             box_hit_rate,
-
         "exact_hit_rate":
             exact_hit_rate,
     }

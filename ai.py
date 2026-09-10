@@ -1,293 +1,286 @@
+import itertools
 import math
+
 import numpy as np
 
 
-def _f(value):
-    try:
-        return float(value)
-    except Exception:
-        return 0.0
+def _normalize(values):
+    """
+    数値を合計1の確率に変換
+    """
 
-
-def _score(racer):
-    raw = racer.get("raw", {})
-    number = racer["number"]
-
-    score = 0.0
-
-    score += _f(raw.get("national_win_rate")) * 2.2
-    score += _f(raw.get("local_win_rate")) * 1.8
-    score += _f(raw.get("national_top_2_percent")) * 0.06
-    score += _f(raw.get("local_top_2_percent")) * 0.04
-    score += _f(raw.get("motor_top_2_percent")) * 0.04
-    score += _f(raw.get("boat_top_2_percent")) * 0.02
-
-    # コース補正
-    course_bonus = {
-        1: 15.0,
-        2: 8.0,
-        3: 6.0,
-        4: 4.0,
-        5: 2.0,
-        6: 0.0,
-    }
-
-    score += course_bonus.get(number, 0.0)
-
-    return score
-
-
-def _scores(racers):
-    return {
-        racer["number"]: _score(racer)
-        for racer in racers
-    }
-
-
-def _trifecta_distribution(scores):
-    combinations = []
-
-    for a in range(1, 7):
-        for b in range(1, 7):
-            if b == a:
-                continue
-
-            for c in range(1, 7):
-                if c == a or c == b:
-                    continue
-
-                combinations.append((a, b, c))
-
-    t1 = 12.0
-    t2 = 15.0
-    t3 = 18.0
-
-    raw = {}
-
-    for combo in combinations:
-        a, b, c = combo
-
-        value = (
-            scores.get(a, 0.0) / t1
-            + scores.get(b, 0.0) / t2
-            + scores.get(c, 0.0) / t3
-        )
-
-        raw[combo] = value
-
-    maximum = max(raw.values())
-
-    weights = {
-        combo: math.exp(value - maximum)
-        for combo, value in raw.items()
-    }
-
-    total = sum(weights.values())
-
-    probabilities = {
-        combo: weights[combo] / total
-        for combo in combinations
-    }
-
-    # 極端なAI予想を少し緩和
-    uniform = 1.0 / 120.0
-
-    probabilities = {
-        combo:
-        probabilities[combo] * 0.85
-        + uniform * 0.15
-        for combo in combinations
-    }
-
-    total = sum(probabilities.values())
-
-    return {
-        combo: probabilities[combo] / total
-        for combo in combinations
-    }
-
-
-def _first_probabilities(trifecta):
-    result = {
-        i: 0.0
-        for i in range(1, 7)
-    }
-
-    for combo, probability in trifecta.items():
-        result[combo[0]] += probability
-
-    return result
-
-
-def _confidence(probabilities):
-    values = np.array(
-        list(probabilities.values()),
+    arr = np.asarray(
+        values,
         dtype=float,
     )
 
-    values = np.clip(
-        values,
-        1e-12,
-        1.0,
+    arr = np.maximum(
+        arr,
+        0.0,
     )
 
-    entropy = -np.sum(
-        values * np.log(values)
+    total = arr.sum()
+
+    if total <= 0:
+        return np.ones(
+            len(arr)
+        ) / len(arr)
+
+    return arr / total
+
+
+def predict_race(race):
+    """
+    6艇のAI評価と
+    3連単120通りのAI確率を作成
+    """
+
+    boats = race["boats"]
+
+    scores = []
+
+    # -------------------------
+    # 各艇のAIスコア
+    # -------------------------
+
+    for boat_data in boats:
+
+        boat = boat_data["boat"]
+
+        score = (
+            boat_data["rate"] * 4.2
+            + boat_data["local_rate"] * 1.8
+            + boat_data["motor"] * 0.8
+            + boat_data["course"] * 0.7
+            + max(0, 7 - boat) * 1.2
+        )
+
+        # 1コースを少し重視
+        if boat == 1:
+            score += 8.0
+
+        scores.append(
+            max(score, 0.1)
+        )
+
+    scores = np.asarray(
+        scores,
+        dtype=float,
     )
 
-    maximum = math.log(6)
+    # -------------------------
+    # 3連単120通り
+    # -------------------------
 
-    certainty = 1.0 - (
-        entropy / maximum
-    )
-
-    confidence = (
-        0.55
-        + certainty * 0.40
-    )
-
-    return float(
-        np.clip(
-            confidence,
-            0.55,
-            0.95,
+    combos = list(
+        itertools.permutations(
+            range(1, 7),
+            3,
         )
     )
 
+    weights = []
 
-def _candidates(trifecta, odds):
-    result = []
+    # 極端な穴がEVだけで
+    # 上位を独占しないように
+    # 着順ごとに温度を設定
+    temp_first = 11.0
+    temp_second = 9.5
+    temp_third = 10.5
 
-    for combo, probability in trifecta.items():
+    for first, second, third in combos:
 
-        odd = odds.get(combo)
-
-        item = {
-            "combination": combo,
-            "probability": probability,
-            "odds": odd,
-            "ev": None,
-            "ev_rate": None,
-            "market_probability": None,
-            "edge": None,
-        }
-
-        if odd and odd > 0:
-
-            market_probability = 1.0 / odd
-
-            ev = (
-                probability * odd
-                - 1.0
-            )
-
-            item["market_probability"] = (
-                market_probability
-            )
-
-            item["ev"] = ev
-            item["ev_rate"] = ev * 100.0
-
-            item["edge"] = (
-                probability
-                - market_probability
-            )
-
-        result.append(item)
-
-    if odds:
-        result.sort(
-            key=lambda x:
-            -999999
-            if x["ev"] is None
-            else x["ev"],
-            reverse=True,
-        )
-    else:
-        result.sort(
-            key=lambda x:
-            x["probability"],
-            reverse=True,
+        weight = math.exp(
+            scores[first - 1]
+            / temp_first
+            + scores[second - 1]
+            / temp_second
+            + scores[third - 1]
+            / temp_third
         )
 
-    return result
+        weights.append(weight)
 
-
-def tri_ai(racers, odds=None):
-    odds = odds or {}
-
-    if not racers:
-        return {
-            "scores": {},
-            "probabilities": {},
-            "ranking": [],
-            "main": None,
-            "counter": None,
-            "hole": None,
-            "confidence": 0.55,
-            "trifecta_probabilities": {},
-            "trifecta_candidates": [],
-            "odds": {},
-            "odds_available": False,
-        }
-
-    scores = _scores(racers)
-
-    ranking = sorted(
-        scores.keys(),
-        key=lambda x: scores[x],
-        reverse=True,
+    probabilities = _normalize(
+        weights
     )
 
-    trifecta = _trifecta_distribution(
-        scores
+    # -------------------------
+    # 少量の確率フロア
+    # -------------------------
+
+    probabilities = (
+        0.96 * probabilities
+        + 0.04 / len(probabilities)
     )
 
-    probabilities = _first_probabilities(
-        trifecta
-    )
-
-    main = ranking[0] if ranking else None
-
-    counter = (
-        ranking[1]
-        if len(ranking) >= 2
-        else None
-    )
-
-    hole = None
-
-    if len(ranking) >= 3:
-
-        candidates = [
-            x
-            for x in ranking
-            if x not in [main, counter]
-        ]
-
-        hole = max(
-            candidates,
-            key=lambda x:
-            probabilities.get(x, 0.0),
-        )
-
-    confidence = _confidence(
+    probabilities = _normalize(
         probabilities
     )
 
-    return {
-        "scores": scores,
-        "probabilities": probabilities,
-        "ranking": ranking,
-        "main": main,
-        "counter": counter,
-        "hole": hole,
-        "confidence": confidence,
-        "trifecta_probabilities": trifecta,
-        "trifecta_candidates": _candidates(
-            trifecta,
-            odds,
-        ),
-        "odds": odds,
-        "odds_available": len(odds) > 0,
+    joint = {
+        combo: float(prob)
+        for combo, prob in zip(
+            combos,
+            probabilities,
+        )
     }
+
+    # -------------------------
+    # 1着確率
+    # -------------------------
+
+    first_probs = {
+        1: 0.0,
+        2: 0.0,
+        3: 0.0,
+        4: 0.0,
+        5: 0.0,
+        6: 0.0,
+    }
+
+    for combo, prob in joint.items():
+
+        first = combo[0]
+
+        first_probs[first] += prob
+
+    # -------------------------
+    # 1着AIランキング
+    # -------------------------
+
+    ranking = sorted(
+        first_probs,
+        key=first_probs.get,
+        reverse=True,
+    )
+
+    main = ranking[0]
+    counter = ranking[1]
+    hole = ranking[2]
+
+    # -------------------------
+    # AI信頼度
+    # -------------------------
+
+    confidence = (
+        50.0
+        + first_probs[main] * 100.0
+    )
+
+    confidence = max(
+        55.0,
+        min(
+            95.0,
+            confidence,
+        ),
+    )
+
+    return {
+        "scores": {
+            i + 1: float(scores[i])
+            for i in range(6)
+        },
+
+        "joint": joint,
+
+        "first_probs": first_probs,
+
+        "ranking": ranking,
+
+        "main": main,
+
+        "counter": counter,
+
+        "hole": hole,
+
+        "confidence": confidence,
+    }
+
+
+def value_candidates(
+    prediction,
+    odds,
+    min_prob=0.01,
+    limit=8,
+):
+    """
+    実オッズを使った期待値候補。
+
+    ただし、
+    AI確率が1.0%未満の超低確率買い目は
+    EVランキングから除外する。
+
+    これにより、
+
+    「AI確率0.5% × 2000倍」
+
+    のような超穴だけが
+    EV上位を独占するのを防ぐ。
+    """
+
+    candidates = []
+
+    joint = prediction["joint"]
+
+    for combo, probability in joint.items():
+
+        odd = odds.get(combo)
+
+        if not odd:
+            continue
+
+        if odd <= 0:
+            continue
+
+        # 低すぎるAI確率はEV候補から除外
+        if probability < min_prob:
+            continue
+
+        # -------------------------
+        # 期待値
+        #
+        # EV = AI確率 × オッズ - 1
+        # -------------------------
+
+        ev = (
+            probability * odd
+            - 1.0
+        )
+
+        if ev <= 0:
+            continue
+
+        # オッズから逆算した市場確率
+        market_probability = (
+            1.0 / odd
+        )
+
+        # AIと市場の確率差
+        edge = (
+            probability
+            - market_probability
+        )
+
+        candidates.append({
+            "combo": combo,
+
+            "prob": probability,
+
+            "odds": odd,
+
+            "ev": ev,
+
+            "market_prob":
+                market_probability,
+
+            "edge": edge,
+        })
+
+    # EVが高い順
+    candidates.sort(
+        key=lambda x: x["ev"],
+        reverse=True,
+    )
+
+    return candidates[:limit]

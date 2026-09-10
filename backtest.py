@@ -1,6 +1,10 @@
 from datetime import timedelta
 
-from ai import predict_race
+from ai import (
+    predict_race,
+    recommend_bets,
+)
+
 from data import (
     VENUES,
     get_race,
@@ -42,11 +46,16 @@ def run_backtest(
     end_date当日は除外し、
     前日から2026-01-01まで遡る。
 
-    1レース600円投資。
-    本命・対抗・穴の3連単1点を購入。
+    新ルール：
 
-    的中した場合は公式3連単払戻を
-    実際に加算する。
+    ・本線100円
+    ・対抗100円
+    ・穴100円
+
+    合計300円/レース。
+
+    3点のうちどれかが
+    的中したかを評価する。
     """
 
     target = int(target)
@@ -71,13 +80,22 @@ def run_backtest(
     main_top3 = 0
     top3_all_top3 = 0
     box_hits = 0
+
+    three_bet_hits = 0
     exact_hits = 0
+
+    main_exact_hits = 0
+    counter_exact_hits = 0
+    hole_exact_hits = 0
 
     while (
         current >= cutoff
         and len(rows) < target
     ):
-        date_str = current.isoformat()
+
+        date_str = (
+            current.isoformat()
+        )
 
         for venue, venue_id in VENUES.items():
 
@@ -93,8 +111,9 @@ def run_backtest(
                     break
 
                 try:
+
                     # -------------------------
-                    # レース情報
+                    # レース
                     # -------------------------
 
                     race = get_race(
@@ -107,7 +126,7 @@ def run_backtest(
                         continue
 
                     # -------------------------
-                    # 実際の結果
+                    # 結果
                     # -------------------------
 
                     result = get_race_result(
@@ -131,12 +150,19 @@ def run_backtest(
                         continue
 
                     # -------------------------
-                    # AI予想
+                    # AI
                     # -------------------------
 
                     prediction = predict_race(
                         race
                     )
+
+                    bets = recommend_bets(
+                        prediction
+                    )
+
+                    if len(bets) < 3:
+                        continue
 
                     main = prediction[
                         "main"
@@ -149,12 +175,6 @@ def run_backtest(
                     hole = prediction[
                         "hole"
                     ]
-
-                    predicted = (
-                        main,
-                        counter,
-                        hole,
-                    )
 
                     ranking = prediction[
                         "ranking"
@@ -169,12 +189,35 @@ def run_backtest(
                     )
 
                     # -------------------------
+                    # 3点
+                    # -------------------------
+
+                    bet_combos = [
+                        bet["combo"]
+                        for bet in bets
+                    ]
+
+                    bet_texts = [
+                        "-".join(
+                            map(
+                                str,
+                                combo,
+                            )
+                        )
+                        for combo in bet_combos
+                    ]
+
+                    # -------------------------
                     # 投資
                     # -------------------------
 
-                    bet = 600
+                    bet_amount = 100 * len(
+                        bet_combos
+                    )
 
-                    investment += bet
+                    investment += (
+                        bet_amount
+                    )
 
                     # -------------------------
                     # 本命1着
@@ -201,7 +244,7 @@ def run_backtest(
                         top3_all_top3 += 1
 
                     # -------------------------
-                    # AI3艇BOX
+                    # 3艇BOX
                     # -------------------------
 
                     box_hit = _box_hit(
@@ -213,23 +256,73 @@ def run_backtest(
                         box_hits += 1
 
                     # -------------------------
+                    # 3点的中
+                    # -------------------------
+
+                    hit_indexes = []
+
+                    for i, combo in enumerate(
+                        bet_combos
+                    ):
+
+                        if combo == actual:
+                            hit_indexes.append(i)
+
+                    three_bet_hit = (
+                        len(hit_indexes) > 0
+                    )
+
+                    if three_bet_hit:
+                        three_bet_hits += 1
+
+                    # -------------------------
+                    # 各買い目の的中
+                    # -------------------------
+
+                    main_exact = (
+                        bet_combos[0]
+                        == actual
+                    )
+
+                    counter_exact = (
+                        bet_combos[1]
+                        == actual
+                    )
+
+                    hole_exact = (
+                        bet_combos[2]
+                        == actual
+                    )
+
+                    if main_exact:
+                        main_exact_hits += 1
+
+                    if counter_exact:
+                        counter_exact_hits += 1
+
+                    if hole_exact:
+                        hole_exact_hits += 1
+
+                    # -------------------------
                     # 完全的中
                     # -------------------------
 
                     exact_hit = (
-                        predicted
-                        == actual
+                        main_exact
+                        or counter_exact
+                        or hole_exact
                     )
 
                     if exact_hit:
                         exact_hits += 1
 
-                        # 実際の払戻
+                        # 3点のうち1点のみ
+                        # 的中する通常ケースを想定
                         if actual_payout > 0:
                             payout += (
-                                actual_payout
-                                / 100
-                                * 100
+                                float(
+                                    actual_payout
+                                )
                             )
 
                     # -------------------------
@@ -241,13 +334,36 @@ def run_backtest(
                             "date": date_str,
                             "venue": venue,
                             "race_no": race_no,
+
                             "main": main,
                             "counter": counter,
                             "hole": hole,
-                            "predicted": predicted,
+
+                            "predicted": (
+                                bet_combos[0]
+                            ),
+
+                            "bets": bet_combos,
+                            "bet_texts": bet_texts,
+
                             "actual": actual,
+
                             "box_hit": box_hit,
+                            "three_bet_hit": (
+                                three_bet_hit
+                            ),
                             "exact_hit": exact_hit,
+
+                            "main_exact": (
+                                main_exact
+                            ),
+                            "counter_exact": (
+                                counter_exact
+                            ),
+                            "hole_exact": (
+                                hole_exact
+                            ),
+
                             "payout": (
                                 actual_payout
                                 if exact_hit
@@ -257,10 +373,11 @@ def run_backtest(
                     )
 
                     # -------------------------
-                    # 進捗
+                    # Progress
                     # -------------------------
 
                     if progress_callback:
+
                         try:
                             progress_callback(
                                 len(rows),
@@ -276,9 +393,9 @@ def run_backtest(
             days=1
         )
 
-    # --------------------------------
+    # =================================
     # 指標
-    # --------------------------------
+    # =================================
 
     count = len(rows)
 
@@ -308,8 +425,32 @@ def run_backtest(
             * 100
         )
 
+        three_bet_hit_rate = (
+            three_bet_hits
+            / count
+            * 100
+        )
+
         exact_hit_rate = (
             exact_hits
+            / count
+            * 100
+        )
+
+        main_exact_rate = (
+            main_exact_hits
+            / count
+            * 100
+        )
+
+        counter_exact_rate = (
+            counter_exact_hits
+            / count
+            * 100
+        )
+
+        hole_exact_rate = (
+            hole_exact_hits
             / count
             * 100
         )
@@ -320,32 +461,66 @@ def run_backtest(
         main_top3_rate = 0.0
         top3_all_top3_rate = 0.0
         box_hit_rate = 0.0
+        three_bet_hit_rate = 0.0
         exact_hit_rate = 0.0
+        main_exact_rate = 0.0
+        counter_exact_rate = 0.0
+        hole_exact_rate = 0.0
 
-    # --------------------------------
+    # =================================
     # 回収率
-    # --------------------------------
+    # =================================
 
     if investment > 0:
+
         recovery = (
             payout
             / investment
             * 100
         )
+
     else:
+
         recovery = 0.0
 
     return {
         "count": count,
+
         "recovery": recovery,
-        "main_win_rate": main_win_rate,
-        "main_top3_rate": main_top3_rate,
-        "top3_all_top3_rate": (
-            top3_all_top3_rate
-        ),
-        "box_hit_rate": box_hit_rate,
-        "exact_hit_rate": exact_hit_rate,
-        "investment": investment,
-        "return": payout,
-        "rows": rows,
-    }
+
+        "main_win_rate":
+            main_win_rate,
+
+        "main_top3_rate":
+            main_top3_rate,
+
+        "top3_all_top3_rate":
+            top3_all_top3_rate,
+
+        "box_hit_rate":
+            box_hit_rate,
+
+        "three_bet_hit_rate":
+            three_bet_hit_rate,
+
+        "exact_hit_rate":
+            exact_hit_rate,
+
+        "main_exact_rate":
+            main_exact_rate,
+
+        "counter_exact_rate":
+            counter_exact_rate,
+
+        "hole_exact_rate":
+            hole_exact_rate,
+
+        "investment":
+            investment,
+
+        "return":
+            payout,
+
+        "rows":
+            rows,
+                    }

@@ -433,6 +433,108 @@ def _select_main_counter(
     )
 
 
+def _venue_profile(stadium_no):
+    """
+    会場別補正。
+    
+    強い会場を大きく優遇するのではなく、
+    「同程度の候補なら少しだけ優先」するための
+    非常に弱い補正。
+    
+    数値は今回の1000レース集計をもとにした実験値。
+    """
+    profiles = {
+        # 3点的中率 上位
+        7: 0.020,   # 蒲郡
+        1: 0.015,   # 桐生
+        20: 0.015,  # 若松
+        22: 0.015,  # 福岡
+        2: 0.015,   # 戸田
+
+        # その他
+        5: 0.010,   # 多摩川
+        11: 0.010,  # びわこ
+        14: 0.010,  # 鳴門
+        13: 0.005,  # 尼崎
+        18: 0.005,  # 宮島
+
+        # 弱かった会場
+        24: -0.015, # 大村
+        9: -0.010,  # 津
+        18: 0.005,  # 徳山は後述の実験では中立寄り
+        16: -0.005, # 児島
+        3: -0.005,  # 江戸川
+    }
+
+    try:
+        stadium_no = int(stadium_no)
+    except Exception:
+        return 0.0
+
+    return float(
+        profiles.get(stadium_no, 0.0)
+    )
+
+
+def _apply_venue_adjustment(
+    ranked,
+    stadium_no,
+):
+    """
+    会場補正はランキングを大きく崩さない。
+
+    raw score が近い候補同士の場合だけ、
+    会場傾向をわずかに反映する。
+    """
+    venue_bonus = _venue_profile(
+        stadium_no
+    )
+
+    if abs(venue_bonus) < 1e-12:
+        return ranked
+
+    adjusted = []
+
+    for item in ranked:
+        combo = item[0]
+        probability = float(item[1])
+        raw_score = float(item[2])
+
+        axis = int(combo[0])
+
+        # 会場補正を全候補へ一律にかけず、
+        # 1着軸側へ少しだけ反映。
+        axis_bonus = venue_bonus
+
+        if axis in (1, 2):
+            axis_bonus *= 0.70
+        elif axis in (3, 4, 5, 6):
+            axis_bonus *= 0.85
+
+        adjusted_score = (
+            raw_score
+            + axis_bonus
+        )
+
+        adjusted.append(
+            (
+                combo,
+                probability,
+                adjusted_score,
+            )
+        )
+
+    adjusted.sort(
+        key=lambda item: (
+            item[2],
+            item[1],
+        ),
+        reverse=True
+    )
+
+    return adjusted
+
+
 def _select_hole(
     ranked,
     main,
@@ -442,10 +544,7 @@ def _select_hole(
     main_combo = main[0]
     counter_combo = counter[0]
 
-    # 今回の実験：
-    # 本線・対抗を除外した全候補を対象にする。
-    # その中から「別軸」を少し優先しつつ、
-    # 元のコンボ順位を大きく崩さない。
+    # 本線・対抗を除外した全候補を対象。
     candidates = [
         item
         for item in ranked
@@ -472,8 +571,6 @@ def _select_hole(
             first_score[alternative_axis]
         )
 
-        # 本線と異なる軸を少し優先。
-        # ただし元のスコア順位を大きく壊さない。
         diversity_bonus = 0.0
 
         if alternative_axis != main_axis:
@@ -503,7 +600,7 @@ def _select_hole(
     return candidate_rows[0][1]
 
 
-def predict(df):
+def predict(df, stadium_no=None):
 
     if (
         not isinstance(
@@ -611,6 +708,14 @@ def predict(df):
         ],
         key=lambda item: item[1],
         reverse=True,
+    )
+
+    # 今回追加した変更はここだけ。
+    # 会場補正を入れても、元のスコアから
+    # 大きく離れた候補を無理に採用しない。
+    ranked = _apply_venue_adjustment(
+        ranked,
+        stadium_no,
     )
 
     main, counter = (
@@ -782,4 +887,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-            }
+    }

@@ -36,7 +36,10 @@ STADIUMS = {
     24: "大村",
 }
 
-STADIUM_BY_NAME = {v: k for k, v in STADIUMS.items()}
+STADIUM_BY_NAME = {
+    v: k
+    for k, v in STADIUMS.items()
+}
 
 
 def _num(value, default=0.0):
@@ -59,12 +62,19 @@ def _int(value, default=0):
 
 def _normalize_racers(racers):
     """
-    API v1のracersを、
-    {1: {...}, 2: {...}, ..., 6: {...}}
+    API v1のracersを
+
+    {
+        1: {...},
+        2: {...},
+        ...
+        6: {...}
+    }
+
     の形に統一する。
 
-    v1はdict形式。
-    念のため旧list形式も受け付ける。
+    欠場などで一部の艇が存在しない場合は、
+    存在する艇だけを返す。
     """
 
     result = {}
@@ -86,7 +96,10 @@ def _normalize_racers(racers):
 
     elif isinstance(racers, list):
 
-        for index, racer in enumerate(racers, start=1):
+        for index, racer in enumerate(
+            racers,
+            start=1
+        ):
 
             if not isinstance(racer, dict):
                 continue
@@ -105,10 +118,13 @@ def _normalize_racers(racers):
 @lru_cache(maxsize=128)
 def get_day_data(day_str):
     """
-    1日分の全国24場データを取得する。
+    1日分の全国24場データを取得。
     """
 
-    clean_date = day_str.replace("-", "")
+    clean_date = day_str.replace(
+        "-",
+        ""
+    )
 
     url = (
         f"{BASE_URL}/"
@@ -133,7 +149,10 @@ def get_day_data(day_str):
             f"API取得失敗: {day_str}\n{e}"
         )
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict
+    ):
 
         raise RuntimeError(
             f"APIデータ形式が不正です: {day_str}"
@@ -151,17 +170,26 @@ def get_day_data(day_str):
     return data
 
 
-def get_race(day, stadium_no, race_no):
+def get_race(
+    day,
+    stadium_no,
+    race_no
+):
     """
     指定日・指定場・指定レースを取得。
     """
 
-    if isinstance(day, date):
+    if isinstance(
+        day,
+        date
+    ):
         day_str = day.isoformat()
     else:
         day_str = str(day)
 
-    data = get_day_data(day_str)
+    data = get_day_data(
+        day_str
+    )
 
     stadiums = (
         data
@@ -190,15 +218,24 @@ def get_races_for_stadium(
 ):
     """
     指定日の指定場について、
-    出走表が6艇揃っているレース番号を返す。
+    3〜6艇の出走情報があるレースを返す。
+
+    通常は6艇。
+    欠場などで5艇以下になった場合も
+    レース選択対象にする。
     """
 
-    if isinstance(day, date):
+    if isinstance(
+        day,
+        date
+    ):
         day_str = day.isoformat()
     else:
         day_str = str(day)
 
-    data = get_day_data(day_str)
+    data = get_day_data(
+        day_str
+    )
 
     stadium = (
         data
@@ -216,14 +253,17 @@ def get_races_for_stadium(
 
     for race_key, race in races.items():
 
-        if not isinstance(race, dict):
+        if not isinstance(
+            race,
+            dict
+        ):
             continue
 
         racers = _normalize_racers(
             race.get("racers")
         )
 
-        if len(racers) == 6:
+        if 3 <= len(racers) <= 6:
 
             race_no = _int(
                 race_key,
@@ -231,22 +271,37 @@ def get_races_for_stadium(
             )
 
             if 1 <= race_no <= 12:
+
                 race_numbers.append(
                     race_no
                 )
 
-    return sorted(race_numbers)
+    return sorted(
+        race_numbers
+    )
 
 
 def race_to_df(race):
     """
     出走表と直前情報をDataFrameへ変換。
 
-    最重要:
-    「艇番」は必ず1〜6のentry_numberを使用する。
+    通常:
+        1,2,3,4,5,6
+
+    欠場など:
+        1,2,3,5,6
+
+    のように、実際に存在する艇だけを返す。
+
+    「boat」は必ず艇番1〜6。
+    選手登録番号・モーター番号・ボート番号を
+    艇番として使用しない。
     """
 
-    if not isinstance(race, dict):
+    if not isinstance(
+        race,
+        dict
+    ):
         return pd.DataFrame()
 
     racers = _normalize_racers(
@@ -263,14 +318,22 @@ def race_to_df(race):
         preview
     )
 
-    if set(racers.keys()) != set(range(1, 7)):
+    active_boats = sorted(
+        racers.keys()
+    )
+
+    # 3艇未満は3連単予想不可
+    if not (
+        3 <= len(active_boats) <= 6
+    ):
         return pd.DataFrame()
 
     rows = []
 
-    for boat in range(1, 7):
+    for boat in active_boats:
 
         racer = racers[boat]
+
         preview_data = preview.get(
             boat,
             {}
@@ -278,10 +341,10 @@ def race_to_df(race):
 
         row = {
 
-            # ここが艇番
+            # 艇番
             "boat": boat,
 
-            # API上の枠番
+            # 枠番
             "entry_number": boat,
 
             # 選手情報
@@ -292,7 +355,6 @@ def race_to_df(race):
                 )
             ),
 
-            # 選手登録番号
             "racer_number": _int(
                 racer.get(
                     "number"
@@ -424,9 +486,7 @@ def race_to_df(race):
                 0
             ),
 
-            # 直前情報
-            # course_numberは「進入コース」であり、
-            # 艇番そのものではない
+            # 進入コース
             "course_number": _int(
                 preview_data.get(
                     "course_number"
@@ -465,16 +525,35 @@ def race_to_df(race):
 
         rows.append(row)
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(
+        rows
+    )
 
-    # 最終安全確認
-    if len(df) != 6:
+    if not (
+        3 <= len(df) <= 6
+    ):
         return pd.DataFrame()
 
-    if set(
-        df["boat"].astype(int)
-    ) != set(range(1, 7)):
+    if len(
+        set(
+            df["boat"].astype(int)
+        )
+    ) != len(df):
+
         return pd.DataFrame()
+
+    # 欠場等で存在しない艇を記録
+    df.attrs[
+        "active_boats"
+    ] = active_boats
+
+    df.attrs[
+        "withdrawn_boats"
+    ] = [
+        boat
+        for boat in range(1, 7)
+        if boat not in active_boats
+    ]
 
     return df
 
@@ -483,29 +562,38 @@ def get_result(race):
     """
     結果を1着-2着-3着の艇番で返す。
 
-    例:
-    (4, 1, 2)
+    通常:
+        (1, 2, 3)
 
-    API v1では
-    result.racers["4"].place_number == 1
-    なら4号艇が1着。
+    欠場艇がある場合:
+        (1, 5, 2)
+
+    のように、実際の着順だけを見る。
+
+    3着まで取得できれば有効。
     """
 
-    if not isinstance(race, dict):
+    if not isinstance(
+        race,
+        dict
+    ):
         return None
 
     result = race.get(
         "result"
     )
 
-    if not isinstance(result, dict):
+    if not isinstance(
+        result,
+        dict
+    ):
         return None
 
     racers = _normalize_racers(
         result.get("racers")
     )
 
-    if len(racers) < 6:
+    if len(racers) < 3:
         return None
 
     finish = []
@@ -523,6 +611,7 @@ def get_result(race):
             1 <= boat <= 6
             and place > 0
         ):
+
             finish.append(
                 (
                     place,
@@ -562,7 +651,10 @@ def get_payout(race):
     3連単払戻を取得。
     """
 
-    if not isinstance(race, dict):
+    if not isinstance(
+        race,
+        dict
+    ):
         return None
 
     payouts = (
@@ -595,11 +687,19 @@ def get_payout(race):
 
         combination = (
             combination
-            .replace("=", "-")
-            .replace(" ", "")
+            .replace(
+                "=",
+                "-"
+            )
+            .replace(
+                " ",
+                ""
+            )
         )
 
-        parts = combination.split("-")
+        parts = combination.split(
+            "-"
+        )
 
         if len(parts) == 3:
 
@@ -623,14 +723,15 @@ def get_all_races(
     """
     1日分の全24場レースを取得。
 
-    戻り値:
-    [
-        (stadium_no, race_no, race),
-        ...
-    ]
+    通常6艇。
+    欠場等で5艇以下になったレースも
+    取得対象にする。
     """
 
-    if isinstance(day, date):
+    if isinstance(
+        day,
+        date
+    ):
         day_str = day.isoformat()
     else:
         day_str = str(day)
@@ -692,7 +793,9 @@ def get_all_races(
                 race.get("racers")
             )
 
-            if len(racers) != 6:
+            if not (
+                3 <= len(racers) <= 6
+            ):
                 continue
 
             if require_result:

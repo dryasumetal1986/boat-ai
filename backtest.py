@@ -20,23 +20,11 @@ def collect_races(
     max_days=120,
     progress=None,
 ):
-    """
-    start_dateから過去へ遡り、
-    結果が確定しているレースをtarget_count件集める。
-
-    全24場を対象にする。
-
-    progress:
-        app.pyから進捗表示用の関数を受け取る。
-    """
-
     found = []
-
     current_day = start_date
 
     for day_index in range(max_days):
 
-        # 進捗表示
         if progress is not None:
             try:
                 progress(
@@ -49,12 +37,10 @@ def collect_races(
                 pass
 
         try:
-
             races = get_all_races(
                 current_day,
                 require_result=True,
             )
-
         except Exception:
             current_day -= timedelta(days=1)
             continue
@@ -62,16 +48,13 @@ def collect_races(
         for stadium_no, race_no, race in races:
 
             try:
-
                 actual = get_result(race)
-
             except Exception:
                 actual = None
 
             if actual is None:
                 continue
 
-            # 念のため結果が1〜6号艇だけか確認
             if len(actual) != 3:
                 continue
 
@@ -107,21 +90,8 @@ def run_backtest(
     target_count,
     progress=None,
 ):
-    """
-    AI予想のバックテスト。
-
-    現在のAIが出す
-    本線・対抗・穴の3点を、
-    そのまま過去レースの結果と比較する。
-
-    重要:
-    予想も結果も必ず1〜6号艇で比較する。
-    """
-
     try:
-        target_count = int(
-            target_count
-        )
+        target_count = int(target_count)
     except Exception:
         target_count = 100
 
@@ -129,10 +99,6 @@ def run_backtest(
         1,
         target_count
     )
-
-    # ------------------------------------------------
-    # 過去レース収集
-    # ------------------------------------------------
 
     races = collect_races(
         start_date,
@@ -143,7 +109,6 @@ def run_backtest(
 
     rows = []
 
-    # 的中数
     hits = {
         "本線": 0,
         "対抗": 0,
@@ -151,17 +116,32 @@ def run_backtest(
         "3点": 0,
     }
 
-    # 軸成績
     axis_first = 0
     axis_top3 = 0
 
-    # 投資・払戻
     total_bet = 0
     total_payout = 0
 
-    # ------------------------------------------------
-    # 各レースを検証
-    # ------------------------------------------------
+    # =====================================================
+    # 会場別集計
+    # =====================================================
+
+    venue_stats = {}
+
+    for stadium_no in STADIUMS:
+        venue_stats[stadium_no] = {
+            "検証数": 0,
+            "本線": 0,
+            "対抗": 0,
+            "穴": 0,
+            "3点": 0,
+            "投資": 0,
+            "払戻": 0,
+        }
+
+    # =====================================================
+    # バックテスト
+    # =====================================================
 
     for (
         day,
@@ -173,35 +153,19 @@ def run_backtest(
 
         try:
 
-            # 出走表をDataFrame化
-            df = race_to_df(
-                race
-            )
+            df = race_to_df(race)
 
-            if df.empty:
+            if df.empty or len(df) != 6:
                 continue
 
-            if len(df) != 6:
-                continue
-
-            # 艇番が1〜6か確認
             boats = set(
-                df["boat"]
-                .astype(int)
+                df["boat"].astype(int)
             )
 
-            if boats != {
-                1, 2, 3, 4, 5, 6
-            }:
+            if boats != {1, 2, 3, 4, 5, 6}:
                 continue
 
-            # ------------------------------------------------
-            # 現在のAIで予想
-            # ------------------------------------------------
-
-            pred = predict(
-                df
-            )
+            pred = predict(df)
 
             tickets = {}
 
@@ -216,7 +180,6 @@ def run_backtest(
                     for x in ticket["combo"]
                 )
 
-                # 予想の最終安全確認
                 if len(combo) != 3:
                     continue
 
@@ -231,8 +194,6 @@ def run_backtest(
 
                 tickets[label] = combo
 
-            # 3点すべて揃っていなければ
-            # このレースは検証対象から除外
             if not all(
                 label in tickets
                 for label in [
@@ -242,10 +203,6 @@ def run_backtest(
                 ]
             ):
                 continue
-
-            # ------------------------------------------------
-            # 実結果も1〜6号艇で確認
-            # ------------------------------------------------
 
             actual = tuple(
                 int(x)
@@ -264,9 +221,26 @@ def run_backtest(
             ):
                 continue
 
-            # ------------------------------------------------
+            # -------------------------------------------------
+            # 会場別の検証数
+            # -------------------------------------------------
+
+            if stadium_no not in venue_stats:
+                venue_stats[stadium_no] = {
+                    "検証数": 0,
+                    "本線": 0,
+                    "対抗": 0,
+                    "穴": 0,
+                    "3点": 0,
+                    "投資": 0,
+                    "払戻": 0,
+                }
+
+            venue_stats[stadium_no]["検証数"] += 1
+
+            # -------------------------------------------------
             # 的中判定
-            # ------------------------------------------------
+            # -------------------------------------------------
 
             hit_labels = []
 
@@ -280,17 +254,23 @@ def run_backtest(
 
                     hits[label] += 1
 
-                    hit_labels.append(
-                        label
-                    )
+                    venue_stats[
+                        stadium_no
+                    ][label] += 1
 
-            # 3点のどれかが当たった
+                    hit_labels.append(label)
+
             if len(hit_labels) > 0:
+
                 hits["3点"] += 1
 
-            # ------------------------------------------------
-            # 軸成績
-            # ------------------------------------------------
+                venue_stats[
+                    stadium_no
+                ]["3点"] += 1
+
+            # -------------------------------------------------
+            # 軸判定
+            # -------------------------------------------------
 
             axis = int(
                 pred["axis"]
@@ -302,16 +282,14 @@ def run_backtest(
             if axis in actual:
                 axis_top3 += 1
 
-            # ------------------------------------------------
+            # -------------------------------------------------
             # 払戻
-            # ------------------------------------------------
+            # -------------------------------------------------
 
             payout = None
 
             try:
-                payout = get_payout(
-                    race
-                )
+                payout = get_payout(race)
             except Exception:
                 payout = None
 
@@ -328,24 +306,15 @@ def run_backtest(
 
                 payout_combination = (
                     payout_combination
-                    .replace(
-                        "=",
-                        "-"
-                    )
-                    .replace(
-                        " ",
-                        ""
-                    )
+                    .replace("=", "-")
+                    .replace(" ", "")
                 )
 
                 actual_text = combo_text(
                     actual
                 )
 
-                if (
-                    payout_combination
-                    == actual_text
-                ):
+                if payout_combination == actual_text:
 
                     try:
                         payout_amount = int(
@@ -357,72 +326,71 @@ def run_backtest(
                     except Exception:
                         payout_amount = 0
 
-            # 1レース3点購入
+            # 1レース300円
             bet_amount = 300
 
             total_bet += bet_amount
 
-            # 3点のいずれかに的中していた場合、
-            # 実際の払戻を加算
-            if len(hit_labels) > 0:
-                total_payout += payout_amount
+            venue_stats[
+                stadium_no
+            ]["投資"] += bet_amount
 
-            # ------------------------------------------------
-            # 表示用行
-            # ------------------------------------------------
+            if len(hit_labels) > 0:
+
+                total_payout += (
+                    payout_amount
+                )
+
+                venue_stats[
+                    stadium_no
+                ]["払戻"] += (
+                    payout_amount
+                )
+
+            # -------------------------------------------------
+            # 詳細行
+            # -------------------------------------------------
 
             rows.append(
                 {
                     "日付": day.strftime(
                         "%m/%d"
                     ),
-
                     "会場": STADIUMS.get(
                         stadium_no,
                         str(stadium_no)
                     ),
-
-                    "R": int(
-                        race_no
-                    ),
-
+                    "R": int(race_no),
                     "本線": combo_text(
                         tickets["本線"]
                     ),
-
                     "対抗": combo_text(
                         tickets["対抗"]
                     ),
-
                     "穴": combo_text(
                         tickets["穴"]
                     ),
-
                     "結果": combo_text(
                         actual
                     ),
-
                     "本線的中": (
                         "○"
                         if tickets["本線"]
                         == actual
                         else ""
                     ),
-
                     "対抗的中": (
                         "○"
                         if tickets["対抗"]
                         == actual
                         else ""
                     ),
-
                     "穴的中": (
                         "○"
                         if tickets["穴"]
                         == actual
                         else ""
                     ),
-
                     "払戻": int(
                         payout_amount
                     ),
@@ -430,13 +398,11 @@ def run_backtest(
             )
 
         except Exception:
-            # 1レースの不具合で
-            # バックテスト全体を止めない
             continue
 
-    # ------------------------------------------------
-    # 集計
-    # ------------------------------------------------
+    # =====================================================
+    # 全体集計
+    # =====================================================
 
     n = len(rows)
 
@@ -496,59 +462,149 @@ def run_backtest(
         )
 
     else:
-
         recovery_rate = 0.0
 
-    # ------------------------------------------------
-    # 最終結果
-    # ------------------------------------------------
+    # =====================================================
+    # 会場別集計をDataFrame用の行へ変換
+    # =====================================================
+
+    venue_rows = []
+
+    for stadium_no in sorted(
+        venue_stats.keys()
+    ):
+
+        stats = venue_stats[
+            stadium_no
+        ]
+
+        venue_count = int(
+            stats["検証数"]
+        )
+
+        if venue_count <= 0:
+            continue
+
+        venue_three_rate = (
+            stats["3点"]
+            / venue_count
+            * 100
+        )
+
+        venue_main_rate = (
+            stats["本線"]
+            / venue_count
+            * 100
+        )
+
+        venue_counter_rate = (
+            stats["対抗"]
+            / venue_count
+            * 100
+        )
+
+        venue_hole_rate = (
+            stats["穴"]
+            / venue_count
+            * 100
+        )
+
+        venue_investment = int(
+            stats["投資"]
+        )
+
+        venue_payout = int(
+            stats["払戻"]
+        )
+
+        if venue_investment > 0:
+
+            venue_recovery = (
+                venue_payout
+                / venue_investment
+                * 100
+            )
+
+        else:
+            venue_recovery = 0.0
+
+        venue_rows.append(
+            {
+                "会場": STADIUMS.get(
+                    stadium_no,
+                    str(stadium_no)
+                ),
+                "検証数": venue_count,
+                "3点的中率": round(
+                    venue_three_rate,
+                    2
+                ),
+                "本線": round(
+                    venue_main_rate,
+                    2
+                ),
+                "対抗": round(
+                    venue_counter_rate,
+                    2
+                ),
+                "穴": round(
+                    venue_hole_rate,
+                    2
+                ),
+                "投資": venue_investment,
+                "払戻": venue_payout,
+                "回収率": round(
+                    venue_recovery,
+                    2
+                ),
+            }
+        )
+
+    # 3点的中率が高い順
+    venue_rows.sort(
+        key=lambda row: (
+            row["3点的中率"],
+            row["検証数"],
+        ),
+        reverse=True,
+    )
 
     summary = {
-
         "検証数": n,
-
         "3点的中率": round(
             three_hit_rate,
             2
         ),
-
         "本線的中率": round(
             main_hit_rate,
             2
         ),
-
         "対抗的中率": round(
             counter_hit_rate,
             2
         ),
-
         "穴的中率": round(
             hole_hit_rate,
             2
         ),
-
         "軸1着率": round(
             axis_first_rate,
             2
         ),
-
         "軸3着内率": round(
             axis_top3_rate,
             2
         ),
-
-        "投資": int(
-            total_bet
-        ),
-
-        "払戻": int(
-            total_payout
-        ),
-
+        "投資": int(total_bet),
+        "払戻": int(total_payout),
         "回収率": round(
             recovery_rate,
             2
         ),
     }
 
-    return summary, rows
+    return (
+        summary,
+        rows,
+        venue_rows,
+    )

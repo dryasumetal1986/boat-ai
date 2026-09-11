@@ -125,9 +125,6 @@ def _prepare(df):
         + 0.10 * x["st"]
     )
 
-    # 今回の実験：
-    # 3着予測で展示タイムを2%増やし、
-    # スタートタイミングを2%減らす
     x["third_score"] = (
         0.18 * x["top3_n"]
         + 0.14 * x["top3_l"]
@@ -135,8 +132,8 @@ def _prepare(df):
         + 0.12 * x["boat3"]
         + 0.12 * x["top2_n"]
         + 0.10 * x["top2_l"]
-        + 0.08 * x["st"]
-        + 0.10 * x["exh"]
+        + 0.10 * x["st"]
+        + 0.08 * x["exh"]
     )
 
     return x
@@ -496,14 +493,18 @@ def _select_hole(
 
         best = candidates[0]
 
+        # 今回の実験：
+        # 穴の軸候補について、
+        # 軸そのものの強さを少し下げ、
+        # 3連単としての組み合わせ強度を少し重くする。
         candidate_score = (
-            0.70
+            0.65
             * float(
                 first_score[
                     alternative_axis
                 ]
             )
-            + 0.30
+            + 0.35
             * float(best[2])
         )
 
@@ -823,4 +824,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+                    }

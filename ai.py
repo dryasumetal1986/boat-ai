@@ -102,6 +102,7 @@ def _prepare(df):
     )
 
     # 12.4%ベースライン
+    # 全国勝率の2%分を展示タイムへ移した構成
     x["first_score"] = (
         0.22 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -378,6 +379,23 @@ def _select_main_counter(
 
     main_candidate = adjusted[0]
 
+    # ==========================================================
+    # 今回の実験
+    #
+    # 本線と対抗の役割分担を少し強める。
+    #
+    # 本線と
+    #   ・2着艇が同じ
+    #   ・3着艇が同じ
+    #
+    # という対抗候補に軽いペナルティを入れる。
+    #
+    # 強い候補を大きく捨てないよう、
+    # ペナルティは小さく設定。
+    #
+    # それ以外のスコア計算は12.4%ベースラインと同じ。
+    # ==========================================================
+
     counter_candidates = [
         item
         for item in adjusted
@@ -391,8 +409,32 @@ def _select_main_counter(
             same_axis[1]
         )
 
-    counter_candidate = (
-        counter_candidates[0]
+    main_combo = main_candidate["combo"]
+
+    def counter_key(item):
+
+        combo = item["combo"]
+
+        score = float(
+            item["adjusted_score"]
+        )
+
+        # 本線と2着艇が同じ
+        if combo[1] == main_combo[1]:
+            score -= 0.012
+
+        # 本線と3着艇が同じ
+        if combo[2] == main_combo[2]:
+            score -= 0.006
+
+        return (
+            score,
+            float(item["raw_score"])
+        )
+
+    counter_candidate = max(
+        counter_candidates,
+        key=counter_key
     )
 
     main = (
@@ -493,18 +535,14 @@ def _select_hole(
 
         best = candidates[0]
 
-        # 今回の実験：
-        # 穴の軸候補について、
-        # 軸そのものの強さを少し下げ、
-        # 3連単としての組み合わせ強度を少し重くする。
         candidate_score = (
-            0.65
+            0.70
             * float(
                 first_score[
                     alternative_axis
                 ]
             )
-            + 0.35
+            + 0.30
             * float(best[2])
         )
 
@@ -824,4 +862,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-                    }
+            }

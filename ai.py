@@ -101,6 +101,7 @@ def _prepare(df):
         1.0
     )
 
+    # 全国勝率の2%分を展示タイムへ移す
     x["first_score"] = (
         0.22 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -196,7 +197,6 @@ def _ordering_bonus(
     third_boat,
     second_score,
     third_score,
-    exh,
 ):
     second_strength = float(
         second_score[second_boat]
@@ -250,31 +250,9 @@ def _ordering_bonus(
         )
     )
 
-    # =====================================================
-    # 今回の変更はここだけ
-    #
-    # 2着候補と3着候補の展示タイム差を
-    # 「並び決定」にだけ微量反映。
-    #
-    # exh は高いほど展示タイムが良い。
-    # =====================================================
-    exhibition_gap = (
-        float(exh[second_boat])
-        - float(exh[third_boat])
-    )
-
-    exhibition_gap = float(
-        np.clip(
-            exhibition_gap,
-            -0.30,
-            0.30
-        )
-    )
-
     return (
         0.045 * strength_gap
-        + 0.025 * role
-        + 0.010 * exhibition_gap
+        + 0.035 * role
     )
 
 
@@ -283,7 +261,6 @@ def _select_main_counter(
     first_score,
     second_score,
     third_score,
-    exh,
 ):
     if not ranked:
         raise ValueError(
@@ -375,7 +352,6 @@ def _select_main_counter(
             third_boat,
             second_score,
             third_score,
-            exh,
         )
 
         adjusted_score = (
@@ -620,13 +596,6 @@ def predict(df):
         )
     )
 
-    exh = dict(
-        zip(
-            x["boat"].astype(int),
-            x["exh"].astype(float),
-        )
-    )
-
     combos = []
 
     for a, b, c in itertools.permutations(
@@ -688,7 +657,6 @@ def predict(df):
             first_score,
             second_score,
             third_score,
-            exh,
         )
     )
 
@@ -852,4 +820,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

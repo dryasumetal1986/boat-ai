@@ -101,7 +101,7 @@ def _prepare(df):
         1.0
     )
 
-    # 全国勝率の2%分を展示タイムへ移した12.4%ベースライン
+    # 12.4%ベースライン
     x["first_score"] = (
         0.22 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -125,6 +125,9 @@ def _prepare(df):
         + 0.10 * x["st"]
     )
 
+    # 今回の実験：
+    # 3着予測で展示タイムを2%増やし、
+    # スタートタイミングを2%減らす
     x["third_score"] = (
         0.18 * x["top3_n"]
         + 0.14 * x["top3_l"]
@@ -132,8 +135,8 @@ def _prepare(df):
         + 0.12 * x["boat3"]
         + 0.12 * x["top2_n"]
         + 0.10 * x["top2_l"]
-        + 0.10 * x["st"]
-        + 0.08 * x["exh"]
+        + 0.08 * x["st"]
+        + 0.10 * x["exh"]
     )
 
     return x
@@ -250,10 +253,8 @@ def _ordering_bonus(
         )
     )
 
-    # 今回の実験：
-    # strength_gap 0.045 → 0.040
     return (
-        0.040 * strength_gap
+        0.045 * strength_gap
         + 0.025 * role
     )
 
@@ -822,4 +823,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-                  }
+        }

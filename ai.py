@@ -101,7 +101,7 @@ def _prepare(df):
         1.0
     )
 
-    # 全国勝率の2%分を展示タイムへ移す
+    # 全国勝率の2%分を展示タイムへ移した12.4%ベースライン
     x["first_score"] = (
         0.22 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -250,8 +250,10 @@ def _ordering_bonus(
         )
     )
 
+    # 今回の実験：
+    # strength_gap 0.045 → 0.040
     return (
-        0.050 * strength_gap
+        0.040 * strength_gap
         + 0.025 * role
     )
 
@@ -820,4 +822,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-            }
+                  }

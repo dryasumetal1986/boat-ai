@@ -339,10 +339,6 @@ def _select_main_counter(
             candidate_main
         )
 
-    # 今回の実験：
-    # 同一軸に固める候補を少し限定し、
-    # 「生スコア順位」と「2着・3着の役割」の
-    # バランスが良い組み合わせを選ぶ。
     pool = same_axis[:10]
 
     adjusted = []
@@ -380,10 +376,8 @@ def _select_main_counter(
         reverse=True
     )
 
-    # 本線は調整後1位
     main_candidate = adjusted[0]
 
-    # 対抗は本線と異なる組み合わせの中から選ぶ
     counter_candidates = [
         item
         for item in adjusted
@@ -397,27 +391,9 @@ def _select_main_counter(
             same_axis[1]
         )
 
-    # 今回は「本線と同じ2着艇」を
-    # 対抗として優先しすぎない。
-    main_second = int(
-        main_candidate["combo"][1]
+    counter_candidate = (
+        counter_candidates[0]
     )
-
-    diverse_candidates = [
-        item
-        for item in counter_candidates
-        if int(item["combo"][1])
-        != main_second
-    ]
-
-    if diverse_candidates:
-        counter_candidate = (
-            diverse_candidates[0]
-        )
-    else:
-        counter_candidate = (
-            counter_candidates[0]
-        )
 
     main = (
         main_candidate["combo"],
@@ -466,101 +442,63 @@ def _select_hole(
     main_combo = main[0]
     counter_combo = counter[0]
 
+    # 今回の実験：
+    # 本線・対抗を除外した全候補を対象にする。
+    # その中から「別軸」を少し優先しつつ、
+    # 元のコンボ順位を大きく崩さない。
+    candidates = [
+        item
+        for item in ranked
+        if item[0] != main_combo
+        and item[0] != counter_combo
+    ]
+
+    if not candidates:
+        return ranked[1]
+
     main_axis = int(
         main_combo[0]
     )
 
-    non_axis_boats = [
-        boat
-        for boat in BOATS
-        if boat != main_axis
-    ]
-
-    ranked_first = sorted(
-        non_axis_boats,
-        key=lambda boat: first_score[boat],
-        reverse=True,
-    )
-
-    if (
-        1 != main_axis
-        and 1 not in ranked_first
-        and ranked_first
-    ):
-        top_score = float(
-            first_score[
-                ranked_first[0]
-            ]
-        )
-
-        if (
-            float(first_score[1])
-            >= top_score - 0.08
-        ):
-            ranked_first.append(1)
-
     candidate_rows = []
 
-    for alternative_axis in ranked_first[:4]:
+    for item in candidates:
 
-        candidates = [
-            item
-            for item in ranked
-            if int(item[0][0])
-            == int(alternative_axis)
-            and item[0] != main_combo
-            and item[0] != counter_combo
-        ]
+        combo = item[0]
+        raw_score = float(item[2])
+        alternative_axis = int(combo[0])
 
-        if not candidates:
-            continue
+        axis_score = float(
+            first_score[alternative_axis]
+        )
 
-        best = candidates[0]
+        # 本線と異なる軸を少し優先。
+        # ただし元のスコア順位を大きく壊さない。
+        diversity_bonus = 0.0
 
-        candidate_score = (
-            0.70
-            * float(
-                first_score[
-                    alternative_axis
-                ]
-            )
-            + 0.30
-            * float(best[2])
+        if alternative_axis != main_axis:
+            diversity_bonus = 0.025
+
+        hole_score = (
+            raw_score
+            + diversity_bonus
+            + 0.10 * axis_score
         )
 
         candidate_rows.append(
             (
-                candidate_score,
-                best,
+                float(hole_score),
+                item,
             )
         )
 
-    if not candidate_rows:
-
-        fallback = [
-            item
-            for item in ranked
-            if item[0] != main_combo
-            and item[0] != counter_combo
-        ]
-
-        if fallback:
-            return fallback[0]
-
-        return ranked[1]
-
     candidate_rows.sort(
-        key=lambda item: item[0],
+        key=lambda item: (
+            item[0],
+            float(item[1][2]),
+        ),
         reverse=True
     )
-
-    for _, candidate in candidate_rows:
-
-        if (
-            candidate[0] != main_combo
-            and candidate[0] != counter_combo
-        ):
-            return candidate
 
     return candidate_rows[0][1]
 
@@ -844,4 +782,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-                }
+            }

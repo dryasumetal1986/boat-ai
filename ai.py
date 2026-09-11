@@ -101,7 +101,7 @@ def _prepare(df):
         1.0
     )
 
-    # 12.4%ベースに戻す
+    # 12.4%ベース
     x["first_score"] = (
         0.22 * x["win_n"]
         + 0.13 * x["win_l"]
@@ -175,13 +175,10 @@ def _combo_score(
     second_score,
     third_score,
 ):
-    # 今回の実験：
-    # 2着の重みを0.72→0.70
-    # 3着の重みを0.58→0.60
     score = (
         1.00 * first_score[a]
-        + 0.70 * second_score[b]
-        + 0.60 * third_score[c]
+        + 0.72 * second_score[b]
+        + 0.58 * third_score[c]
     )
 
     if a == 1:
@@ -342,6 +339,10 @@ def _select_main_counter(
             candidate_main
         )
 
+    # 今回の実験：
+    # 同一軸に固める候補を少し限定し、
+    # 「生スコア順位」と「2着・3着の役割」の
+    # バランスが良い組み合わせを選ぶ。
     pool = same_axis[:10]
 
     adjusted = []
@@ -379,8 +380,10 @@ def _select_main_counter(
         reverse=True
     )
 
+    # 本線は調整後1位
     main_candidate = adjusted[0]
 
+    # 対抗は本線と異なる組み合わせの中から選ぶ
     counter_candidates = [
         item
         for item in adjusted
@@ -394,9 +397,27 @@ def _select_main_counter(
             same_axis[1]
         )
 
-    counter_candidate = (
-        counter_candidates[0]
+    # 今回は「本線と同じ2着艇」を
+    # 対抗として優先しすぎない。
+    main_second = int(
+        main_candidate["combo"][1]
     )
+
+    diverse_candidates = [
+        item
+        for item in counter_candidates
+        if int(item["combo"][1])
+        != main_second
+    ]
+
+    if diverse_candidates:
+        counter_candidate = (
+            diverse_candidates[0]
+        )
+    else:
+        counter_candidate = (
+            counter_candidates[0]
+        )
 
     main = (
         main_candidate["combo"],

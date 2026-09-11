@@ -1,4 +1,4 @@
-import json
+import time
 from functools import lru_cache
 from datetime import date
 
@@ -6,8 +6,20 @@ import requests
 import pandas as pd
 
 
+# =========================================================
+# API設定
+# =========================================================
+
 BASE_URL = "https://boatraceopenapi.github.io/api/v1"
 
+REQUEST_TIMEOUT = 20
+REQUEST_RETRY_COUNT = 3
+REQUEST_RETRY_WAIT = 1.0
+
+
+# =========================================================
+# 会場
+# =========================================================
 
 STADIUMS = {
     1: "桐生",
@@ -42,11 +54,22 @@ STADIUM_BY_NAME = {
 }
 
 
+# =========================================================
+# 数値変換
+# =========================================================
+
 def _num(value, default=0.0):
     try:
         if value is None or value == "":
             return default
-        return float(value)
+
+        value = float(value)
+
+        if pd.isna(value):
+            return default
+
+        return value
+
     except (TypeError, ValueError):
         return default
 
@@ -55,29 +78,41 @@ def _int(value, default=0):
     try:
         if value is None or value == "":
             return default
+
         return int(float(value))
+
     except (TypeError, ValueError):
         return default
 
 
+# =========================================================
+# 日付
+# =========================================================
+
+def _day_string(day):
+    if isinstance(day, date):
+        return day.isoformat()
+
+    return str(day)
+
+
+# =========================================================
+# racers正規化
+# =========================================================
+
 def _normalize_racers(racers):
-    """
-    API v1のracersを
-
-    {
-        1: {...},
-        2: {...},
-        ...
-        6: {...}
-    }
-
-    の形に統一する。
-
-    欠場などで一部の艇が存在しない場合は、
-    存在する艇だけを返す。
-    """
 
     result = {}
+
+    # -----------------------------------------------------
+    # API本来の形式
+    #
+    # {
+    #   "1": {...},
+    #   "2": {...},
+    #   ...
+    # }
+    # -----------------------------------------------------
 
     if isinstance(racers, dict):
 
@@ -87,14 +122,29 @@ def _normalize_racers(racers):
                 continue
 
             boat = _int(
-                racer.get("entry_number"),
-                _int(key, 0)
+                racer.get(
+                    "entry_number"
+                ),
+                _int(
+                    key,
+                    0
+                )
             )
 
-            if 1 <= boat <= 6:
-                result[boat] = racer
+            if not (
+                1 <= boat <= 6
+            ):
+                continue
 
-    elif isinstance(racers, list):
+            result[boat] = racer
+
+        return result
+
+    # -----------------------------------------------------
+    # 念のためlistにも対応
+    # -----------------------------------------------------
+
+    if isinstance(racers, list):
 
         for index, racer in enumerate(
             racers,
@@ -105,26 +155,38 @@ def _normalize_racers(racers):
                 continue
 
             boat = _int(
-                racer.get("entry_number"),
+                racer.get(
+                    "entry_number"
+                ),
                 index
             )
 
-            if 1 <= boat <= 6:
-                result[boat] = racer
+            if not (
+                1 <= boat <= 6
+            ):
+                continue
+
+            result[boat] = racer
 
     return result
 
 
-@lru_cache(maxsize=128)
-def get_day_data(day_str):
-    """
-    1日分の全国24場データを取得。
-    """
+# =========================================================
+# API取得
+# =========================================================
 
-    clean_date = day_str.replace(
-        "-",
-        ""
+def _request_day_data(day_str):
+
+    clean_date = (
+        day_str
+        .replace("-", "")
+        .replace("/", "")
     )
+
+    if len(clean_date) != 8:
+        raise RuntimeError(
+            f"日付形式が不正です: {day_str}"
+        )
 
     url = (
         f"{BASE_URL}/"
@@ -132,60 +194,124 @@ def get_day_data(day_str):
         f"{clean_date}.json"
     )
 
+    last_error = None
+
+    for attempt in range(
+        REQUEST_RETRY_COUNT
+    ):
+
+        try:
+
+            response = requests.get(
+                url,
+                timeout=REQUEST_TIMEOUT,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 "
+                        "(compatible; "
+                        "YacchanBoatAI/1.0)"
+                    ),
+                    "Accept": (
+                        "application/json,"
+                        "text/plain,*/*"
+                    ),
+                },
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if not isinstance(
+                data,
+                dict
+            ):
+                raise RuntimeError(
+                    "APIレスポンスがJSONオブジェクトではありません"
+                )
+
+            programs = data.get(
+                "programs"
+            )
+
+            if not isinstance(
+                programs,
+                dict
+            ):
+                raise RuntimeError(
+                    "APIレスポンスにprogramsがありません"
+                )
+
+            stadiums = programs.get(
+                "stadiums"
+            )
+
+            if not isinstance(
+                stadiums,
+                dict
+            ):
+                raise RuntimeError(
+                    "APIレスポンスにprograms.stadiumsがありません"
+                )
+
+            return data
+
+        except Exception as e:
+
+            last_error = e
+
+            if attempt < (
+                REQUEST_RETRY_COUNT - 1
+            ):
+                time.sleep(
+                    REQUEST_RETRY_WAIT
+                )
+
+    raise RuntimeError(
+        f"API取得失敗: {day_str}\n"
+        f"URL: {url}\n"
+        f"最後のエラー: {last_error}"
+    )
+
+
+# =========================================================
+# 1日分データ
+# =========================================================
+
+@lru_cache(maxsize=128)
+def get_day_data(day_str):
+
+    return _request_day_data(
+        day_str
+    )
+
+
+# =========================================================
+# キャッシュクリア
+# =========================================================
+
+def clear_cache():
+
     try:
+        get_day_data.cache_clear()
 
-        response = requests.get(
-            url,
-            timeout=15
-        )
+    except Exception:
+        pass
 
-        response.raise_for_status()
 
-        data = response.json()
-
-    except Exception as e:
-
-        raise RuntimeError(
-            f"API取得失敗: {day_str}\n{e}"
-        )
-
-    if not isinstance(
-        data,
-        dict
-    ):
-
-        raise RuntimeError(
-            f"APIデータ形式が不正です: {day_str}"
-        )
-
-    if not isinstance(
-        data.get("programs"),
-        dict
-    ):
-
-        raise RuntimeError(
-            f"programsデータがありません: {day_str}"
-        )
-
-    return data
-
+# =========================================================
+# レース取得
+# =========================================================
 
 def get_race(
     day,
     stadium_no,
     race_no
 ):
-    """
-    指定日・指定場・指定レースを取得。
-    """
 
-    if isinstance(
-        day,
-        date
-    ):
-        day_str = day.isoformat()
-    else:
-        day_str = str(day)
+    day_str = _day_string(
+        day
+    )
 
     data = get_day_data(
         day_str
@@ -198,40 +324,48 @@ def get_race(
     )
 
     stadium = stadiums.get(
-        str(int(stadium_no)),
+        str(
+            int(stadium_no)
+        ),
         {}
     )
+
+    if not isinstance(
+        stadium,
+        dict
+    ):
+        return None
 
     races = stadium.get(
         "races",
         {}
     )
 
+    if not isinstance(
+        races,
+        dict
+    ):
+        return None
+
     return races.get(
-        str(int(race_no))
+        str(
+            int(race_no)
+        )
     )
 
+
+# =========================================================
+# 会場内レース番号
+# =========================================================
 
 def get_races_for_stadium(
     day,
     stadium_no
 ):
-    """
-    指定日の指定場について、
-    3〜6艇の出走情報があるレースを返す。
 
-    通常は6艇。
-    欠場などで5艇以下になった場合も
-    レース選択対象にする。
-    """
-
-    if isinstance(
-        day,
-        date
-    ):
-        day_str = day.isoformat()
-    else:
-        day_str = str(day)
+    day_str = _day_string(
+        day
+    )
 
     data = get_day_data(
         day_str
@@ -241,13 +375,30 @@ def get_races_for_stadium(
         data
         .get("programs", {})
         .get("stadiums", {})
-        .get(str(int(stadium_no)), {})
+        .get(
+            str(
+                int(stadium_no)
+            ),
+            {}
+        )
     )
+
+    if not isinstance(
+        stadium,
+        dict
+    ):
+        return []
 
     races = stadium.get(
         "races",
         {}
     )
+
+    if not isinstance(
+        races,
+        dict
+    ):
+        return []
 
     race_numbers = []
 
@@ -260,43 +411,36 @@ def get_races_for_stadium(
             continue
 
         racers = _normalize_racers(
-            race.get("racers")
+            race.get(
+                "racers"
+            )
         )
 
-        if 3 <= len(racers) <= 6:
+        if not (
+            3 <= len(racers) <= 6
+        ):
+            continue
 
-            race_no = _int(
-                race_key,
-                0
+        race_no = _int(
+            race_key,
+            0
+        )
+
+        if 1 <= race_no <= 12:
+            race_numbers.append(
+                race_no
             )
 
-            if 1 <= race_no <= 12:
-
-                race_numbers.append(
-                    race_no
-                )
-
     return sorted(
-        race_numbers
+        set(race_numbers)
     )
 
 
+# =========================================================
+# レース → DataFrame
+# =========================================================
+
 def race_to_df(race):
-    """
-    出走表と直前情報をDataFrameへ変換。
-
-    通常:
-        1,2,3,4,5,6
-
-    欠場など:
-        1,2,3,5,6
-
-    のように、実際に存在する艇だけを返す。
-
-    「boat」は必ず艇番1〜6。
-    選手登録番号・モーター番号・ボート番号を
-    艇番として使用しない。
-    """
 
     if not isinstance(
         race,
@@ -305,24 +449,32 @@ def race_to_df(race):
         return pd.DataFrame()
 
     racers = _normalize_racers(
-        race.get("racers")
+        race.get(
+            "racers"
+        )
     )
 
-    preview = (
-        race
-        .get("preview", {})
-        .get("racers", {})
+    preview_root = race.get(
+        "preview",
+        {}
     )
+
+    if not isinstance(
+        preview_root,
+        dict
+    ):
+        preview_root = {}
 
     preview = _normalize_racers(
-        preview
+        preview_root.get(
+            "racers"
+        )
     )
 
     active_boats = sorted(
         racers.keys()
     )
 
-    # 3艇未満は3連単予想不可
     if not (
         3 <= len(active_boats) <= 6
     ):
@@ -332,22 +484,33 @@ def race_to_df(race):
 
     for boat in active_boats:
 
-        racer = racers[boat]
+        racer = racers.get(
+            boat,
+            {}
+        )
+
+        if not isinstance(
+            racer,
+            dict
+        ):
+            continue
 
         preview_data = preview.get(
             boat,
             {}
         )
 
-        row = {
+        if not isinstance(
+            preview_data,
+            dict
+        ):
+            preview_data = {}
 
-            # 艇番
+        row = {
             "boat": boat,
 
-            # 枠番
             "entry_number": boat,
 
-            # 選手情報
             "name": str(
                 racer.get(
                     "name",
@@ -376,7 +539,6 @@ def race_to_df(race):
                 0
             ),
 
-            # 全国成績
             "average_start_timing": _num(
                 racer.get(
                     "average_start_timing"
@@ -405,7 +567,6 @@ def race_to_df(race):
                 0
             ),
 
-            # 当地成績
             "local_win_rate": _num(
                 racer.get(
                     "local_win_rate"
@@ -427,7 +588,6 @@ def race_to_df(race):
                 0
             ),
 
-            # モーター
             "motor_number": _int(
                 racer.get(
                     "motor_number"
@@ -449,7 +609,6 @@ def race_to_df(race):
                 0
             ),
 
-            # ボート
             "boat_number": _int(
                 racer.get(
                     "boat_number"
@@ -471,7 +630,6 @@ def race_to_df(race):
                 0
             ),
 
-            # F/L
             "flying_count": _int(
                 racer.get(
                     "flying_count"
@@ -486,7 +644,6 @@ def race_to_df(race):
                 0
             ),
 
-            # 進入コース
             "course_number": _int(
                 preview_data.get(
                     "course_number"
@@ -523,7 +680,9 @@ def race_to_df(race):
             ),
         }
 
-        rows.append(row)
+        rows.append(
+            row
+        )
 
     df = pd.DataFrame(
         rows
@@ -539,39 +698,39 @@ def race_to_df(race):
             df["boat"].astype(int)
         )
     ) != len(df):
-
         return pd.DataFrame()
 
-    # 欠場等で存在しない艇を記録
+    df = df.sort_values(
+        "boat"
+    ).reset_index(
+        drop=True
+    )
+
     df.attrs[
         "active_boats"
-    ] = active_boats
+    ] = [
+        int(x)
+        for x in df["boat"]
+    ]
 
     df.attrs[
         "withdrawn_boats"
     ] = [
         boat
         for boat in range(1, 7)
-        if boat not in active_boats
+        if boat not in df.attrs[
+            "active_boats"
+        ]
     ]
 
     return df
 
 
+# =========================================================
+# 結果取得
+# =========================================================
+
 def get_result(race):
-    """
-    結果を1着-2着-3着の艇番で返す。
-
-    通常:
-        (1, 2, 3)
-
-    欠場艇がある場合:
-        (1, 5, 2)
-
-    のように、実際の着順だけを見る。
-
-    3着まで取得できれば有効。
-    """
 
     if not isinstance(
         race,
@@ -590,7 +749,9 @@ def get_result(race):
         return None
 
     racers = _normalize_racers(
-        result.get("racers")
+        result.get(
+            "racers"
+        )
     )
 
     if len(racers) < 3:
@@ -600,6 +761,12 @@ def get_result(race):
 
     for boat, racer in racers.items():
 
+        if not isinstance(
+            racer,
+            dict
+        ):
+            continue
+
         place = _int(
             racer.get(
                 "place_number"
@@ -607,30 +774,39 @@ def get_result(race):
             0
         )
 
-        if (
+        if not (
             1 <= boat <= 6
-            and place > 0
         ):
+            continue
 
-            finish.append(
-                (
-                    place,
-                    boat
-                )
+        if place <= 0:
+            continue
+
+        finish.append(
+            (
+                place,
+                boat
             )
-
-    finish.sort(
-        key=lambda x: x[0]
-    )
+        )
 
     if len(finish) < 3:
         return None
 
+    finish.sort(
+        key=lambda x: (
+            x[0],
+            x[1]
+        )
+    )
+
     top3 = tuple(
         boat
-        for place, boat
+        for _, boat
         in finish[:3]
     )
+
+    if len(top3) != 3:
+        return None
 
     if len(
         set(top3)
@@ -646,10 +822,11 @@ def get_result(race):
     return top3
 
 
+# =========================================================
+# 払戻取得
+# =========================================================
+
 def get_payout(race):
-    """
-    3連単払戻を取得。
-    """
 
     if not isinstance(
         race,
@@ -657,20 +834,43 @@ def get_payout(race):
     ):
         return None
 
+    result = race.get(
+        "result",
+        {}
+    )
+
+    if not isinstance(
+        result,
+        dict
+    ):
+        return None
+
     payouts = (
-        race
-        .get("result", {})
-        .get("payouts", {})
-        .get("trifecta", [])
+        result
+        .get(
+            "payouts",
+            {}
+        )
     )
 
     if not isinstance(
         payouts,
+        dict
+    ):
+        return None
+
+    trifecta = payouts.get(
+        "trifecta",
+        []
+    )
+
+    if not isinstance(
+        trifecta,
         list
     ):
         return None
 
-    for item in payouts:
+    for item in trifecta:
 
         if not isinstance(
             item,
@@ -701,40 +901,40 @@ def get_payout(race):
             "-"
         )
 
-        if len(parts) == 3:
+        if len(parts) != 3:
+            continue
 
-            return {
-                "combination": combination,
-                "amount": _int(
-                    item.get(
-                        "amount"
-                    ),
-                    0
-                )
-            }
+        if not all(
+            part.isdigit()
+            for part in parts
+        ):
+            continue
+
+        return {
+            "combination": combination,
+            "amount": _int(
+                item.get(
+                    "amount"
+                ),
+                0
+            ),
+        }
 
     return None
 
+
+# =========================================================
+# 全レース取得
+# =========================================================
 
 def get_all_races(
     day,
     require_result=False
 ):
-    """
-    1日分の全24場レースを取得。
 
-    通常6艇。
-    欠場等で5艇以下になったレースも
-    取得対象にする。
-    """
-
-    if isinstance(
-        day,
-        date
-    ):
-        day_str = day.isoformat()
-    else:
-        day_str = str(day)
+    day_str = _day_string(
+        day
+    )
 
     data = get_day_data(
         day_str
@@ -746,9 +946,17 @@ def get_all_races(
         .get("stadiums", {})
     )
 
+    if not isinstance(
+        stadiums,
+        dict
+    ):
+        return []
+
     result = []
 
-    for stadium_key, stadium in stadiums.items():
+    for stadium_key, stadium in (
+        stadiums.items()
+    ):
 
         stadium_no = _int(
             stadium_key,
@@ -771,7 +979,15 @@ def get_all_races(
             {}
         )
 
-        for race_key, race in races.items():
+        if not isinstance(
+            races,
+            dict
+        ):
+            continue
+
+        for race_key, race in (
+            races.items()
+        ):
 
             race_no = _int(
                 race_key,
@@ -790,7 +1006,9 @@ def get_all_races(
                 continue
 
             racers = _normalize_racers(
-                race.get("racers")
+                race.get(
+                    "racers"
+                )
             )
 
             if not (
@@ -800,7 +1018,11 @@ def get_all_races(
 
             if require_result:
 
-                if get_result(race) is None:
+                actual = get_result(
+                    race
+                )
+
+                if actual is None:
                     continue
 
             result.append(

@@ -251,8 +251,8 @@ def _ordering_bonus(
     )
 
     return (
-        0.045 * strength_gap
-        + 0.035 * role
+        0.050 * strength_gap
+        + 0.025 * role
     )
 
 
@@ -820,4 +820,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+            }

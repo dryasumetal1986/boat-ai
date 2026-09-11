@@ -379,23 +379,6 @@ def _select_main_counter(
 
     main_candidate = adjusted[0]
 
-    # ==========================================================
-    # 今回の実験
-    #
-    # 本線と対抗の役割分担を少し強める。
-    #
-    # 本線と
-    #   ・2着艇が同じ
-    #   ・3着艇が同じ
-    #
-    # という対抗候補に軽いペナルティを入れる。
-    #
-    # 強い候補を大きく捨てないよう、
-    # ペナルティは小さく設定。
-    #
-    # それ以外のスコア計算は12.4%ベースラインと同じ。
-    # ==========================================================
-
     counter_candidates = [
         item
         for item in adjusted
@@ -411,6 +394,13 @@ def _select_main_counter(
 
     main_combo = main_candidate["combo"]
 
+    # 今回の実験：
+    # 本線と対抗の役割分担を前回より
+    # ごく小さく強める。
+    #
+    # 変更点はここだけ。
+    # 2着艇一致：0.012 -> 0.016
+    # 3着艇一致：0.006 -> 0.008
     def counter_key(item):
 
         combo = item["combo"]
@@ -421,11 +411,11 @@ def _select_main_counter(
 
         # 本線と2着艇が同じ
         if combo[1] == main_combo[1]:
-            score -= 0.012
+            score -= 0.016
 
         # 本線と3着艇が同じ
         if combo[2] == main_combo[2]:
-            score -= 0.006
+            score -= 0.008
 
         return (
             score,
@@ -862,4 +852,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-            }
+    }

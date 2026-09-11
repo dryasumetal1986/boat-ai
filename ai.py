@@ -101,17 +101,16 @@ def _prepare(df):
         1.0
     )
 
-    # 今回の実験：
-    # 全国勝率の1%分を展示タイムへ追加で移す
+    # 12.4%ベースに戻す
     x["first_score"] = (
-        0.21 * x["win_n"]
+        0.22 * x["win_n"]
         + 0.13 * x["win_l"]
         + 0.13 * x["top2_n"]
         + 0.08 * x["top2_l"]
         + 0.10 * x["motor2"]
         + 0.06 * x["boat2"]
         + 0.12 * x["st"]
-        + 0.11 * x["exh"]
+        + 0.10 * x["exh"]
         + 0.06 * x["course"]
     )
 
@@ -176,10 +175,13 @@ def _combo_score(
     second_score,
     third_score,
 ):
+    # 今回の実験：
+    # 2着の重みを0.72→0.70
+    # 3着の重みを0.58→0.60
     score = (
         1.00 * first_score[a]
-        + 0.72 * second_score[b]
-        + 0.58 * third_score[c]
+        + 0.70 * second_score[b]
+        + 0.60 * third_score[c]
     )
 
     if a == 1:
@@ -821,4 +823,4 @@ def predict(df):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+                }

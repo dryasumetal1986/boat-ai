@@ -58,20 +58,6 @@ bt_default = today - timedelta(days=1)
 # =========================================================
 # 新しいセッションの初期化
 # =========================================================
-#
-# 新しいStreamlitセッションで最初の1回だけ実行。
-#
-# 初期状態：
-#   開催日       → 今日
-#   開催場       → 選択してください
-#   レース       → 選択してください
-#   バックテスト → 昨日
-#   検証数       → 100
-#
-# date_input / selectbox 側では value を指定せず、
-# Session Stateだけで初期値を管理する。
-# これによりStreamlitの警告を防ぐ。
-# =========================================================
 
 if "app_initialized" not in st.session_state:
 
@@ -131,13 +117,17 @@ venue_name = st.selectbox(
 
 if venue_name != "選択してください":
 
-    venue_no = data.STADIUM_BY_NAME[venue_name]
+    venue_no = data.STADIUM_BY_NAME[
+        venue_name
+    ]
 
     try:
 
-        race_numbers = data.get_races_for_stadium(
-            race_day,
-            venue_no
+        race_numbers = (
+            data.get_races_for_stadium(
+                race_day,
+                venue_no
+            )
         )
 
     except Exception as e:
@@ -150,7 +140,10 @@ if venue_name != "選択してください":
 
     race_options = [
         "選択してください"
-    ] + [str(x) for x in race_numbers]
+    ] + [
+        str(x)
+        for x in race_numbers
+    ]
 
 else:
 
@@ -165,11 +158,14 @@ else:
 # レース選択
 # ---------------------------------------------------------
 
-# 開催場を変更した結果、以前のレース番号が
-# 現在の候補に存在しない場合は初期状態へ戻す
-if st.session_state.get("race") not in race_options:
+if (
+    st.session_state.get("race")
+    not in race_options
+):
 
-    st.session_state["race"] = "選択してください"
+    st.session_state["race"] = (
+        "選択してください"
+    )
 
 
 race_choice = st.selectbox(
@@ -188,7 +184,10 @@ if st.button(
     use_container_width=True
 ):
 
-    if venue_no is None or race_choice == "選択してください":
+    if (
+        venue_no is None
+        or race_choice == "選択してください"
+    ):
 
         st.warning(
             "開催場とレースを選択してください。"
@@ -202,7 +201,9 @@ if st.button(
 
             try:
 
-                race_no = int(race_choice)
+                race_no = int(
+                    race_choice
+                )
 
                 race = data.get_race(
                     race_day,
@@ -210,15 +211,22 @@ if st.button(
                     race_no
                 )
 
-                df = data.race_to_df(race)
+                df = data.race_to_df(
+                    race
+                )
 
-                if df.empty or len(df) != 6:
+                if (
+                    df.empty
+                    or len(df) != 6
+                ):
 
                     raise ValueError(
                         "6艇分の出走表データを正しく取得できませんでした。"
                     )
 
-                if set(df["boat"].astype(int)) != set(range(1, 7)):
+                if set(
+                    df["boat"].astype(int)
+                ) != set(range(1, 7)):
 
                     raise ValueError(
                         "艇番が1〜6として取得できていません。"
@@ -264,7 +272,10 @@ if st.button(
                 for ticket in pred["tickets"]:
 
                     combo = "-".join(
-                        map(str, ticket["combo"])
+                        map(
+                            str,
+                            ticket["combo"]
+                        )
                     )
 
                     st.markdown(
@@ -283,7 +294,9 @@ if st.button(
                 # 出走表
                 # -------------------------------------------------
 
-                with st.expander("出走表を確認"):
+                with st.expander(
+                    "出走表を確認"
+                ):
 
                     cols = [
                         "boat",
@@ -298,7 +311,9 @@ if st.button(
                         "start_timing"
                     ]
 
-                    show = df[cols].copy()
+                    show = df[
+                        cols
+                    ].copy()
 
                     show.columns = [
                         "艇番",
@@ -384,7 +399,6 @@ if st.button(
     progress_bar = st.progress(0)
     status = st.empty()
 
-
     def progress(
         day_no,
         max_days,
@@ -393,7 +407,10 @@ if st.button(
     ):
 
         progress_bar.progress(
-            min(day_no / max_days, 1.0)
+            min(
+                day_no / max_days,
+                1.0
+            )
         )
 
         status.write(
@@ -401,13 +418,14 @@ if st.button(
             f"{found}/{count}件 / {current_day}"
         )
 
-
     try:
 
-        summary, rows = run_backtest(
-            bt_day,
-            count,
-            progress=progress
+        summary, rows, venue_rows = (
+            run_backtest(
+                bt_day,
+                count,
+                progress=progress
+            )
         )
 
     except Exception as e:
@@ -422,7 +440,6 @@ if st.button(
 
         progress_bar.progress(1.0)
         status.empty()
-
 
         if not rows:
 
@@ -508,12 +525,72 @@ if st.button(
             )
 
 
+            # =================================================
+            # 会場別集計
+            # =================================================
+
+            st.divider()
+
+            st.subheader(
+                "🏟️ 会場別成績"
+            )
+
+            st.caption(
+                "3点的中率の高い順に表示しています。"
+                "検証数が少ない会場は参考値として見てください。"
+            )
+
+            if venue_rows:
+
+                venue_display = []
+
+                for row in venue_rows:
+
+                    venue_display.append(
+                        {
+                            "会場": row["会場"],
+                            "検証数": row["検証数"],
+                            "3点的中率": (
+                                f"{row['3点的中率']:.1f}%"
+                            ),
+                            "本線": (
+                                f"{row['本線']:.1f}%"
+                            ),
+                            "対抗": (
+                                f"{row['対抗']:.1f}%"
+                            ),
+                            "穴": (
+                                f"{row['穴']:.1f}%"
+                            ),
+                            "回収率": (
+                                f"{row['回収率']:.1f}%"
+                            ),
+                        }
+                    )
+
+                st.dataframe(
+                    venue_display,
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+            else:
+
+                st.info(
+                    "会場別データがありません。"
+                )
+
+
             # -------------------------------------------------
             # 詳細結果
             # -------------------------------------------------
 
-            st.dataframe(
-                rows,
-                hide_index=True,
-                use_container_width=True
-            )
+            with st.expander(
+                "全レースの詳細結果"
+            ):
+
+                st.dataframe(
+                    rows,
+                    hide_index=True,
+                    use_container_width=True
+                )

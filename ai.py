@@ -101,16 +101,17 @@ def _prepare(df):
         1.0
     )
 
-    # 12.4%ベースライン
+    # 今回の実験：
+    # 全国勝率の1%分を展示タイムへ追加で移す
     x["first_score"] = (
-        0.22 * x["win_n"]
+        0.21 * x["win_n"]
         + 0.13 * x["win_l"]
         + 0.13 * x["top2_n"]
         + 0.08 * x["top2_l"]
         + 0.10 * x["motor2"]
         + 0.06 * x["boat2"]
         + 0.12 * x["st"]
-        + 0.10 * x["exh"]
+        + 0.11 * x["exh"]
         + 0.06 * x["course"]
     )
 
@@ -197,7 +198,6 @@ def _ordering_bonus(
     third_boat,
     second_score,
     third_score,
-    start_timing,
 ):
     second_strength = float(
         second_score[second_boat]
@@ -251,38 +251,9 @@ def _ordering_bonus(
         )
     )
 
-    # 今回の実験：
-    # 直前スタートタイミングを小さく反映。
-    #
-    # start_timing は小さいほど良いので、
-    # 2着候補のSTが3着候補より良いほどプラス。
-    #
-    # 0.05秒差を基準にして小さく補正する。
-    second_start = float(
-        start_timing.get(second_boat, 0.0)
-    )
-
-    third_start = float(
-        start_timing.get(third_boat, 0.0)
-    )
-
-    start_gap = (
-        third_start
-        - second_start
-    )
-
-    start_gap = float(
-        np.clip(
-            start_gap / 0.05,
-            -0.30,
-            0.30
-        )
-    )
-
     return (
         0.045 * strength_gap
         + 0.025 * role
-        + 0.015 * start_gap
     )
 
 
@@ -291,7 +262,6 @@ def _select_main_counter(
     first_score,
     second_score,
     third_score,
-    start_timing,
 ):
     if not ranked:
         raise ValueError(
@@ -383,7 +353,6 @@ def _select_main_counter(
             third_boat,
             second_score,
             third_score,
-            start_timing,
         )
 
         adjusted_score = (
@@ -423,34 +392,8 @@ def _select_main_counter(
             same_axis[1]
         )
 
-    main_combo = main_candidate["combo"]
-
-    # 12.4%ベースラインで採用した
-    # 本線・対抗の役割分担を維持。
-    def counter_key(item):
-
-        combo = item["combo"]
-
-        score = float(
-            item["adjusted_score"]
-        )
-
-        # 本線と2着艇が同じ
-        if combo[1] == main_combo[1]:
-            score -= 0.012
-
-        # 本線と3着艇が同じ
-        if combo[2] == main_combo[2]:
-            score -= 0.006
-
-        return (
-            score,
-            float(item["raw_score"])
-        )
-
-    counter_candidate = max(
-        counter_candidates,
-        key=counter_key
+    counter_candidate = (
+        counter_candidates[0]
     )
 
     main = (
@@ -654,17 +597,6 @@ def predict(df):
         )
     )
 
-    # 直前スタートタイミング
-    start_timing = dict(
-        zip(
-            x["boat"].astype(int),
-            pd.to_numeric(
-                x["start_timing"],
-                errors="coerce"
-            ).fillna(0.0).astype(float),
-        )
-    )
-
     combos = []
 
     for a, b, c in itertools.permutations(
@@ -726,7 +658,6 @@ def predict(df):
             first_score,
             second_score,
             third_score,
-            start_timing,
         )
     )
 

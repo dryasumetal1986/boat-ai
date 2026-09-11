@@ -165,7 +165,16 @@ def run_backtest(
             if boats != {1, 2, 3, 4, 5, 6}:
                 continue
 
-            pred = predict(df)
+            # =================================================
+            # 会場補正対応
+            # =================================================
+            # 重要：
+            # 実際の予想と同じく stadium_no を渡す。
+            # それ以外のバックテストロジックは変更しない。
+            pred = predict(
+                df,
+                stadium_no=stadium_no
+            )
 
             tickets = {}
 
@@ -236,7 +245,9 @@ def run_backtest(
                     "払戻": 0,
                 }
 
-            venue_stats[stadium_no]["検証数"] += 1
+            venue_stats[
+                stadium_no
+            ]["検証数"] += 1
 
             # -------------------------------------------------
             # 的中判定
@@ -607,4 +618,4 @@ def run_backtest(
         summary,
         rows,
         venue_rows,
-    )
+            )

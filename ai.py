@@ -334,51 +334,7 @@ def _select_main_counter(
     if not counter_candidates:
         return candidate_main, same_axis[1]
 
-    # ---------------------------------------------------------
-    # 実験③
-    #
-    # 対抗を選ぶときだけ、
-    # 「2着としての強さ」を弱く追加評価する。
-    #
-    # 本線の選択順位には影響させない。
-    # 穴の選択にも影響させない。
-    # ---------------------------------------------------------
-    counter_adjusted = []
-
-    for item in counter_candidates:
-        combo = item["combo"]
-
-        second_boat = int(
-            combo[1]
-        )
-
-        second_strength = float(
-            second_score[second_boat]
-        )
-
-        second_bonus = (
-            0.015 * second_strength
-        )
-
-        counter_score = (
-            float(item["adjusted_score"])
-            + second_bonus
-        )
-
-        counter_adjusted.append({
-            "item": item,
-            "counter_score": counter_score,
-        })
-
-    counter_adjusted.sort(
-        key=lambda item: (
-            item["counter_score"],
-            item["item"]["raw_score"]
-        ),
-        reverse=True
-    )
-
-    counter_candidate = counter_adjusted[0]["item"]
+    counter_candidate = counter_candidates[0]
 
     main = (
         main_candidate["combo"],
@@ -539,6 +495,20 @@ def _apply_venue_adjustment(
     return adjusted
 
 
+# ============================================================
+# 実験④
+#
+# 変更点は「穴の選び方」だけ。
+#
+# 本線・対抗は14.1%版から変更なし。
+#
+# 穴について、
+# 「本線と違う軸」が存在する場合は、
+# その候補だけから穴を選ぶ。
+#
+# それ以外のスコア・重み・会場補正は変更しない。
+# ============================================================
+
 def _select_hole(
     ranked,
     main,
@@ -564,6 +534,21 @@ def _select_hole(
     main_axis = int(
         main_combo[0]
     )
+
+    # --------------------------------------------------------
+    # 実験④の唯一の変更点
+    #
+    # 本線と異なる軸の候補が存在する場合、
+    # 穴は必ず別軸から選ぶ。
+    # --------------------------------------------------------
+    different_axis_candidates = [
+        item
+        for item in candidates
+        if int(item[0][0]) != main_axis
+    ]
+
+    if different_axis_candidates:
+        candidates = different_axis_candidates
 
     candidate_rows = []
 

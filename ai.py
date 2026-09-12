@@ -138,6 +138,51 @@ def _softmax(values, temperature=0.075):
     return exp_values / total
 
 
+def _pair_third_bonus(
+    first_boat,
+    second_boat,
+    third_boat,
+    third_score
+):
+    """
+    1着・2着ペアに応じた3着評価の弱い補正。
+
+    9月・7月・4月の3000レース分析で、
+    1-3 / 1-2 / 1-4 の1-2ペアが
+    3着取りこぼしの中で特に多かったため、
+    そのペアに対して現在のthird_scoreが高い艇を
+    ごく弱く優先する。
+
+    固定的に特定艇を押し上げるのではなく、
+    third_scoreに比例させる。
+    """
+
+    pair_strength = {
+        (1, 3): 0.018,
+        (1, 2): 0.015,
+        (1, 4): 0.015,
+    }
+
+    strength = float(
+        pair_strength.get(
+            (int(first_boat), int(second_boat)),
+            0.0
+        )
+    )
+
+    if strength <= 0.0:
+        return 0.0
+
+    value = float(
+        third_score.get(
+            int(third_boat),
+            0.0
+        )
+    )
+
+    return strength * value
+
+
 def _combo_score(
     a,
     b,
@@ -159,6 +204,15 @@ def _combo_score(
 
     if b == 1:
         score += 0.020
+
+    # 今回の実験：
+    # 1着・2着ペアに応じて3着評価を弱く補正
+    score += _pair_third_bonus(
+        a,
+        b,
+        c,
+        third_score
+    )
 
     return float(score)
 
@@ -490,7 +544,6 @@ def _apply_venue_adjustment(
         elif axis in (3, 4, 5, 6):
             axis_bonus *= 0.85
 
-        # 今回の実験部分
         venue_axis_bonus = _venue_axis_bonus(
             stadium_no,
             axis

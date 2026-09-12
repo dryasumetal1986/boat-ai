@@ -51,7 +51,9 @@ def _prepare(df):
     valid_exhibition = exhibition[exhibition > 0]
 
     if len(valid_exhibition) > 0:
-        exhibition_median = float(valid_exhibition.median())
+        exhibition_median = float(
+            valid_exhibition.median()
+        )
     else:
         exhibition_median = 1.0
 
@@ -450,7 +452,8 @@ def _select_hole(
     ranked,
     main,
     counter,
-    first_score
+    first_score,
+    third_score
 ):
     main_combo = main[0]
     counter_combo = counter[0]
@@ -482,8 +485,15 @@ def _select_hole(
             combo[0]
         )
 
+        second_boat = int(combo[1])
+        third_boat = int(combo[2])
+
         axis_score = float(
             first_score[alternative_axis]
+        )
+
+        third_score_value = float(
+            third_score[third_boat]
         )
 
         diversity_bonus = 0.0
@@ -493,16 +503,22 @@ def _select_hole(
 
         third_boat_bonus = 0.0
 
-        if int(combo[2]) == 2:
+        if third_boat == 2:
             third_boat_bonus = 0.018
 
         third_fit_bonus = 0.035 * float(
             np.clip(
-                first_score[int(combo[2])]
-                - first_score[int(combo[1])],
+                first_score[third_boat]
+                - first_score[second_boat],
                 -0.20,
                 0.20
             )
+        )
+
+        # 今回の実験：
+        # 3着適性そのものを弱く追加評価
+        third_strength_bonus = (
+            0.035 * third_score_value
         )
 
         hole_score = (
@@ -511,6 +527,7 @@ def _select_hole(
             + 0.10 * axis_score
             + third_boat_bonus
             + third_fit_bonus
+            + third_strength_bonus
         )
 
         candidate_rows.append((
@@ -665,7 +682,8 @@ def predict(df, stadium_no=None):
         ranked,
         main,
         counter,
-        first_score
+        first_score,
+        third_score
     )
 
     used = {
@@ -813,4 +831,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

@@ -334,7 +334,51 @@ def _select_main_counter(
     if not counter_candidates:
         return candidate_main, same_axis[1]
 
-    counter_candidate = counter_candidates[0]
+    # ---------------------------------------------------------
+    # 実験③
+    #
+    # 対抗を選ぶときだけ、
+    # 「2着としての強さ」を弱く追加評価する。
+    #
+    # 本線の選択順位には影響させない。
+    # 穴の選択にも影響させない。
+    # ---------------------------------------------------------
+    counter_adjusted = []
+
+    for item in counter_candidates:
+        combo = item["combo"]
+
+        second_boat = int(
+            combo[1]
+        )
+
+        second_strength = float(
+            second_score[second_boat]
+        )
+
+        second_bonus = (
+            0.015 * second_strength
+        )
+
+        counter_score = (
+            float(item["adjusted_score"])
+            + second_bonus
+        )
+
+        counter_adjusted.append({
+            "item": item,
+            "counter_score": counter_score,
+        })
+
+    counter_adjusted.sort(
+        key=lambda item: (
+            item["counter_score"],
+            item["item"]["raw_score"]
+        ),
+        reverse=True
+    )
+
+    counter_candidate = counter_adjusted[0]["item"]
 
     main = (
         main_candidate["combo"],
@@ -495,68 +539,6 @@ def _apply_venue_adjustment(
     return adjusted
 
 
-def _conditional_third_bonus(
-    first_boat,
-    second_boat,
-    third_boat
-):
-    """
-    実験②専用。
-
-    3000レース分析で確認した
-    「1着・2着の組み合わせごとの
-    3着分布」を弱く利用する。
-
-    あくまで穴選択だけに使用し、
-    本線・対抗の順位には影響させない。
-    """
-
-    pair_preferences = {
-        (1, 2): {
-            3: 0.014,
-            4: 0.008,
-            5: 0.007,
-            6: 0.003,
-        },
-        (1, 3): {
-            2: 0.014,
-            4: 0.011,
-            5: 0.007,
-            6: 0.004,
-        },
-        (1, 4): {
-            2: 0.012,
-            3: 0.011,
-            5: 0.004,
-            6: 0.005,
-        },
-        (1, 5): {
-            2: 0.013,
-            3: 0.008,
-            4: 0.005,
-            6: 0.003,
-        },
-        (1, 6): {
-            2: 0.012,
-            3: 0.007,
-            4: 0.005,
-            5: 0.004,
-        },
-    }
-
-    return float(
-        pair_preferences
-        .get(
-            (int(first_boat), int(second_boat)),
-            {}
-        )
-        .get(
-            int(third_boat),
-            0.0
-        )
-    )
-
-
 def _select_hole(
     ranked,
     main,
@@ -564,15 +546,6 @@ def _select_hole(
     first_score,
     third_score
 ):
-    """
-    実験②：
-    穴の選択方法だけ変更。
-
-    本線・対抗は従来ロジックのまま。
-    穴についてのみ、第一・第二艇の組み合わせに
-    応じた3着候補の弱い条件付き補正を追加する。
-    """
-
     main_combo = main[0]
     counter_combo = counter[0]
 
@@ -642,14 +615,6 @@ def _select_hole(
             0.035 * third_score_value
         )
 
-        conditional_bonus = (
-            _conditional_third_bonus(
-                alternative_axis,
-                second_boat,
-                third_boat
-            )
-        )
-
         hole_score = (
             raw_score
             + diversity_bonus
@@ -657,7 +622,6 @@ def _select_hole(
             + third_boat_bonus
             + third_fit_bonus
             + third_strength_bonus
-            + conditional_bonus
         )
 
         candidate_rows.append((
@@ -961,4 +925,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-            }
+        }

@@ -38,6 +38,7 @@ def _prepare(df):
     x["motor3"] = _norm_series(x["motor_top_3_percent"])
     x["boat2"] = _norm_series(x["boat_top_2_percent"])
     x["boat3"] = _norm_series(x["boat_top_3_percent"])
+
     x["st"] = _norm_series(
         x["average_start_timing"],
         higher=False
@@ -138,51 +139,6 @@ def _softmax(values, temperature=0.075):
     return exp_values / total
 
 
-def _pair_third_bonus(
-    first_boat,
-    second_boat,
-    third_boat,
-    third_score
-):
-    """
-    1着・2着ペアに応じた3着評価の弱い補正。
-
-    9月・7月・4月の3000レース分析で、
-    1-3 / 1-2 / 1-4 の1-2ペアが
-    3着取りこぼしの中で特に多かったため、
-    そのペアに対して現在のthird_scoreが高い艇を
-    ごく弱く優先する。
-
-    固定的に特定艇を押し上げるのではなく、
-    third_scoreに比例させる。
-    """
-
-    pair_strength = {
-        (1, 3): 0.018,
-        (1, 2): 0.015,
-        (1, 4): 0.015,
-    }
-
-    strength = float(
-        pair_strength.get(
-            (int(first_boat), int(second_boat)),
-            0.0
-        )
-    )
-
-    if strength <= 0.0:
-        return 0.0
-
-    value = float(
-        third_score.get(
-            int(third_boat),
-            0.0
-        )
-    )
-
-    return strength * value
-
-
 def _combo_score(
     a,
     b,
@@ -204,15 +160,6 @@ def _combo_score(
 
     if b == 1:
         score += 0.020
-
-    # 今回の実験：
-    # 1着・2着ペアに応じて3着評価を弱く補正
-    score += _pair_third_bonus(
-        a,
-        b,
-        c,
-        third_score
-    )
 
     return float(score)
 
@@ -279,6 +226,7 @@ def _select_main_counter(
         )
 
     original_main = ranked[0]
+
     original_axis = int(
         original_main[0][0]
     )
@@ -458,14 +406,6 @@ def _venue_axis_bonus(
     stadium_no,
     axis
 ):
-    """
-    会場 × 軸番号の弱い補正。
-
-    補正値は小さくし、
-    14.0%ベースの予想構造を
-    大きく変えない。
-    """
-
     try:
         stadium_no = int(stadium_no)
         axis = int(axis)
@@ -473,40 +413,23 @@ def _venue_axis_bonus(
         return 0.0
 
     axis_profiles = {
-        # 桐生
-        # 外枠軸を少し抑える
         1: {
             4: -0.008,
             5: -0.012,
             6: -0.012,
         },
-
-        # 若松
-        # 2号艇軸を少し抑える
         20: {
             2: -0.012,
         },
-
-        # 蒲郡
-        # 1号艇軸を少し強化
         7: {
             1: 0.010,
         },
-
-        # 福岡
-        # 1号艇軸を少し強化
         22: {
             1: 0.010,
         },
-
-        # 芦屋
-        # 1号艇軸を少し強化
         21: {
             1: 0.010,
         },
-
-        # 津
-        # 2・5号艇軸を少し抑える
         9: {
             2: -0.010,
             5: -0.010,
@@ -572,6 +495,68 @@ def _apply_venue_adjustment(
     return adjusted
 
 
+def _conditional_third_bonus(
+    first_boat,
+    second_boat,
+    third_boat
+):
+    """
+    実験②専用。
+
+    3000レース分析で確認した
+    「1着・2着の組み合わせごとの
+    3着分布」を弱く利用する。
+
+    あくまで穴選択だけに使用し、
+    本線・対抗の順位には影響させない。
+    """
+
+    pair_preferences = {
+        (1, 2): {
+            3: 0.014,
+            4: 0.008,
+            5: 0.007,
+            6: 0.003,
+        },
+        (1, 3): {
+            2: 0.014,
+            4: 0.011,
+            5: 0.007,
+            6: 0.004,
+        },
+        (1, 4): {
+            2: 0.012,
+            3: 0.011,
+            5: 0.004,
+            6: 0.005,
+        },
+        (1, 5): {
+            2: 0.013,
+            3: 0.008,
+            4: 0.005,
+            6: 0.003,
+        },
+        (1, 6): {
+            2: 0.012,
+            3: 0.007,
+            4: 0.005,
+            5: 0.004,
+        },
+    }
+
+    return float(
+        pair_preferences
+        .get(
+            (int(first_boat), int(second_boat)),
+            {}
+        )
+        .get(
+            int(third_boat),
+            0.0
+        )
+    )
+
+
 def _select_hole(
     ranked,
     main,
@@ -579,6 +564,15 @@ def _select_hole(
     first_score,
     third_score
 ):
+    """
+    実験②：
+    穴の選択方法だけ変更。
+
+    本線・対抗は従来ロジックのまま。
+    穴についてのみ、第一・第二艇の組み合わせに
+    応じた3着候補の弱い条件付き補正を追加する。
+    """
+
     main_combo = main[0]
     counter_combo = counter[0]
 
@@ -609,8 +603,13 @@ def _select_hole(
             combo[0]
         )
 
-        second_boat = int(combo[1])
-        third_boat = int(combo[2])
+        second_boat = int(
+            combo[1]
+        )
+
+        third_boat = int(
+            combo[2]
+        )
 
         axis_score = float(
             first_score[alternative_axis]
@@ -643,6 +642,14 @@ def _select_hole(
             0.035 * third_score_value
         )
 
+        conditional_bonus = (
+            _conditional_third_bonus(
+                alternative_axis,
+                second_boat,
+                third_boat
+            )
+        )
+
         hole_score = (
             raw_score
             + diversity_bonus
@@ -650,6 +657,7 @@ def _select_hole(
             + third_boat_bonus
             + third_fit_bonus
             + third_strength_bonus
+            + conditional_bonus
         )
 
         candidate_rows.append((
@@ -953,4 +961,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+            }

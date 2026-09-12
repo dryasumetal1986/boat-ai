@@ -453,6 +453,7 @@ def _select_hole(
     main,
     counter,
     first_score,
+    second_score,
     third_score
 ):
     main_combo = main[0]
@@ -515,10 +516,24 @@ def _select_hole(
             )
         )
 
-        # 今回の実験：
-        # 3着適性そのものを弱く追加評価
         third_strength_bonus = (
             0.035 * third_score_value
+        )
+
+        # 今回の実験：
+        # 2着適性より3着適性が高い艇を、
+        # 3着候補としてわずかに優先する。
+        third_role_gap = float(
+            np.clip(
+                third_score[third_boat]
+                - second_score[third_boat],
+                -0.20,
+                0.20
+            )
+        )
+
+        third_role_bonus = (
+            0.020 * third_role_gap
         )
 
         hole_score = (
@@ -528,6 +543,7 @@ def _select_hole(
             + third_boat_bonus
             + third_fit_bonus
             + third_strength_bonus
+            + third_role_bonus
         )
 
         candidate_rows.append((
@@ -683,6 +699,7 @@ def predict(df, stadium_no=None):
         main,
         counter,
         first_score,
+        second_score,
         third_score
     )
 

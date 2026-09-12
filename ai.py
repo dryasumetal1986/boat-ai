@@ -515,24 +515,10 @@ def _select_hole(
             )
         )
 
-        # 次の実験：
-        # 3着適性が2着候補より明確に高い場合だけ
-        # 3着役としての強さを追加評価する
-        second_score_value = float(
-            second_score[second_boat]
-        )
-
-        third_role_strength = float(
-            np.clip(
-                third_score_value
-                - second_score_value,
-                0.0,
-                0.30
-            )
-        )
-
+        # 今回の実験：
+        # 3着適性そのものを弱く追加評価
         third_strength_bonus = (
-            0.050 * third_role_strength
+            0.035 * third_score_value
         )
 
         hole_score = (
@@ -845,4 +831,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

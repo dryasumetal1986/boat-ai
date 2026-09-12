@@ -13,11 +13,15 @@ def _norm_series(series, higher=True):
     x = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
     lo = float(x.min())
     hi = float(x.max())
+
     if hi - lo < 1e-12:
         return pd.Series(0.5, index=x.index)
+
     z = (x - lo) / (hi - lo)
+
     if higher:
         return z
+
     return 1.0 - z
 
 
@@ -513,27 +517,27 @@ def _select_hole(
         if third_boat == 2:
             third_boat_bonus = 0.018
 
-        # 穴の1着・2着の形を維持しながら、
-        # その組み合わせに対する3着候補を評価する。
+        # 今回の変更点：
+        # 3着候補について「1着・2着向きの強さ」と
+        # 「3着向きの強さ」の差を見る。
         #
-        # 3着側だけを強くしすぎず、
-        # 「2着として強い艇」を3着に置く形を
-        # 少し抑えることで、3着専用候補を拾う。
-        third_role = float(
+        # 3着としての適性が相対的に高い艇を
+        # 穴の3着候補として少しだけ優先する。
+        third_fit = float(
             first_score[third_boat]
             - first_score[second_boat]
         )
 
-        third_role = float(
+        third_fit = float(
             np.clip(
-                third_role,
+                third_fit,
                 -0.20,
                 0.20
             )
         )
 
-        third_role_bonus = (
-            0.035 * third_role
+        third_fit_bonus = (
+            0.035 * third_fit
         )
 
         hole_score = (
@@ -541,7 +545,7 @@ def _select_hole(
             + diversity_bonus
             + 0.10 * axis_score
             + third_boat_bonus
-            + third_role_bonus
+            + third_fit_bonus
         )
 
         candidate_rows.append(
@@ -853,4 +857,4 @@ def predict(
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+        }

@@ -495,20 +495,6 @@ def _apply_venue_adjustment(
     return adjusted
 
 
-# ============================================================
-# 実験④
-#
-# 変更点は「穴の選び方」だけ。
-#
-# 本線・対抗は14.1%版から変更なし。
-#
-# 穴について、
-# 「本線と違う軸」が存在する場合は、
-# その候補だけから穴を選ぶ。
-#
-# それ以外のスコア・重み・会場補正は変更しない。
-# ============================================================
-
 def _select_hole(
     ranked,
     main,
@@ -535,21 +521,6 @@ def _select_hole(
         main_combo[0]
     )
 
-    # --------------------------------------------------------
-    # 実験④の唯一の変更点
-    #
-    # 本線と異なる軸の候補が存在する場合、
-    # 穴は必ず別軸から選ぶ。
-    # --------------------------------------------------------
-    different_axis_candidates = [
-        item
-        for item in candidates
-        if int(item[0][0]) != main_axis
-    ]
-
-    if different_axis_candidates:
-        candidates = different_axis_candidates
-
     candidate_rows = []
 
     for item in candidates:
@@ -561,13 +532,8 @@ def _select_hole(
             combo[0]
         )
 
-        second_boat = int(
-            combo[1]
-        )
-
-        third_boat = int(
-            combo[2]
-        )
+        second_boat = int(combo[1])
+        third_boat = int(combo[2])
 
         axis_score = float(
             first_score[alternative_axis]
@@ -910,4 +876,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

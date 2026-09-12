@@ -373,34 +373,21 @@ def _select_main_counter(
 
 def _venue_profile(stadium_no):
     profiles = {
-        # 強化グループ
-        7: 0.035,    # 蒲郡
-        1: 0.030,    # 桐生
-        20: 0.030,   # 若松
-        22: 0.025,   # 福岡
-        2: 0.025,    # 戸田
-        5: 0.020,    # 多摩川
-        11: 0.020,   # びわこ
-        14: 0.020,   # 鳴門
-
-        # 中間グループ
-        13: 0.010,   # 尼崎
-        17: 0.010,   # 宮島
-        18: 0.010,   # 徳山
-        24: -0.005,  # 大村
-        9: 0.000,    # 津
-        16: 0.000,   # 児島
-        3: 0.000,    # 江戸川
-
-        # 弱めグループ
-        6: -0.010,   # 浜名湖
-        12: -0.010,  # 住之江
-        10: -0.010,  # 三国
-        4: -0.010,   # 平和島
-        15: -0.010,  # 丸亀
-        8: -0.010,   # 常滑
-        21: -0.010,  # 芦屋
-        19: -0.010,  # 下関
+        7: 0.020,
+        1: 0.015,
+        20: 0.015,
+        22: 0.015,
+        2: 0.015,
+        5: 0.010,
+        11: 0.010,
+        14: 0.010,
+        13: 0.005,
+        17: 0.005,
+        18: 0.005,
+        24: -0.015,
+        9: -0.010,
+        16: -0.005,
+        3: -0.005,
     }
 
     try:
@@ -413,6 +400,72 @@ def _venue_profile(stadium_no):
     )
 
 
+def _venue_axis_bonus(
+    stadium_no,
+    axis
+):
+    """
+    会場 × 軸番号の弱い補正。
+
+    補正値は小さくし、
+    14.0%ベースの予想構造を
+    大きく変えない。
+    """
+
+    try:
+        stadium_no = int(stadium_no)
+        axis = int(axis)
+    except Exception:
+        return 0.0
+
+    axis_profiles = {
+        # 桐生
+        # 外枠軸を少し抑える
+        1: {
+            4: -0.008,
+            5: -0.012,
+            6: -0.012,
+        },
+
+        # 若松
+        # 2号艇軸を少し抑える
+        20: {
+            2: -0.012,
+        },
+
+        # 蒲郡
+        # 1号艇軸を少し強化
+        7: {
+            1: 0.010,
+        },
+
+        # 福岡
+        # 1号艇軸を少し強化
+        22: {
+            1: 0.010,
+        },
+
+        # 芦屋
+        # 1号艇軸を少し強化
+        21: {
+            1: 0.010,
+        },
+
+        # 津
+        # 2・5号艇軸を少し抑える
+        9: {
+            2: -0.010,
+            5: -0.010,
+        },
+    }
+
+    return float(
+        axis_profiles
+        .get(stadium_no, {})
+        .get(axis, 0.0)
+    )
+
+
 def _apply_venue_adjustment(
     ranked,
     stadium_no
@@ -420,9 +473,6 @@ def _apply_venue_adjustment(
     venue_bonus = _venue_profile(
         stadium_no
     )
-
-    if abs(venue_bonus) < 1e-12:
-        return ranked
 
     adjusted = []
 
@@ -440,8 +490,16 @@ def _apply_venue_adjustment(
         elif axis in (3, 4, 5, 6):
             axis_bonus *= 0.85
 
+        # 今回の実験部分
+        venue_axis_bonus = _venue_axis_bonus(
+            stadium_no,
+            axis
+        )
+
         adjusted_score = (
-            raw_score + axis_bonus
+            raw_score
+            + axis_bonus
+            + venue_axis_bonus
         )
 
         adjusted.append((
@@ -842,4 +900,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

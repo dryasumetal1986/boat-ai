@@ -210,8 +210,7 @@ def _ordering_bonus(
 
     strength_gap = float(
         np.clip(
-            second_strength
-            - third_strength,
+            second_strength - third_strength,
             -0.30,
             0.30
         )
@@ -489,6 +488,16 @@ def _select_hole(
         main_combo[0]
     )
 
+    # 1着-2着の組み合わせごとに、
+    # 実績上取りこぼしが多かった3着候補を
+    # ごく弱く補正する。
+    pair_third_bonus = {
+        (1, 3): {2, 4},
+        (1, 2): {3, 4},
+        (1, 4): {2, 3},
+        (1, 5): {2, 3, 4},
+    }
+
     candidate_rows = []
 
     for item in candidates:
@@ -500,12 +509,17 @@ def _select_hole(
             combo[0]
         )
 
+        second_boat = int(
+            combo[1]
+        )
+
+        third_boat = int(
+            combo[2]
+        )
+
         axis_score = float(
             first_score[alternative_axis]
         )
-
-        second_boat = int(combo[1])
-        third_boat = int(combo[2])
 
         diversity_bonus = 0.0
 
@@ -517,12 +531,6 @@ def _select_hole(
         if third_boat == 2:
             third_boat_bonus = 0.018
 
-        # 今回の変更点：
-        # 3着候補について「1着・2着向きの強さ」と
-        # 「3着向きの強さ」の差を見る。
-        #
-        # 3着としての適性が相対的に高い艇を
-        # 穴の3着候補として少しだけ優先する。
         third_fit = float(
             first_score[third_boat]
             - first_score[second_boat]
@@ -540,12 +548,27 @@ def _select_hole(
             0.035 * third_fit
         )
 
+        # 今回の新規補正。
+        # 1着-2着が特定の形になったとき、
+        # 実データ分析で3着に多かった艇を
+        # +0.008だけ優先する。
+        pair_bonus = 0.0
+
+        preferred_thirds = pair_third_bonus.get(
+            (int(combo[0]), int(combo[1])),
+            set()
+        )
+
+        if third_boat in preferred_thirds:
+            pair_bonus = 0.008
+
         hole_score = (
             raw_score
             + diversity_bonus
             + 0.10 * axis_score
             + third_boat_bonus
             + third_fit_bonus
+            + pair_bonus
         )
 
         candidate_rows.append(
@@ -857,4 +880,4 @@ def predict(
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

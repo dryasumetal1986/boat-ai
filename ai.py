@@ -373,21 +373,34 @@ def _select_main_counter(
 
 def _venue_profile(stadium_no):
     profiles = {
-        7: 0.020,
-        1: 0.015,
-        20: 0.015,
-        22: 0.015,
-        2: 0.015,
-        5: 0.010,
-        11: 0.010,
-        14: 0.010,
-        13: 0.005,
-        17: 0.005,
-        18: 0.005,
-        24: -0.015,
-        9: -0.010,
-        16: -0.005,
-        3: -0.005,
+        # 強化グループ
+        7: 0.035,    # 蒲郡
+        1: 0.030,    # 桐生
+        20: 0.030,   # 若松
+        22: 0.025,   # 福岡
+        2: 0.025,    # 戸田
+        5: 0.020,    # 多摩川
+        11: 0.020,   # びわこ
+        14: 0.020,   # 鳴門
+
+        # 中間グループ
+        13: 0.010,   # 尼崎
+        17: 0.010,   # 宮島
+        18: 0.010,   # 徳山
+        24: -0.005,  # 大村
+        9: 0.000,    # 津
+        16: 0.000,   # 児島
+        3: 0.000,    # 江戸川
+
+        # 弱めグループ
+        6: -0.010,   # 浜名湖
+        12: -0.010,  # 住之江
+        10: -0.010,  # 三国
+        4: -0.010,   # 平和島
+        15: -0.010,  # 丸亀
+        8: -0.010,   # 常滑
+        21: -0.010,  # 芦屋
+        19: -0.010,  # 下関
     }
 
     try:
@@ -453,7 +466,6 @@ def _select_hole(
     main,
     counter,
     first_score,
-    second_score,
     third_score
 ):
     main_combo = main[0]
@@ -520,22 +532,6 @@ def _select_hole(
             0.035 * third_score_value
         )
 
-        # 今回の実験：
-        # 2着適性より3着適性が高い艇を、
-        # 3着候補としてわずかに優先する。
-        third_role_gap = float(
-            np.clip(
-                third_score[third_boat]
-                - second_score[third_boat],
-                -0.20,
-                0.20
-            )
-        )
-
-        third_role_bonus = (
-            0.020 * third_role_gap
-        )
-
         hole_score = (
             raw_score
             + diversity_bonus
@@ -543,7 +539,6 @@ def _select_hole(
             + third_boat_bonus
             + third_fit_bonus
             + third_strength_bonus
-            + third_role_bonus
         )
 
         candidate_rows.append((
@@ -699,7 +694,6 @@ def predict(df, stadium_no=None):
         main,
         counter,
         first_score,
-        second_score,
         third_score
     )
 
@@ -848,4 +842,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+        }

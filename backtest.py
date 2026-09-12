@@ -800,4 +800,4 @@ def run_backtest(
         summary,
         rows,
         venue_rows,
-    )
+        )

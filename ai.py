@@ -51,14 +51,17 @@ def _prepare(df):
     valid_exhibition = exhibition[exhibition > 0]
 
     if len(valid_exhibition) > 0:
-        exhibition_median = float(valid_exhibition.median())
+        exhibition_median = float(
+            valid_exhibition.median()
+        )
     else:
         exhibition_median = 1.0
 
-    exhibition = exhibition.replace(
-        0,
-        np.nan
-    ).fillna(exhibition_median)
+    exhibition = (
+        exhibition
+        .replace(0, np.nan)
+        .fillna(exhibition_median)
+    )
 
     x["exh"] = _norm_series(
         exhibition,
@@ -121,10 +124,7 @@ def _softmax(values, temperature=0.075):
     if len(values) == 0:
         return np.array([])
 
-    temperature = max(
-        float(temperature),
-        0.001
-    )
+    temperature = max(float(temperature), 0.001)
 
     scaled = values / temperature
     scaled -= np.max(scaled)
@@ -188,24 +188,15 @@ def _ordering_bonus(
     )
 
     second_role = float(
-        np.clip(
-            second_role,
-            -0.30,
-            0.30
-        )
+        np.clip(second_role, -0.30, 0.30)
     )
 
     third_role = float(
-        np.clip(
-            third_role,
-            -0.30,
-            0.30
-        )
+        np.clip(third_role, -0.30, 0.30)
     )
 
     role = (
-        second_role
-        + third_role
+        second_role + third_role
     ) / 2.0
 
     strength_gap = float(
@@ -281,9 +272,7 @@ def _select_main_counter(
                 ):
                     candidate_main = best_boat5
 
-    axis = int(
-        candidate_main[0][0]
-    )
+    axis = int(candidate_main[0][0])
 
     same_axis = [
         item
@@ -294,6 +283,7 @@ def _select_main_counter(
     if len(same_axis) < 2:
         if len(ranked) >= 2:
             return candidate_main, ranked[1]
+
         return candidate_main, candidate_main
 
     pool = same_axis[:10]
@@ -315,14 +305,12 @@ def _select_main_counter(
             + float(bonus)
         )
 
-        adjusted.append(
-            {
-                "combo": combo,
-                "prob": float(probability),
-                "raw_score": float(raw_score),
-                "adjusted_score": adjusted_score,
-            }
-        )
+        adjusted.append({
+            "combo": combo,
+            "prob": float(probability),
+            "raw_score": float(raw_score),
+            "adjusted_score": adjusted_score,
+        })
 
     adjusted.sort(
         key=lambda item: (
@@ -440,17 +428,14 @@ def _apply_venue_adjustment(
             axis_bonus *= 0.85
 
         adjusted_score = (
-            raw_score
-            + axis_bonus
+            raw_score + axis_bonus
         )
 
-        adjusted.append(
-            (
-                combo,
-                probability,
-                adjusted_score
-            )
-        )
+        adjusted.append((
+            combo,
+            probability,
+            adjusted_score
+        ))
 
     adjusted.sort(
         key=lambda item: (
@@ -488,16 +473,6 @@ def _select_hole(
         main_combo[0]
     )
 
-    # 1着-2着の組み合わせごとに、
-    # 実績上取りこぼしが多かった3着候補を
-    # ごく弱く補正する。
-    pair_third_bonus = {
-        (1, 3): {2, 4},
-        (1, 2): {3, 4},
-        (1, 4): {2, 3},
-        (1, 5): {2, 3, 4},
-    }
-
     candidate_rows = []
 
     for item in candidates:
@@ -507,14 +482,6 @@ def _select_hole(
 
         alternative_axis = int(
             combo[0]
-        )
-
-        second_boat = int(
-            combo[1]
-        )
-
-        third_boat = int(
-            combo[2]
         )
 
         axis_score = float(
@@ -528,39 +495,37 @@ def _select_hole(
 
         third_boat_bonus = 0.0
 
-        if third_boat == 2:
+        if int(combo[2]) == 2:
             third_boat_bonus = 0.018
 
-        third_fit = float(
-            first_score[third_boat]
-            - first_score[second_boat]
-        )
-
-        third_fit = float(
+        third_fit_bonus = 0.035 * float(
             np.clip(
-                third_fit,
+                first_score[int(combo[2])]
+                - first_score[int(combo[1])],
                 -0.20,
                 0.20
             )
         )
 
-        third_fit_bonus = (
-            0.035 * third_fit
+        # CSV分析に基づく弱い条件付き3着補正
+        # 前回の+0.008は強すぎたため今回は+0.003
+        pair_third_bonus = 0.0
+
+        pair = (
+            int(combo[0]),
+            int(combo[1])
         )
 
-        # 今回の新規補正。
-        # 1着-2着が特定の形になったとき、
-        # 実データ分析で3着に多かった艇を
-        # +0.008だけ優先する。
-        pair_bonus = 0.0
+        preferred_thirds = {
+            (1, 3): {2, 4},
+            (1, 2): {3, 4},
+            (1, 4): {2, 3},
+            (1, 5): {2, 3, 4},
+        }
 
-        preferred_thirds = pair_third_bonus.get(
-            (int(combo[0]), int(combo[1])),
-            set()
-        )
-
-        if third_boat in preferred_thirds:
-            pair_bonus = 0.008
+        if pair in preferred_thirds:
+            if int(combo[2]) in preferred_thirds[pair]:
+                pair_third_bonus = 0.003
 
         hole_score = (
             raw_score
@@ -568,15 +533,13 @@ def _select_hole(
             + 0.10 * axis_score
             + third_boat_bonus
             + third_fit_bonus
-            + pair_bonus
+            + pair_third_bonus
         )
 
-        candidate_rows.append(
-            (
-                float(hole_score),
-                item
-            )
-        )
+        candidate_rows.append((
+            float(hole_score),
+            item
+        ))
 
     candidate_rows.sort(
         key=lambda item: (
@@ -589,10 +552,7 @@ def _select_hole(
     return candidate_rows[0][1]
 
 
-def predict(
-    df,
-    stadium_no=None
-):
+def predict(df, stadium_no=None):
     if not isinstance(df, pd.DataFrame):
         raise ValueError(
             "出走表データが不正です。"
@@ -673,10 +633,7 @@ def predict(
         )
 
         combos.append(
-            (
-                (a, b, c),
-                score
-            )
+            ((a, b, c), score)
         )
 
     if not combos:
@@ -704,10 +661,9 @@ def predict(
                 float(probability),
                 float(score)
             )
-            for (
-                combo,
-                score
-            ), probability in zip(
+            for (combo, score),
+            probability
+            in zip(
                 combos,
                 probabilities
             )
@@ -880,4 +836,4 @@ def predict(
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+        }

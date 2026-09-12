@@ -1,9 +1,10 @@
+import traceback
+from datetime import date, timedelta
+
 import streamlit as st
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import data
-from ai import predict
+from ai import predict, combo_text
 from backtest import run_backtest
 
 
@@ -13,335 +14,463 @@ from backtest import run_backtest
 
 st.set_page_config(
     page_title="やっちゃんの競艇AI予想 PRO",
-    page_icon="🎯",
-    layout="centered"
+    page_icon="🚤",
+    layout="centered",
 )
-
-
-# =========================================================
-# デザイン
-# =========================================================
-
-st.markdown("""
-<style>
-.block-container{
-    padding-top:1.2rem;
-    max-width:900px;
-}
-h1{
-    font-size:2.4rem;
-}
-.ticket{
-    padding:12px 14px;
-    border:1px solid #444;
-    border-radius:10px;
-    margin:8px 0;
-}
-.big{
-    font-size:1.55rem;
-    font-weight:700;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# =========================================================
-# 今日の日付
-# 日本時間で判定
-# =========================================================
-
-JST = ZoneInfo("Asia/Tokyo")
-today = datetime.now(JST).date()
-bt_default = today - timedelta(days=1)
-
-
-# =========================================================
-# 新しいセッションの初期化
-# =========================================================
-
-if "app_initialized" not in st.session_state:
-
-    st.session_state["race_day"] = today
-    st.session_state["venue"] = "選択してください"
-    st.session_state["race"] = "選択してください"
-    st.session_state["bt_day"] = bt_default
-    st.session_state["count"] = 100
-
-    st.session_state["app_initialized"] = True
 
 
 # =========================================================
 # タイトル
 # =========================================================
 
-st.title("やっちゃんの競艇AI予想 PRO")
-st.caption("AI的中率重視 × 実データ × 3連単3点")
+st.title("🚤 やっちゃんの競艇AI予想 PRO")
+
+st.caption(
+    "AI的中率重視 × 実データ × 3連単3点"
+)
 
 
 # =========================================================
-# AI予想
+# セッション初期値
 # =========================================================
 
-st.header("🎯 AI予想")
+today = date.today()
+yesterday = today - timedelta(days=1)
+
+if "race_day" not in st.session_state:
+    st.session_state.race_day = today
+
+if "venue" not in st.session_state:
+    st.session_state.venue = "選択してください"
+
+if "race" not in st.session_state:
+    st.session_state.race = "選択してください"
+
+if "bt_day" not in st.session_state:
+    st.session_state.bt_day = yesterday
+
+if "count" not in st.session_state:
+    st.session_state.count = 100
 
 
-# ---------------------------------------------------------
+# =========================================================
 # 開催日
-# ---------------------------------------------------------
+# =========================================================
 
 race_day = st.date_input(
     "開催日",
     key="race_day",
-    max_value=today
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # 開催場
-# ---------------------------------------------------------
+# =========================================================
 
 venue_names = [
     "選択してください"
-] + list(data.STADIUM_BY_NAME.keys())
+] + list(
+    data.STADIUMS.values()
+)
 
 venue_name = st.selectbox(
     "開催場",
     venue_names,
-    key="venue"
+    key="venue",
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # レース
-# ---------------------------------------------------------
+# =========================================================
+
+race_options = [
+    "選択してください"
+]
+
+stadium_no = None
 
 if venue_name != "選択してください":
 
-    venue_no = data.STADIUM_BY_NAME[
+    stadium_no = data.STADIUM_BY_NAME.get(
         venue_name
-    ]
+    )
 
     try:
 
         race_numbers = (
             data.get_races_for_stadium(
                 race_day,
-                venue_no
+                stadium_no,
             )
         )
 
+        for race_no in race_numbers:
+
+            # APIからintで返ってきてもOK
+            # dictで返ってきてもOK
+            if isinstance(
+                race_no,
+                dict
+            ):
+
+                value = race_no.get(
+                    "race_number",
+                    race_no.get(
+                        "race_no",
+                        0
+                    )
+                )
+
+            else:
+                value = race_no
+
+            try:
+                value = int(value)
+
+            except Exception:
+                continue
+
+            if 1 <= value <= 12:
+                race_options.append(
+                    value
+                )
+
     except Exception as e:
 
-        race_numbers = []
-
         st.error(
-            f"出走表データの取得に失敗しました。\n\n{e}"
+            "レース一覧の取得に失敗しました。"
         )
 
-    race_options = [
-        "選択してください"
-    ] + [
-        str(x)
-        for x in race_numbers
-    ]
-
-else:
-
-    venue_no = None
-
-    race_options = [
-        "選択してください"
-    ]
+        with st.expander(
+            "🔎 詳細エラー"
+        ):
+            st.code(
+                traceback.format_exc()
+            )
 
 
-# ---------------------------------------------------------
-# レース選択
-# ---------------------------------------------------------
+race_display_options = [
+    "選択してください"
+]
 
-if (
-    st.session_state.get("race")
-    not in race_options
-):
+for race_no in race_options[1:]:
 
-    st.session_state["race"] = (
-        "選択してください"
+    race_display_options.append(
+        str(race_no)
     )
 
 
-race_choice = st.selectbox(
+selected_race = st.selectbox(
     "レース",
-    race_options,
-    key="race"
+    race_display_options,
 )
 
 
 # =========================================================
-# AI予想実行
+# AI予想
 # =========================================================
 
 if st.button(
     "🎯 AI予想を実行",
-    use_container_width=True
+    use_container_width=True,
 ):
 
     if (
-        venue_no is None
-        or race_choice == "選択してください"
+        venue_name
+        == "選択してください"
     ):
 
         st.warning(
-            "開催場とレースを選択してください。"
+            "開催場を選択してください。"
+        )
+
+    elif (
+        selected_race
+        == "選択してください"
+    ):
+
+        st.warning(
+            "レースを選択してください。"
         )
 
     else:
 
-        with st.spinner(
-            "出走表・直前情報を取得してAI予想を計算しています…"
-        ):
+        try:
 
-            try:
+            stadium_no = (
+                data.STADIUM_BY_NAME[
+                    venue_name
+                ]
+            )
 
-                race_no = int(
-                    race_choice
+            race_no = int(
+                selected_race
+            )
+
+            # -------------------------------------------------
+            # レース本体取得
+            # -------------------------------------------------
+
+            race = data.get_race(
+                race_day,
+                stadium_no,
+                race_no,
+            )
+
+            if not isinstance(
+                race,
+                dict
+            ):
+
+                raise ValueError(
+                    "レースデータがdict形式ではありません。"
+                    f"\n実際の型: {type(race)}"
                 )
 
-                race = data.get_race(
-                    race_day,
-                    venue_no,
-                    race_no
+            # -------------------------------------------------
+            # DataFrame変換
+            # -------------------------------------------------
+
+            df = data.race_to_df(
+                race
+            )
+
+            if df is None or df.empty:
+
+                raise ValueError(
+                    "出走表DataFrameを作成できませんでした。"
+                    f"\nDataFrame型: {type(df)}"
+                    f"\n行数: "
+                    f"{0 if df is None else len(df)}"
                 )
 
-                df = data.race_to_df(
-                    race
+            # -------------------------------------------------
+            # 通常は6艇
+            # -------------------------------------------------
+
+            if len(df) != 6:
+
+                raise ValueError(
+                    "通常の予想対象である6艇データを取得できませんでした。"
+                    f"\n取得艇数: {len(df)}"
+                    f"\n艇番: "
+                    f"{df['boat'].tolist()}"
                 )
 
-                if (
-                    df.empty
-                    or len(df) != 6
+            # -------------------------------------------------
+            # AI予想
+            # -------------------------------------------------
+
+            pred = predict(
+                df,
+                stadium_no=stadium_no,
+            )
+
+            if not isinstance(
+                pred,
+                dict
+            ):
+
+                raise ValueError(
+                    "AI予想結果がdict形式ではありません。"
+                    f"\n実際の型: {type(pred)}"
+                )
+
+            # -------------------------------------------------
+            # 軸
+            # -------------------------------------------------
+
+            axis = pred.get(
+                "axis"
+            )
+
+            st.subheader(
+                f"🎯 AI軸：{axis}号艇"
+            )
+
+            # -------------------------------------------------
+            # 3点
+            # -------------------------------------------------
+
+            tickets = pred.get(
+                "tickets",
+                []
+            )
+
+            if not isinstance(
+                tickets,
+                list
+            ):
+
+                raise ValueError(
+                    "ticketsがlist形式ではありません。"
+                    f"\n実際の型: {type(tickets)}"
+                )
+
+            for ticket in tickets:
+
+                if not isinstance(
+                    ticket,
+                    dict
                 ):
+                    continue
 
-                    raise ValueError(
-                        "6艇分の出走表データを正しく取得できませんでした。"
+                label = str(
+                    ticket.get(
+                        "label",
+                        ""
                     )
-
-                if set(
-                    df["boat"].astype(int)
-                ) != set(range(1, 7)):
-
-                    raise ValueError(
-                        "艇番が1〜6として取得できていません。"
-                    )
-
-                pred = predict(df)
-
-            except Exception as e:
-
-                st.error(
-                    "出走表データが正しく取得できませんでした。\n\n"
-                    f"{e}"
                 )
 
-            else:
-
-                # -------------------------------------------------
-                # レース情報
-                # -------------------------------------------------
-
-                st.success(
-                    f"{race_day:%Y年%m月%d日} "
-                    f"{venue_name}{race_no}R"
+                combo = ticket.get(
+                    "combo",
+                    ()
                 )
 
-                st.metric(
-                    "AI最有力軸",
-                    f"{pred['axis']}号艇",
-                    f"信頼度 {pred['confidence']:.1f}%"
+                score = ticket.get(
+                    "score",
+                    0
                 )
 
-                st.caption(
-                    "※艇番は1〜6号艇で統一しています。"
-                    "選手登録番号・モーター番号・ボート番号は"
-                    "艇番として使いません。"
-                )
+                try:
 
-
-                # -------------------------------------------------
-                # 3連単3点
-                # -------------------------------------------------
-
-                for ticket in pred["tickets"]:
-
-                    combo = "-".join(
-                        map(
-                            str,
-                            ticket["combo"]
-                        )
+                    text = combo_text(
+                        combo
                     )
 
-                    st.markdown(
-                        f"""
-                        <div class="ticket">
-                            <b>{ticket["label"]}</b>
-                            <span class="big">{combo}</span><br>
-                            AI確率 {ticket["prob"] * 100:.2f}%
-                        </div>
-                        """,
-                        unsafe_allow_html=True
+                except Exception:
+
+                    text = str(
+                        combo
                     )
 
+                if label == "本線":
+                    st.success(
+                        f"本線　{text}"
+                    )
 
-                # -------------------------------------------------
-                # 出走表
-                # -------------------------------------------------
+                elif label == "対抗":
+                    st.info(
+                        f"対抗　{text}"
+                    )
 
-                with st.expander(
-                    "出走表を確認"
-                ):
+                elif label == "穴":
+                    st.warning(
+                        f"穴　{text}"
+                    )
 
-                    cols = [
-                        "boat",
-                        "name",
-                        "racer_number",
-                        "national_win_rate",
-                        "local_win_rate",
-                        "motor_top_2_percent",
-                        "boat_top_2_percent",
-                        "course_number",
-                        "exhibition_time",
-                        "start_timing"
-                    ]
+                else:
+                    st.write(
+                        f"{label}　{text}"
+                    )
 
-                    show = df[
-                        cols
-                    ].copy()
+            # -------------------------------------------------
+            # 確率
+            # -------------------------------------------------
 
-                    show.columns = [
-                        "艇番",
-                        "選手",
-                        "登録番号",
-                        "全国勝率",
-                        "当地勝率",
-                        "モーター2連率",
-                        "ボート2連率",
-                        "進入",
-                        "展示",
-                        "ST"
-                    ]
+            three_probability = pred.get(
+                "three_point_probability",
+                0
+            )
 
+            axis_first = pred.get(
+                "axis_first_probability",
+                0
+            )
+
+            axis_top3 = pred.get(
+                "axis_top3_probability",
+                0
+            )
+
+            st.write(
+                f"3点合計AI確率："
+                f"{three_probability:.2f}%"
+            )
+
+            st.write(
+                f"軸1着AI確率："
+                f"{axis_first:.2f}%"
+            )
+
+            st.write(
+                f"軸3着内AI確率："
+                f"{axis_top3:.2f}%"
+            )
+
+            # -------------------------------------------------
+            # 詳細
+            # -------------------------------------------------
+
+            with st.expander(
+                "出走表データ"
+            ):
+
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                )
+
+            with st.expander(
+                "AI内部ランキング"
+            ):
+
+                ranking = pred.get(
+                    "ranking",
+                    []
+                )
+
+                if ranking:
                     st.dataframe(
-                        show,
-                        hide_index=True,
-                        use_container_width=True
+                        ranking,
+                        use_container_width=True,
                     )
 
+        except Exception as e:
 
-                # -------------------------------------------------
-                # オッズ
-                # -------------------------------------------------
+            st.error(
+                "出走表データが正しく取得できませんでした。"
+            )
 
-                st.info(
-                    "公式オッズは現在のv1データに含まれないため、"
-                    "この版ではAI確率のみ表示しています。"
+            st.error(
+                str(e)
+            )
+
+            # -------------------------------------------------
+            # 今回は原因特定のため表示
+            # -------------------------------------------------
+
+            with st.expander(
+                "🔎 詳細エラーを見る"
+            ):
+
+                st.code(
+                    traceback.format_exc()
+                )
+
+                st.write(
+                    "【確認情報】"
+                )
+
+                st.write(
+                    "開催日:",
+                    race_day
+                )
+
+                st.write(
+                    "開催場:",
+                    venue_name
+                )
+
+                st.write(
+                    "会場番号:",
+                    stadium_no
+                )
+
+                st.write(
+                    "レース:",
+                    selected_race
                 )
 
 
@@ -356,66 +485,71 @@ st.divider()
 # バックテスト
 # =========================================================
 
-st.header("📈 バックテスト")
+st.header(
+    "📈 バックテスト"
+)
 
-
-# ---------------------------------------------------------
-# バックテスト日
-# ---------------------------------------------------------
 
 bt_day = st.date_input(
     "バックテスト日",
     key="bt_day",
-    max_value=bt_default
+    max_value=yesterday,
 )
 
-
-# ---------------------------------------------------------
-# 検証レース数
-# ---------------------------------------------------------
 
 count = st.selectbox(
     "検証レース数",
     [100, 200, 300, 500, 1000],
-    key="count"
+    key="count",
 )
 
 
 st.caption(
-    "昨日を起点に、必要なレース数に達するまで"
-    "過去へ自動的に遡ります。全24場を対象にします。"
+    "昨日を起点に、必要なレース数に達するまで過去へ自動的に遡ります。"
+    "全24場を対象にします。"
 )
 
 
-# =========================================================
-# バックテスト開始
-# =========================================================
-
 if st.button(
-    "🚀 バックテスト開始",
-    use_container_width=True
+    "📊 バックテスト実行",
+    use_container_width=True,
 ):
 
-    progress_bar = st.progress(0)
+    progress_bar = st.progress(
+        0
+    )
+
     status = st.empty()
 
-    def progress(
-        day_no,
+    def progress_callback(
+        day_index,
         max_days,
         found,
-        current_day
+        current_day,
     ):
 
-        progress_bar.progress(
+        ratio = (
+            day_index
+            / max_days
+        )
+
+        ratio = max(
+            0.0,
             min(
-                day_no / max_days,
-                1.0
+                1.0,
+                ratio
             )
         )
 
-        status.write(
-            f"全24場の過去レースを解析しています… "
-            f"{found}/{count}件 / {current_day}"
+        progress_bar.progress(
+            ratio
+        )
+
+        status.info(
+            f"取得中："
+            f"{current_day} / "
+            f"有効レース {found} / "
+            f"目標 {count}"
         )
 
     try:
@@ -424,173 +558,127 @@ if st.button(
             run_backtest(
                 bt_day,
                 count,
-                progress=progress
+                progress=progress_callback,
             )
         )
 
-    except Exception as e:
-
-        status.empty()
-
-        st.error(
-            f"バックテストに失敗しました: {e}"
+        progress_bar.progress(
+            1.0
         )
 
-    else:
-
-        progress_bar.progress(1.0)
         status.empty()
 
         if not rows:
 
             st.error(
                 "有効な結果データを1レースも取得できませんでした。"
-                "API接続または日付を確認してください。"
+            )
+
+            st.warning(
+                "下の診断情報を確認してください。"
             )
 
         else:
 
+            st.success(
+                f"{len(rows)}レースの検証が完了しました。"
+            )
+
             # -------------------------------------------------
-            # 結果タイトル
+            # サマリー
+            # -------------------------------------------------
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.metric(
+                    "検証数",
+                    summary["検証数"]
+                )
+
+                st.metric(
+                    "3点的中率",
+                    f'{summary["3点的中率"]:.2f}%'
+                )
+
+                st.metric(
+                    "軸1着率",
+                    f'{summary["軸1着率"]:.2f}%'
+                )
+
+                st.metric(
+                    "軸3着内率",
+                    f'{summary["軸3着内率"]:.2f}%'
+                )
+
+            with col2:
+
+                st.metric(
+                    "本線",
+                    f'{summary["本線的中率"]:.2f}%'
+                )
+
+                st.metric(
+                    "対抗",
+                    f'{summary["対抗的中率"]:.2f}%'
+                )
+
+                st.metric(
+                    "穴",
+                    f'{summary["穴的中率"]:.2f}%'
+                )
+
+                st.metric(
+                    "回収率",
+                    f'{summary["回収率"]:.2f}%'
+                )
+
+            # -------------------------------------------------
+            # 会場別
             # -------------------------------------------------
 
             st.subheader(
-                f"検証結果：{summary['検証数']}レース"
-            )
-
-
-            # -------------------------------------------------
-            # 基本的中率
-            # -------------------------------------------------
-
-            c1, c2, c3 = st.columns(3)
-
-            c1.metric(
-                "3点的中率",
-                f"{summary['3点的中率']:.1f}%"
-            )
-
-            c2.metric(
-                "軸1着率",
-                f"{summary['軸1着率']:.1f}%"
-            )
-
-            c3.metric(
-                "軸3着内率",
-                f"{summary['軸3着内率']:.1f}%"
-            )
-
-
-            # -------------------------------------------------
-            # 各チケット
-            # -------------------------------------------------
-
-            c4, c5, c6 = st.columns(3)
-
-            c4.metric(
-                "本線",
-                f"{summary['本線的中率']:.1f}%"
-            )
-
-            c5.metric(
-                "対抗",
-                f"{summary['対抗的中率']:.1f}%"
-            )
-
-            c6.metric(
-                "穴",
-                f"{summary['穴的中率']:.1f}%"
-            )
-
-
-            # -------------------------------------------------
-            # 回収関連
-            # -------------------------------------------------
-
-            c7, c8, c9 = st.columns(3)
-
-            c7.metric(
-                "投資",
-                f"{summary['投資']:,}円"
-            )
-
-            c8.metric(
-                "払戻",
-                f"{summary['払戻']:,}円"
-            )
-
-            c9.metric(
-                "回収率",
-                f"{summary['回収率']:.1f}%"
-            )
-
-
-            # =================================================
-            # 会場別集計
-            # =================================================
-
-            st.divider()
-
-            st.subheader(
-                "🏟️ 会場別成績"
-            )
-
-            st.caption(
-                "3点的中率の高い順に表示しています。"
-                "検証数が少ない会場は参考値として見てください。"
+                "会場別成績"
             )
 
             if venue_rows:
 
-                venue_display = []
-
-                for row in venue_rows:
-
-                    venue_display.append(
-                        {
-                            "会場": row["会場"],
-                            "検証数": row["検証数"],
-                            "3点的中率": (
-                                f"{row['3点的中率']:.1f}%"
-                            ),
-                            "本線": (
-                                f"{row['本線']:.1f}%"
-                            ),
-                            "対抗": (
-                                f"{row['対抗']:.1f}%"
-                            ),
-                            "穴": (
-                                f"{row['穴']:.1f}%"
-                            ),
-                            "回収率": (
-                                f"{row['回収率']:.1f}%"
-                            ),
-                        }
-                    )
-
                 st.dataframe(
-                    venue_display,
-                    hide_index=True,
-                    use_container_width=True
+                    venue_rows,
+                    use_container_width=True,
                 )
 
-            else:
-
-                st.info(
-                    "会場別データがありません。"
-                )
-
-
             # -------------------------------------------------
-            # 詳細結果
+            # 詳細
             # -------------------------------------------------
 
-            with st.expander(
-                "全レースの詳細結果"
-            ):
+            st.subheader(
+                "検証詳細"
+            )
 
-                st.dataframe(
-                    rows,
-                    hide_index=True,
-                    use_container_width=True
+            st.dataframe(
+                rows,
+                use_container_width=True,
+            )
+
+    except Exception as e:
+
+        progress_bar.empty()
+        status.empty()
+
+        st.error(
+            "バックテスト中にエラーが発生しました。"
+        )
+
+        st.error(
+            str(e)
+        )
+
+        with st.expander(
+            "🔎 詳細エラーを見る"
+        ):
+
+            st.code(
+                traceback.format_exc()
                 )

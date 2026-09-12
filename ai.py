@@ -258,14 +258,20 @@ def _combo_score(
     )
 
     if a == 1:
+
         score += 0.055
+
     elif a == 2:
+
         score += 0.025
 
     if b == 1:
+
         score += 0.020
 
-    return float(score)
+    return float(
+        score
+    )
 
 
 def _ordering_bonus(
@@ -275,21 +281,33 @@ def _ordering_bonus(
     third_score,
 ):
     second_strength = float(
-        second_score[second_boat]
+        second_score[
+            second_boat
+        ]
     )
 
     third_strength = float(
-        third_score[third_boat]
+        third_score[
+            third_boat
+        ]
     )
 
     second_role = float(
-        second_score[second_boat]
-        - third_score[second_boat]
+        second_score[
+            second_boat
+        ]
+        - third_score[
+            second_boat
+        ]
     )
 
     third_role = float(
-        third_score[third_boat]
-        - second_score[third_boat]
+        third_score[
+            third_boat
+        ]
+        - second_score[
+            third_boat
+        ]
     )
 
     second_role = float(
@@ -326,11 +344,9 @@ def _ordering_bonus(
         )
     )
 
-    # 今回の実験変更はここだけ。
-    # 2着・3着それぞれの役割差を少し強く評価する。
     return (
         0.045 * strength_gap
-        + 0.040 * role
+        + 0.025 * role
     )
 
 
@@ -341,6 +357,7 @@ def _select_main_counter(
     third_score,
 ):
     if not ranked:
+
         raise ValueError(
             "予想候補がありません。"
         )
@@ -351,7 +368,9 @@ def _select_main_counter(
         original_main[0][0]
     )
 
-    candidate_main = original_main
+    candidate_main = (
+        original_main
+    )
 
     # 5号艇特別処理。
     # 5号艇が欠場している場合は完全にスキップ。
@@ -359,8 +378,11 @@ def _select_main_counter(
         original_axis != 5
         and 5 in first_score
     ):
+
         current_axis_score = float(
-            first_score[original_axis]
+            first_score[
+                original_axis
+            ]
         )
 
         boat5_score = float(
@@ -377,7 +399,9 @@ def _select_main_counter(
             boat5_candidates = [
                 item
                 for item in ranked
-                if int(item[0][0]) == 5
+                if int(
+                    item[0][0]
+                ) == 5
             ]
 
             if boat5_candidates:
@@ -398,6 +422,7 @@ def _select_main_counter(
                     boat5_raw
                     >= original_raw - 0.035
                 ):
+
                     candidate_main = (
                         best_boat5
                     )
@@ -409,12 +434,17 @@ def _select_main_counter(
     same_axis = [
         item
         for item in ranked
-        if int(item[0][0]) == axis
+        if int(
+            item[0][0]
+        ) == axis
     ]
 
-    if len(same_axis) < 2:
+    if len(
+        same_axis
+    ) < 2:
 
         if len(ranked) >= 2:
+
             return (
                 candidate_main,
                 ranked[1]
@@ -474,18 +504,19 @@ def _select_main_counter(
         reverse=True
     )
 
-    main_candidate = adjusted[0]
+    main_candidate = (
+        adjusted[0]
+    )
 
     counter_candidates = [
         item
         for item in adjusted
-        if (
-            item["combo"]
-            != main_candidate["combo"]
-        )
+        if item["combo"]
+        != main_candidate["combo"]
     ]
 
     if not counter_candidates:
+
         return (
             candidate_main,
             same_axis[1]
@@ -515,6 +546,7 @@ def _select_main_counter(
         main_candidate["raw_score"]
         < original_raw_score - 0.045
     ):
+
         main = candidate_main
 
         fallback = [
@@ -522,42 +554,71 @@ def _select_main_counter(
             for item in ranked
             if (
                 item[0] != main[0]
-                and int(item[0][0]) == axis
+                and int(
+                    item[0][0]
+                ) == axis
             )
         ]
 
         if fallback:
+
             counter = fallback[0]
 
-    return main, counter
+    return (
+        main,
+        counter
+    )
 
 
-def _venue_profile(stadium_no):
+def _venue_profile(
+    stadium_no
+):
+    """
+    会場別補正。
+
+    18の重複定義を修正。
+    17 = 宮島
+    18 = 徳山
+
+    補正幅はこれまでの実験値を維持。
+    """
 
     profiles = {
-        7: 0.020,
-        1: 0.015,
-        20: 0.015,
-        22: 0.015,
-        2: 0.015,
-        5: 0.010,
-        11: 0.010,
-        14: 0.010,
-        13: 0.005,
+
+        # 3点的中率上位
+        7: 0.020,    # 蒲郡
+        1: 0.015,    # 桐生
+        20: 0.015,   # 若松
+        22: 0.015,   # 福岡
+        2: 0.015,    # 戸田
+
+        # その他
+        5: 0.010,    # 多摩川
+        11: 0.010,   # びわこ
+        14: 0.010,   # 鳴門
+        13: 0.005,   # 尼崎
+
+        # 宮島
         17: 0.005,
+
+        # 徳山
         18: 0.005,
-        24: -0.015,
-        9: -0.010,
-        16: -0.005,
-        3: -0.005,
+
+        # 弱かった会場
+        24: -0.015,  # 大村
+        9: -0.010,   # 津
+        16: -0.005,  # 児島
+        3: -0.005,   # 江戸川
     }
 
     try:
+
         stadium_no = int(
             stadium_no
         )
 
     except Exception:
+
         return 0.0
 
     return float(
@@ -576,7 +637,10 @@ def _apply_venue_adjustment(
         stadium_no
     )
 
-    if abs(venue_bonus) < 1e-12:
+    if abs(
+        venue_bonus
+    ) < 1e-12:
+
         return ranked
 
     adjusted = []
@@ -599,10 +663,20 @@ def _apply_venue_adjustment(
 
         axis_bonus = venue_bonus
 
-        if axis in (1, 2):
+        if axis in (
+            1,
+            2
+        ):
+
             axis_bonus *= 0.70
 
-        elif axis in (3, 4, 5, 6):
+        elif axis in (
+            3,
+            4,
+            5,
+            6
+        ):
+
             axis_bonus *= 0.85
 
         adjusted_score = (
@@ -649,10 +723,11 @@ def _select_hole(
     ]
 
     if not candidates:
+
         return ranked[1]
 
     main_axis = int(
-        main_combo[0][0]
+        main_combo[0]
     )
 
     candidate_rows = []
@@ -677,7 +752,11 @@ def _select_hole(
 
         diversity_bonus = 0.0
 
-        if alternative_axis != main_axis:
+        if (
+            alternative_axis
+            != main_axis
+        ):
+
             diversity_bonus = 0.025
 
         hole_score = (
@@ -696,7 +775,9 @@ def _select_hole(
     candidate_rows.sort(
         key=lambda item: (
             item[0],
-            float(item[1][2]),
+            float(
+                item[1][2]
+            ),
         ),
         reverse=True
     )
@@ -710,12 +791,28 @@ def predict(
 ):
     """
     3〜6艇に対応。
+
+    通常6艇:
+        従来ロジック
+
+    5艇:
+        欠場艇を完全除外
+
+    4艇:
+        欠場艇を完全除外
+
+    3艇:
+        その3艇だけで3連単を生成
+
+    3艇未満:
+        エラー
     """
 
     if not isinstance(
         df,
         pd.DataFrame
     ):
+
         raise ValueError(
             "出走表データが不正です。"
         )
@@ -723,6 +820,7 @@ def predict(
     if not (
         3 <= len(df) <= 6
     ):
+
         raise ValueError(
             "3〜6艇分の出走表が必要です。"
         )
@@ -733,6 +831,7 @@ def predict(
     )
 
     if boats_series.isna().any():
+
         raise ValueError(
             "艇番データが不正です。"
         )
@@ -748,6 +847,7 @@ def predict(
     if not (
         3 <= len(active_boats) <= 6
     ):
+
         raise ValueError(
             "予想対象艇数が不正です。"
         )
@@ -756,11 +856,14 @@ def predict(
         1 <= boat <= 6
         for boat in active_boats
     ):
+
         raise ValueError(
             "艇番が1〜6になっていません。"
         )
 
-    x = _prepare(df)
+    x = _prepare(
+        df
+    )
 
     first_score = dict(
         zip(
@@ -782,6 +885,10 @@ def predict(
             x["third_score"].astype(float),
         )
     )
+
+    # =====================================================
+    # 欠場艇を除いた艇だけで3連単を生成
+    # =====================================================
 
     combos = []
 
@@ -807,6 +914,7 @@ def predict(
         )
 
     if not combos:
+
         raise ValueError(
             "3連単候補を生成できません。"
         )
@@ -828,8 +936,12 @@ def predict(
         [
             (
                 combo,
-                float(probability),
-                float(score),
+                float(
+                    probability
+                ),
+                float(
+                    score
+                ),
             )
             for (
                 combo,
@@ -844,6 +956,7 @@ def predict(
         reverse=True,
     )
 
+    # 会場補正
     ranked = _apply_venue_adjustment(
         ranked,
         stadium_no,
@@ -879,7 +992,12 @@ def predict(
         ]
 
         if alternatives:
+
             hole = alternatives[0]
+
+    # =====================================================
+    # 3点重複防止
+    # =====================================================
 
     if (
         main[0] == counter[0]
@@ -899,7 +1017,10 @@ def predict(
                 u[0]
                 for u in unique
             ]:
-                unique.append(item)
+
+                unique.append(
+                    item
+                )
 
         for item in ranked:
 
@@ -910,13 +1031,20 @@ def predict(
                 u[0]
                 for u in unique
             ]:
-                unique.append(item)
+
+                unique.append(
+                    item
+                )
 
         if len(unique) >= 3:
 
             main = unique[0]
             counter = unique[1]
             hole = unique[2]
+
+    # =====================================================
+    # 1着確率
+    # =====================================================
 
     first_values = [
         first_score[boat]
@@ -948,7 +1076,9 @@ def predict(
     ]
 
     axis_position = (
-        axis_rank.index(axis)
+        axis_rank.index(
+            axis
+        )
         if axis in axis_rank
         else 0
     )
@@ -973,7 +1103,13 @@ def predict(
             )
         )
 
-    if len(first_ranking) >= 2:
+    # =====================================================
+    # 信頼度
+    # =====================================================
+
+    if len(
+        first_ranking
+    ) >= 2:
 
         margin = float(
             first_ranking[0][1]
@@ -981,6 +1117,7 @@ def predict(
         )
 
     else:
+
         margin = 0.0
 
     confidence = (
@@ -1028,7 +1165,9 @@ def predict(
             1
         ),
         "axis": axis,
-        "axis_top3": axis_top3_probability,
+        "axis_top3": (
+            axis_top3_probability
+        ),
         "all_combos": ranked,
         "df": x,
     }

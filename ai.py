@@ -51,9 +51,7 @@ def _prepare(df):
     valid_exhibition = exhibition[exhibition > 0]
 
     if len(valid_exhibition) > 0:
-        exhibition_median = float(
-            valid_exhibition.median()
-        )
+        exhibition_median = float(valid_exhibition.median())
     else:
         exhibition_median = 1.0
 
@@ -507,33 +505,12 @@ def _select_hole(
             )
         )
 
-        # CSV分析に基づく弱い条件付き3着補正
-        # 前回の+0.008は強すぎたため今回は+0.003
-        pair_third_bonus = 0.0
-
-        pair = (
-            int(combo[0]),
-            int(combo[1])
-        )
-
-        preferred_thirds = {
-            (1, 3): {2, 4},
-            (1, 2): {3, 4},
-            (1, 4): {2, 3},
-            (1, 5): {2, 3, 4},
-        }
-
-        if pair in preferred_thirds:
-            if int(combo[2]) in preferred_thirds[pair]:
-                pair_third_bonus = 0.003
-
         hole_score = (
             raw_score
             + diversity_bonus
             + 0.10 * axis_score
             + third_boat_bonus
             + third_fit_bonus
-            + pair_third_bonus
         )
 
         candidate_rows.append((

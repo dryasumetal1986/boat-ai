@@ -1,5 +1,4 @@
 import json
-import time
 from functools import lru_cache
 from datetime import date
 
@@ -8,6 +7,7 @@ import pandas as pd
 
 
 BASE_URL = "https://boatraceopenapi.github.io/api/v1"
+
 
 STADIUMS = {
     1: "桐生",
@@ -119,11 +119,9 @@ def _normalize_racers(racers):
 def get_day_data(day_str):
     """
     1日分の全国24場データを取得。
-
-    API側の一時的な通信失敗に備えてリトライする。
     """
 
-    clean_date = str(day_str).replace(
+    clean_date = day_str.replace(
         "-",
         ""
     )
@@ -134,55 +132,42 @@ def get_day_data(day_str):
         f"{clean_date}.json"
     )
 
-    headers = {
-        "User-Agent": (
-            "YacchanBoatAI/1.0 "
-            "(BoatraceOpenAPI client)"
-        ),
-        "Accept": "application/json",
-    }
+    try:
 
-    last_error = None
+        response = requests.get(
+            url,
+            timeout=15
+        )
 
-    for attempt in range(3):
+        response.raise_for_status()
 
-        try:
+        data = response.json()
 
-            response = requests.get(
-                url,
-                headers=headers,
-                timeout=20
-            )
+    except Exception as e:
 
-            response.raise_for_status()
+        raise RuntimeError(
+            f"API取得失敗: {day_str}\n{e}"
+        )
 
-            data = response.json()
+    if not isinstance(
+        data,
+        dict
+    ):
 
-            if not isinstance(data, dict):
-                raise RuntimeError(
-                    f"APIデータ形式が不正です: {day_str}"
-                )
+        raise RuntimeError(
+            f"APIデータ形式が不正です: {day_str}"
+        )
 
-            if not isinstance(
-                data.get("programs"),
-                dict
-            ):
-                raise RuntimeError(
-                    f"programsデータがありません: {day_str}"
-                )
+    if not isinstance(
+        data.get("programs"),
+        dict
+    ):
 
-            return data
+        raise RuntimeError(
+            f"programsデータがありません: {day_str}"
+        )
 
-        except Exception as e:
-
-            last_error = e
-
-            if attempt < 2:
-                time.sleep(1.0 * (attempt + 1))
-
-    raise RuntimeError(
-        f"API取得失敗: {day_str}\n{last_error}"
-    )
+    return data
 
 
 def get_race(
@@ -337,6 +322,7 @@ def race_to_df(race):
         racers.keys()
     )
 
+    # 3艇未満は3連単予想不可
     if not (
         3 <= len(active_boats) <= 6
     ):
@@ -355,10 +341,13 @@ def race_to_df(race):
 
         row = {
 
+            # 艇番
             "boat": boat,
 
+            # 枠番
             "entry_number": boat,
 
+            # 選手情報
             "name": str(
                 racer.get(
                     "name",
@@ -387,6 +376,7 @@ def race_to_df(race):
                 0
             ),
 
+            # 全国成績
             "average_start_timing": _num(
                 racer.get(
                     "average_start_timing"
@@ -415,6 +405,7 @@ def race_to_df(race):
                 0
             ),
 
+            # 当地成績
             "local_win_rate": _num(
                 racer.get(
                     "local_win_rate"
@@ -436,6 +427,7 @@ def race_to_df(race):
                 0
             ),
 
+            # モーター
             "motor_number": _int(
                 racer.get(
                     "motor_number"
@@ -457,6 +449,7 @@ def race_to_df(race):
                 0
             ),
 
+            # ボート
             "boat_number": _int(
                 racer.get(
                     "boat_number"
@@ -478,6 +471,7 @@ def race_to_df(race):
                 0
             ),
 
+            # F/L
             "flying_count": _int(
                 racer.get(
                     "flying_count"
@@ -492,6 +486,7 @@ def race_to_df(race):
                 0
             ),
 
+            # 進入コース
             "course_number": _int(
                 preview_data.get(
                     "course_number"
@@ -547,6 +542,7 @@ def race_to_df(race):
 
         return pd.DataFrame()
 
+    # 欠場等で存在しない艇を記録
     df.attrs[
         "active_boats"
     ] = active_boats
@@ -565,6 +561,14 @@ def race_to_df(race):
 def get_result(race):
     """
     結果を1着-2着-3着の艇番で返す。
+
+    通常:
+        (1, 2, 3)
+
+    欠場艇がある場合:
+        (1, 5, 2)
+
+    のように、実際の着順だけを見る。
 
     3着まで取得できれば有効。
     """

@@ -303,25 +303,22 @@ def run_backtest(start_date, target_count, progress=None):
 
             pred = predict(df, stadium_no=stadium_no)
 
-            # CURRENT ai.py COMPATIBILITY:
-            # predict() returns tuple tickets directly:
-            #   pred["main"], pred["counter"], pred["hole"]
-            # and pred["tickets"] is [main, counter, hole].
-            # The previous backtest expected ticket dictionaries and
-            # pred["axis"], which caused a KeyError on every race and
-            # the broad exception handler silently discarded every row.
-            tickets = {
-                "本線": tuple(int(x) for x in pred["main"]),
-                "対抗": tuple(int(x) for x in pred["counter"]),
-                "穴": tuple(int(x) for x in pred["hole"]),
-            }
+            tickets = {}
+
+            for ticket in pred["tickets"]:
+                label = str(ticket["label"])
+                combo = tuple(int(x) for x in ticket["combo"])
+
+                if (
+                    len(combo) == 3
+                    and len(set(combo)) == 3
+                    and all(1 <= x <= 6 for x in combo)
+                    and all(x in boats for x in combo)
+                ):
+                    tickets[label] = combo
 
             if not all(
                 label in tickets
-                and len(tickets[label]) == 3
-                and len(set(tickets[label])) == 3
-                and all(1 <= x <= 6 for x in tickets[label])
-                and all(x in boats for x in tickets[label])
                 for label in ("本線", "対抗", "穴")
             ):
                 continue
@@ -351,19 +348,7 @@ def run_backtest(start_date, target_count, progress=None):
                 hits["3点"] += 1
                 venue_stats[stadium_no]["3点"] += 1
 
-            # CURRENT ai.py COMPATIBILITY:
-            # ai.py has no pred["axis"]. Use the boat with the
-            # highest first-place probability as the axis.
-            first_probs = pred.get("first_probs", {})
-            if first_probs:
-                axis = int(
-                    max(
-                        first_probs,
-                        key=first_probs.get,
-                    )
-                )
-            else:
-                axis = int(tickets["本線"][0])
+            axis = int(pred["axis"])
 
             if axis == actual[0]:
                 axis_first += 1

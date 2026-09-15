@@ -210,7 +210,7 @@ def _ordering_bonus(
 
     return (
         0.045 * strength_gap
-        + 0.025 * role
+        + 0.015 * role
     )
 
 

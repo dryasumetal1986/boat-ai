@@ -1,879 +1,821 @@
-import itertools
-import numpy as np
+import json
+from functools import lru_cache
+from datetime import date
+
+import requests
 import pandas as pd
 
-BOATS = (1, 2, 3, 4, 5, 6)
-
-
-def combo_text(combo):
-    return "-".join(str(int(x)) for x in combo)
-
-
-def _norm_series(series, higher=True):
-    x = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
-    lo = float(x.min())
-    hi = float(x.max())
-
-    if hi - lo < 1e-12:
-        return pd.Series(0.5, index=x.index)
-
-    z = (x - lo) / (hi - lo)
-
-    if higher:
-        return z
-
-    return 1.0 - z
-
-
-def _prepare(df):
-    x = df.copy().sort_values("boat").reset_index(drop=True)
-
-    x["win_n"] = _norm_series(x["national_win_rate"])
-    x["win_l"] = _norm_series(x["local_win_rate"])
-    x["top2_n"] = _norm_series(x["national_top_2_percent"])
-    x["top3_n"] = _norm_series(x["national_top_3_percent"])
-    x["top2_l"] = _norm_series(x["local_top_2_percent"])
-    x["top3_l"] = _norm_series(x["local_top_3_percent"])
-    x["motor2"] = _norm_series(x["motor_top_2_percent"])
-    x["motor3"] = _norm_series(x["motor_top_3_percent"])
-    x["boat2"] = _norm_series(x["boat_top_2_percent"])
-    x["boat3"] = _norm_series(x["boat_top_3_percent"])
-
-    x["st"] = _norm_series(
-        x["average_start_timing"],
-        higher=False
-    )
-
-    exhibition = pd.to_numeric(
-        x["exhibition_time"],
-        errors="coerce"
-    )
-
-    valid_exhibition = exhibition[exhibition > 0]
-
-    if len(valid_exhibition) > 0:
-        exhibition_median = float(
-            valid_exhibition.median()
-        )
-    else:
-        exhibition_median = 1.0
-
-    exhibition = (
-        exhibition
-        .replace(0, np.nan)
-        .fillna(exhibition_median)
-    )
-
-    x["exh"] = _norm_series(
-        exhibition,
-        higher=False
-    )
-
-    course = pd.to_numeric(
-        x["course_number"],
-        errors="coerce"
-    )
-
-    course = course.fillna(
-        pd.to_numeric(x["boat"], errors="coerce")
-    )
-
-    x["course"] = (
-        1.0 - (course - 1.0) / 10.0
-    ).clip(0.4, 1.0)
-
-    x["first_score"] = (
-        0.22 * x["win_n"]
-        + 0.13 * x["win_l"]
-        + 0.13 * x["top2_n"]
-        + 0.08 * x["top2_l"]
-        + 0.10 * x["motor2"]
-        + 0.06 * x["boat2"]
-        + 0.12 * x["st"]
-        + 0.10 * x["exh"]
-        + 0.06 * x["course"]
-    )
-
-    x["second_score"] = (
-        0.18 * x["top2_n"]
-        + 0.14 * x["top2_l"]
-        + 0.16 * x["top3_n"]
-        + 0.10 * x["top3_l"]
-        + 0.14 * x["motor2"]
-        + 0.08 * x["motor3"]
-        + 0.10 * x["boat2"]
-        + 0.10 * x["st"]
-    )
-
-    x["third_score"] = (
-        0.18 * x["top3_n"]
-        + 0.14 * x["top3_l"]
-        + 0.16 * x["motor3"]
-        + 0.12 * x["boat3"]
-        + 0.12 * x["top2_n"]
-        + 0.10 * x["top2_l"]
-        + 0.07 * x["st"]
-        + 0.08 * x["exh"]
-    )
-
-    return x
-
-
-def _softmax(values, temperature=0.075):
-    values = np.asarray(values, dtype=float)
-
-    if len(values) == 0:
-        return np.array([])
-
-    temperature = max(float(temperature), 0.001)
-
-    scaled = values / temperature
-    scaled -= np.max(scaled)
-
-    exp_values = np.exp(scaled)
-    total = exp_values.sum()
-
-    if total <= 0:
-        return np.ones(len(values)) / len(values)
-
-    return exp_values / total
-
-
-def _combo_score(
-    a,
-    b,
-    c,
-    first_score,
-    second_score,
-    third_score
-):
-    score = (
-        1.00 * first_score[a]
-        + 0.72 * second_score[b]
-        + 0.58 * third_score[c]
-    )
-
-    if a == 1:
-        score += 0.055
-    elif a == 2:
-        score += 0.025
-
-    if b == 1:
-        score += 0.020
-
-    return float(score)
-
-
-def _ordering_bonus(
-    second_boat,
-    third_boat,
-    second_score,
-    third_score
-):
-    second_strength = float(
-        second_score[second_boat]
-    )
-
-    third_strength = float(
-        third_score[third_boat]
-    )
-
-    second_role = float(
-        second_score[second_boat]
-        - third_score[second_boat]
-    )
-
-    third_role = float(
-        third_score[third_boat]
-        - second_score[third_boat]
-    )
-
-    second_role = float(
-        np.clip(second_role, -0.30, 0.30)
-    )
-
-    third_role = float(
-        np.clip(third_role, -0.30, 0.30)
-    )
-
-    role = (
-        second_role + third_role
-    ) / 2.0
-
-    strength_gap = float(
-        np.clip(
-            second_strength - third_strength,
-            -0.30,
-            0.30
-        )
-    )
-
-    return (
-        0.045 * strength_gap
-        + 0.025 * role
-    )
-
-
-def _select_main_counter(
-    ranked,
-    first_score,
-    second_score,
-    third_score
-):
-    if not ranked:
-        raise ValueError(
-            "予想候補がありません。"
-        )
-
-    original_main = ranked[0]
-
-    original_axis = int(
-        original_main[0][0]
-    )
-
-    candidate_main = original_main
-
-    if (
-        original_axis != 5
-        and 5 in first_score
-    ):
-        current_axis_score = float(
-            first_score[original_axis]
-        )
-
-        boat5_score = float(
-            first_score[5]
-        )
-
-        axis_gap = (
-            current_axis_score
-            - boat5_score
-        )
-
-        if axis_gap <= 0.025:
-            boat5_candidates = [
-                item
-                for item in ranked
-                if int(item[0][0]) == 5
-            ]
-
-            if boat5_candidates:
-                best_boat5 = boat5_candidates[0]
-
-                original_raw = float(
-                    original_main[2]
-                )
-
-                boat5_raw = float(
-                    best_boat5[2]
-                )
-
-                if (
-                    boat5_raw
-                    >= original_raw - 0.035
-                ):
-                    candidate_main = best_boat5
-
-    axis = int(candidate_main[0][0])
-
-    same_axis = [
-        item
-        for item in ranked
-        if int(item[0][0]) == axis
-    ]
-
-    if len(same_axis) < 2:
-        if len(ranked) >= 2:
-            return candidate_main, ranked[1]
-
-        return candidate_main, candidate_main
-
-    pool = same_axis[:10]
-
-    adjusted = []
-
-    for combo, probability, raw_score in pool:
-        _, second_boat, third_boat = combo
-
-        bonus = _ordering_bonus(
-            second_boat,
-            third_boat,
-            second_score,
-            third_score
-        )
-
-        adjusted_score = (
-            float(raw_score)
-            + float(bonus)
-        )
-
-        adjusted.append({
-            "combo": combo,
-            "prob": float(probability),
-            "raw_score": float(raw_score),
-            "adjusted_score": adjusted_score,
-        })
-
-    adjusted.sort(
-        key=lambda item: (
-            item["adjusted_score"],
-            item["raw_score"]
-        ),
-        reverse=True
-    )
-
-    main_candidate = adjusted[0]
-
-    counter_candidates = [
-        item
-        for item in adjusted
-        if item["combo"]
-        != main_candidate["combo"]
-    ]
-
-    if not counter_candidates:
-        return candidate_main, same_axis[1]
-
-    counter_candidate = counter_candidates[0]
-
-    main = (
-        main_candidate["combo"],
-        main_candidate["prob"],
-        main_candidate["raw_score"]
-    )
-
-    counter = (
-        counter_candidate["combo"],
-        counter_candidate["prob"],
-        counter_candidate["raw_score"]
-    )
-
-    original_raw_score = float(
-        candidate_main[2]
-    )
-
-    if (
-        main_candidate["raw_score"]
-        < original_raw_score - 0.045
-    ):
-        main = candidate_main
-
-        fallback = [
-            item
-            for item in ranked
-            if (
-                item[0] != main[0]
-                and int(item[0][0]) == axis
+
+BASE_URL = "https://boatraceopenapi.github.io/api/v1"
+
+
+STADIUMS = {
+    1: "桐生",
+    2: "戸田",
+    3: "江戸川",
+    4: "平和島",
+    5: "多摩川",
+    6: "浜名湖",
+    7: "蒲郡",
+    8: "常滑",
+    9: "津",
+    10: "三国",
+    11: "びわこ",
+    12: "住之江",
+    13: "尼崎",
+    14: "鳴門",
+    15: "丸亀",
+    16: "児島",
+    17: "宮島",
+    18: "徳山",
+    19: "下関",
+    20: "若松",
+    21: "芦屋",
+    22: "福岡",
+    23: "唐津",
+    24: "大村",
+}
+
+STADIUM_BY_NAME = {
+    v: k
+    for k, v in STADIUMS.items()
+}
+
+
+def _num(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_racers(racers):
+    """
+    API v1のracersを
+
+    {
+        1: {...},
+        2: {...},
+        ...
+        6: {...}
+    }
+
+    の形に統一する。
+
+    欠場などで一部の艇が存在しない場合は、
+    存在する艇だけを返す。
+    """
+
+    result = {}
+
+    if isinstance(racers, dict):
+
+        for key, racer in racers.items():
+
+            if not isinstance(racer, dict):
+                continue
+
+            boat = _int(
+                racer.get("entry_number"),
+                _int(key, 0)
             )
-        ]
 
-        if fallback:
-            counter = fallback[0]
+            if 1 <= boat <= 6:
+                result[boat] = racer
 
-    return main, counter
+    elif isinstance(racers, list):
+
+        for index, racer in enumerate(
+            racers,
+            start=1
+        ):
+
+            if not isinstance(racer, dict):
+                continue
+
+            boat = _int(
+                racer.get("entry_number"),
+                index
+            )
+
+            if 1 <= boat <= 6:
+                result[boat] = racer
+
+    return result
 
 
-def _venue_profile(stadium_no):
-    profiles = {
-        7: 0.020,
-        1: 0.015,
-        20: 0.015,
-        22: 0.015,
-        2: 0.015,
-        5: 0.010,
-        11: 0.010,
-        14: 0.010,
-        13: 0.005,
-        17: 0.005,
-        18: 0.005,
-        24: -0.015,
-        9: -0.010,
-        16: -0.005,
-        3: -0.005,
-    }
+@lru_cache(maxsize=128)
+def get_day_data(day_str):
+    """
+    1日分の全国24場データを取得。
+    """
 
-    try:
-        stadium_no = int(stadium_no)
-    except Exception:
-        return 0.0
-
-    return float(
-        profiles.get(stadium_no, 0.0)
+    clean_date = day_str.replace(
+        "-",
+        ""
     )
 
+    url = (
+        f"{BASE_URL}/"
+        f"{clean_date[:4]}/"
+        f"{clean_date}.json"
+    )
 
-def _venue_axis_bonus(
+    try:
+
+        response = requests.get(
+            url,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"API取得失敗: {day_str}\n{e}"
+        )
+
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        raise RuntimeError(
+            f"APIデータ形式が不正です: {day_str}"
+        )
+
+    if not isinstance(
+        data.get("programs"),
+        dict
+    ):
+
+        raise RuntimeError(
+            f"programsデータがありません: {day_str}"
+        )
+
+    return data
+
+
+def get_race(
+    day,
     stadium_no,
-    axis
+    race_no
 ):
-    try:
-        stadium_no = int(stadium_no)
-        axis = int(axis)
-    except Exception:
-        return 0.0
+    """
+    指定日・指定場・指定レースを取得。
+    """
 
-    axis_profiles = {
-        1: {
-            4: -0.008,
-            5: -0.012,
-            6: -0.012,
-        },
-        20: {
-            2: -0.012,
-        },
-        7: {
-            1: 0.010,
-        },
-        22: {
-            1: 0.010,
-        },
-        21: {
-            1: 0.010,
-        },
-        9: {
-            2: -0.010,
-            5: -0.010,
-        },
-    }
+    if isinstance(
+        day,
+        date
+    ):
+        day_str = day.isoformat()
+    else:
+        day_str = str(day)
 
-    return float(
-        axis_profiles
-        .get(stadium_no, {})
-        .get(axis, 0.0)
+    data = get_day_data(
+        day_str
+    )
+
+    stadiums = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+    )
+
+    stadium = stadiums.get(
+        str(int(stadium_no)),
+        {}
+    )
+
+    races = stadium.get(
+        "races",
+        {}
+    )
+
+    return races.get(
+        str(int(race_no))
     )
 
 
-def _apply_venue_adjustment(
-    ranked,
+def get_races_for_stadium(
+    day,
     stadium_no
 ):
-    venue_bonus = _venue_profile(
-        stadium_no
+    """
+    指定日の指定場について、
+    3〜6艇の出走情報があるレースを返す。
+
+    通常は6艇。
+    欠場などで5艇以下になった場合も
+    レース選択対象にする。
+    """
+
+    if isinstance(
+        day,
+        date
+    ):
+        day_str = day.isoformat()
+    else:
+        day_str = str(day)
+
+    data = get_day_data(
+        day_str
     )
 
-    adjusted = []
-
-    for item in ranked:
-        combo = item[0]
-        probability = float(item[1])
-        raw_score = float(item[2])
-
-        axis = int(combo[0])
-
-        axis_bonus = venue_bonus
-
-        if axis in (1, 2):
-            axis_bonus *= 0.70
-        elif axis in (3, 4, 5, 6):
-            axis_bonus *= 0.85
-
-        venue_axis_bonus = _venue_axis_bonus(
-            stadium_no,
-            axis
-        )
-
-        adjusted_score = (
-            raw_score
-            + axis_bonus
-            + venue_axis_bonus
-        )
-
-        adjusted.append((
-            combo,
-            probability,
-            adjusted_score
-        ))
-
-    adjusted.sort(
-        key=lambda item: (
-            item[2],
-            item[1]
-        ),
-        reverse=True
+    stadium = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
+        .get(str(int(stadium_no)), {})
     )
 
-    return adjusted
+    races = stadium.get(
+        "races",
+        {}
+    )
 
+    race_numbers = []
 
-def _select_hole(
-    ranked,
-    main,
-    counter,
-    first_score,
-    third_score
-):
-    main_combo = main[0]
-    counter_combo = counter[0]
+    for race_key, race in races.items():
 
-    candidates = [
-        item
-        for item in ranked
-        if (
-            item[0] != main_combo
-            and item[0] != counter_combo
+        if not isinstance(
+            race,
+            dict
+        ):
+            continue
+
+        racers = _normalize_racers(
+            race.get("racers")
         )
+
+        if 3 <= len(racers) <= 6:
+
+            race_no = _int(
+                race_key,
+                0
+            )
+
+            if 1 <= race_no <= 12:
+
+                race_numbers.append(
+                    race_no
+                )
+
+    return sorted(
+        race_numbers
+    )
+
+
+def race_to_df(race):
+    """
+    出走表と直前情報をDataFrameへ変換。
+
+    通常:
+        1,2,3,4,5,6
+
+    欠場など:
+        1,2,3,5,6
+
+    のように、実際に存在する艇だけを返す。
+
+    「boat」は必ず艇番1〜6。
+    選手登録番号・モーター番号・ボート番号を
+    艇番として使用しない。
+    """
+
+    if not isinstance(
+        race,
+        dict
+    ):
+        return pd.DataFrame()
+
+    racers = _normalize_racers(
+        race.get("racers")
+    )
+
+    preview = (
+        race
+        .get("preview", {})
+        .get("racers", {})
+    )
+
+    preview = _normalize_racers(
+        preview
+    )
+
+    active_boats = sorted(
+        racers.keys()
+    )
+
+    # 3艇未満は3連単予想不可
+    if not (
+        3 <= len(active_boats) <= 6
+    ):
+        return pd.DataFrame()
+
+    rows = []
+
+    for boat in active_boats:
+
+        racer = racers[boat]
+
+        preview_data = preview.get(
+            boat,
+            {}
+        )
+
+        row = {
+
+            # 艇番
+            "boat": boat,
+
+            # 枠番
+            "entry_number": boat,
+
+            # 選手情報
+            "name": str(
+                racer.get(
+                    "name",
+                    ""
+                )
+            ),
+
+            "racer_number": _int(
+                racer.get(
+                    "number"
+                ),
+                0
+            ),
+
+            "rank_number": _int(
+                racer.get(
+                    "rank_number"
+                ),
+                0
+            ),
+
+            "age": _int(
+                racer.get(
+                    "age"
+                ),
+                0
+            ),
+
+            # 全国成績
+            "average_start_timing": _num(
+                racer.get(
+                    "average_start_timing"
+                ),
+                0
+            ),
+
+            "national_win_rate": _num(
+                racer.get(
+                    "national_win_rate"
+                ),
+                0
+            ),
+
+            "national_top_2_percent": _num(
+                racer.get(
+                    "national_top_2_percent"
+                ),
+                0
+            ),
+
+            "national_top_3_percent": _num(
+                racer.get(
+                    "national_top_3_percent"
+                ),
+                0
+            ),
+
+            # 当地成績
+            "local_win_rate": _num(
+                racer.get(
+                    "local_win_rate"
+                ),
+                0
+            ),
+
+            "local_top_2_percent": _num(
+                racer.get(
+                    "local_top_2_percent"
+                ),
+                0
+            ),
+
+            "local_top_3_percent": _num(
+                racer.get(
+                    "local_top_3_percent"
+                ),
+                0
+            ),
+
+            # モーター
+            "motor_number": _int(
+                racer.get(
+                    "motor_number"
+                ),
+                0
+            ),
+
+            "motor_top_2_percent": _num(
+                racer.get(
+                    "motor_top_2_percent"
+                ),
+                0
+            ),
+
+            "motor_top_3_percent": _num(
+                racer.get(
+                    "motor_top_3_percent"
+                ),
+                0
+            ),
+
+            # ボート
+            "boat_number": _int(
+                racer.get(
+                    "boat_number"
+                ),
+                0
+            ),
+
+            "boat_top_2_percent": _num(
+                racer.get(
+                    "boat_top_2_percent"
+                ),
+                0
+            ),
+
+            "boat_top_3_percent": _num(
+                racer.get(
+                    "boat_top_3_percent"
+                ),
+                0
+            ),
+
+            # F/L
+            "flying_count": _int(
+                racer.get(
+                    "flying_count"
+                ),
+                0
+            ),
+
+            "late_count": _int(
+                racer.get(
+                    "late_count"
+                ),
+                0
+            ),
+
+            # 進入コース
+            "course_number": _int(
+                preview_data.get(
+                    "course_number"
+                ),
+                boat
+            ),
+
+            "start_timing": _num(
+                preview_data.get(
+                    "start_timing"
+                ),
+                0
+            ),
+
+            "exhibition_time": _num(
+                preview_data.get(
+                    "exhibition_time"
+                ),
+                0
+            ),
+
+            "weight": _num(
+                preview_data.get(
+                    "weight"
+                ),
+                0
+            ),
+
+            "tilt_adjustment": _num(
+                preview_data.get(
+                    "tilt_adjustment"
+                ),
+                0
+            ),
+        }
+
+        rows.append(row)
+
+    df = pd.DataFrame(
+        rows
+    )
+
+    if not (
+        3 <= len(df) <= 6
+    ):
+        return pd.DataFrame()
+
+    if len(
+        set(
+            df["boat"].astype(int)
+        )
+    ) != len(df):
+
+        return pd.DataFrame()
+
+    # 欠場等で存在しない艇を記録
+    df.attrs[
+        "active_boats"
+    ] = active_boats
+
+    df.attrs[
+        "withdrawn_boats"
+    ] = [
+        boat
+        for boat in range(1, 7)
+        if boat not in active_boats
     ]
 
-    if not candidates:
-        return ranked[1]
+    return df
 
-    main_axis = int(
-        main_combo[0]
+
+def get_result(race):
+    """
+    結果を1着-2着-3着の艇番で返す。
+
+    通常:
+        (1, 2, 3)
+
+    欠場艇がある場合:
+        (1, 5, 2)
+
+    のように、実際の着順だけを見る。
+
+    3着まで取得できれば有効。
+    """
+
+    if not isinstance(
+        race,
+        dict
+    ):
+        return None
+
+    result = race.get(
+        "result"
     )
 
-    candidate_rows = []
+    if not isinstance(
+        result,
+        dict
+    ):
+        return None
 
-    for item in candidates:
-        combo = item[0]
+    racers = _normalize_racers(
+        result.get("racers")
+    )
 
-        raw_score = float(item[2])
+    if len(racers) < 3:
+        return None
 
-        alternative_axis = int(
-            combo[0]
+    finish = []
+
+    for boat, racer in racers.items():
+
+        place = _int(
+            racer.get(
+                "place_number"
+            ),
+            0
         )
 
-        second_boat = int(combo[1])
-        third_boat = int(combo[2])
+        if (
+            1 <= boat <= 6
+            and place > 0
+        ):
 
-        axis_score = float(
-            first_score[alternative_axis]
-        )
-
-        third_score_value = float(
-            third_score[third_boat]
-        )
-
-        diversity_bonus = 0.0
-
-        if alternative_axis != main_axis:
-            diversity_bonus = 0.025
-
-        third_boat_bonus = 0.0
-
-        if third_boat == 2:
-            third_boat_bonus = 0.018
-
-        third_fit_bonus = 0.035 * float(
-            np.clip(
-                first_score[third_boat]
-                - first_score[second_boat],
-                -0.20,
-                0.20
+            finish.append(
+                (
+                    place,
+                    boat
+                )
             )
-        )
 
-        third_strength_bonus = (
-            0.035 * third_score_value
-        )
-
-        hole_score = (
-            raw_score
-            + diversity_bonus
-            + 0.10 * axis_score
-            + third_boat_bonus
-            + third_fit_bonus
-            + third_strength_bonus
-        )
-
-        candidate_rows.append((
-            float(hole_score),
-            item
-        ))
-
-    candidate_rows.sort(
-        key=lambda item: (
-            item[0],
-            float(item[1][2])
-        ),
-        reverse=True
+    finish.sort(
+        key=lambda x: x[0]
     )
 
-    return candidate_rows[0][1]
+    if len(finish) < 3:
+        return None
 
-
-def predict(df, stadium_no=None):
-    if not isinstance(df, pd.DataFrame):
-        raise ValueError(
-            "出走表データが不正です。"
-        )
-
-    if not (3 <= len(df) <= 6):
-        raise ValueError(
-            "3〜6艇分の出走表が必要です。"
-        )
-
-    boats_series = pd.to_numeric(
-        df["boat"],
-        errors="coerce"
+    top3 = tuple(
+        boat
+        for place, boat
+        in finish[:3]
     )
 
-    if boats_series.isna().any():
-        raise ValueError(
-            "艇番データが不正です。"
-        )
-
-    active_boats = tuple(
-        sorted(
-            set(
-                boats_series.astype(int)
-            )
-        )
-    )
-
-    if not (3 <= len(active_boats) <= 6):
-        raise ValueError(
-            "予想対象艇数が不正です。"
-        )
+    if len(
+        set(top3)
+    ) != 3:
+        return None
 
     if not all(
         1 <= boat <= 6
-        for boat in active_boats
+        for boat in top3
     ):
-        raise ValueError(
-            "艇番が1〜6になっていません。"
-        )
+        return None
 
-    x = _prepare(df)
+    return top3
 
-    first_score = dict(
-        zip(
-            x["boat"].astype(int),
-            x["first_score"].astype(float)
-        )
-    )
 
-    second_score = dict(
-        zip(
-            x["boat"].astype(int),
-            x["second_score"].astype(float)
-        )
-    )
+def get_payout(race):
+    """
+    3連単払戻を取得。
+    """
 
-    third_score = dict(
-        zip(
-            x["boat"].astype(int),
-            x["third_score"].astype(float)
-        )
-    )
-
-    combos = []
-
-    for a, b, c in itertools.permutations(
-        active_boats,
-        3
+    if not isinstance(
+        race,
+        dict
     ):
-        score = _combo_score(
-            a,
-            b,
-            c,
-            first_score,
-            second_score,
-            third_score
-        )
+        return None
 
-        combos.append(
-            ((a, b, c), score)
-        )
-
-    if not combos:
-        raise ValueError(
-            "3連単候補を生成できません。"
-        )
-
-    raw_scores = np.array(
-        [
-            score
-            for _, score in combos
-        ],
-        dtype=float
+    payouts = (
+        race
+        .get("result", {})
+        .get("payouts", {})
+        .get("trifecta", [])
     )
 
-    probabilities = _softmax(
-        raw_scores,
-        temperature=0.075
-    )
-
-    ranked = sorted(
-        [
-            (
-                combo,
-                float(probability),
-                float(score)
-            )
-            for (combo, score),
-            probability
-            in zip(
-                combos,
-                probabilities
-            )
-        ],
-        key=lambda item: item[1],
-        reverse=True
-    )
-
-    ranked = _apply_venue_adjustment(
-        ranked,
-        stadium_no
-    )
-
-    main, counter = _select_main_counter(
-        ranked,
-        first_score,
-        second_score,
-        third_score
-    )
-
-    hole = _select_hole(
-        ranked,
-        main,
-        counter,
-        first_score,
-        third_score
-    )
-
-    used = {
-        main[0],
-        counter[0]
-    }
-
-    if hole[0] in used:
-        alternatives = [
-            item
-            for item in ranked
-            if item[0] not in used
-        ]
-
-        if alternatives:
-            hole = alternatives[0]
-
-    if (
-        main[0] == counter[0]
-        or main[0] == hole[0]
-        or counter[0] == hole[0]
+    if not isinstance(
+        payouts,
+        list
     ):
-        unique = []
+        return None
 
-        for item in [
-            main,
-            counter,
-            hole
-        ]:
-            if item[0] not in [
-                u[0] for u in unique
-            ]:
-                unique.append(item)
+    for item in payouts:
 
-        for item in ranked:
-            if len(unique) >= 3:
-                break
+        if not isinstance(
+            item,
+            dict
+        ):
+            continue
 
-            if item[0] not in [
-                u[0] for u in unique
-            ]:
-                unique.append(item)
-
-        if len(unique) >= 3:
-            main = unique[0]
-            counter = unique[1]
-            hole = unique[2]
-
-    first_values = [
-        first_score[boat]
-        for boat in active_boats
-    ]
-
-    first_probabilities = _softmax(
-        first_values,
-        temperature=0.10
-    )
-
-    first_ranking = sorted(
-        zip(
-            active_boats,
-            first_probabilities
-        ),
-        key=lambda item: item[1],
-        reverse=True
-    )
-
-    axis = int(
-        main[0][0]
-    )
-
-    axis_rank = [
-        boat
-        for boat, _
-        in first_ranking
-    ]
-
-    axis_position = (
-        axis_rank.index(axis)
-        if axis in axis_rank
-        else 0
-    )
-
-    axis_top3_probability = float(
-        sum(
-            probability
-            for boat, probability
-            in first_ranking[:3]
-        )
-    )
-
-    if axis_position < 3:
-        axis_top3_probability = float(
-            sum(
-                probability
-                for boat, probability
-                in first_ranking[:3]
+        combination = str(
+            item.get(
+                "combination",
+                ""
             )
         )
 
-    if len(first_ranking) >= 2:
-        margin = float(
-            first_ranking[0][1]
-            - first_ranking[1][1]
+        combination = (
+            combination
+            .replace(
+                "=",
+                "-"
+            )
+            .replace(
+                " ",
+                ""
+            )
         )
+
+        parts = combination.split(
+            "-"
+        )
+
+        if len(parts) == 3:
+
+            return {
+                "combination": combination,
+                "amount": _int(
+                    item.get(
+                        "amount"
+                    ),
+                    0
+                )
+            }
+
+    return None
+
+
+def get_all_races(
+    day,
+    require_result=False
+):
+    """
+    1日分の全24場レースを取得。
+
+    通常6艇。
+    欠場等で5艇以下になったレースも
+    取得対象にする。
+    """
+
+    if isinstance(
+        day,
+        date
+    ):
+        day_str = day.isoformat()
     else:
-        margin = 0.0
+        day_str = str(day)
 
-    confidence = (
-        62.0
-        + margin * 220.0
+    data = get_day_data(
+        day_str
     )
 
-    confidence = min(
-        95.0,
-        max(55.0, confidence)
+    stadiums = (
+        data
+        .get("programs", {})
+        .get("stadiums", {})
     )
 
-    tickets = [
-        {
-            "label": "本線",
-            "combo": main[0],
-            "prob": float(main[1])
-        },
-        {
-            "label": "対抗",
-            "combo": counter[0],
-            "prob": float(counter[1])
-        },
-        {
-            "label": "穴",
-            "combo": hole[0],
-            "prob": float(hole[1])
-        },
-    ]
+    result = []
 
-    return {
-        "tickets": tickets,
-        "ranking": ranked,
-        "confidence": round(
-            confidence,
-            1
-        ),
-        "axis": axis,
-        "axis_top3": axis_top3_probability,
-        "all_combos": ranked,
-        "df": x,
-    }
+    for stadium_key, stadium in stadiums.items():
+
+        stadium_no = _int(
+            stadium_key,
+            0
+        )
+
+        if not (
+            1 <= stadium_no <= 24
+        ):
+            continue
+
+        if not isinstance(
+            stadium,
+            dict
+        ):
+            continue
+
+        races = stadium.get(
+            "races",
+            {}
+        )
+
+        for race_key, race in races.items():
+
+            race_no = _int(
+                race_key,
+                0
+            )
+
+            if not (
+                1 <= race_no <= 12
+            ):
+                continue
+
+            if not isinstance(
+                race,
+                dict
+            ):
+                continue
+
+            racers = _normalize_racers(
+                race.get("racers")
+            )
+
+            if not (
+                3 <= len(racers) <= 6
+            ):
+                continue
+
+            if require_result:
+
+                if get_result(race) is None:
+                    continue
+
+            result.append(
+                (
+                    stadium_no,
+                    race_no,
+                    race
+                )
+            )
+
+    result.sort(
+        key=lambda x: (
+            x[0],
+            x[1]
+        )
+    )
+
+    return result

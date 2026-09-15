@@ -113,7 +113,7 @@ def _prepare(df):
         + 0.12 * x["top2_n"]
         + 0.10 * x["top2_l"]
         + 0.07 * x["st"]
-        + 0.08 * x["exh"]
+        + 0.05 * x["exh"]
     )
 
     return x

@@ -224,53 +224,14 @@ def _select_main_counter(
         )
 
     original_main = ranked[0]
-
     original_axis = int(
         original_main[0][0]
     )
 
+    # 今回の実験：
+    # 5号艇だけを特別に軸へ昇格させる処理を削除。
+    # 元のランキング1位をそのまま軸候補として使用する。
     candidate_main = original_main
-
-    if (
-        original_axis != 5
-        and 5 in first_score
-    ):
-        current_axis_score = float(
-            first_score[original_axis]
-        )
-
-        boat5_score = float(
-            first_score[5]
-        )
-
-        axis_gap = (
-            current_axis_score
-            - boat5_score
-        )
-
-        if axis_gap <= 0.025:
-            boat5_candidates = [
-                item
-                for item in ranked
-                if int(item[0][0]) == 5
-            ]
-
-            if boat5_candidates:
-                best_boat5 = boat5_candidates[0]
-
-                original_raw = float(
-                    original_main[2]
-                )
-
-                boat5_raw = float(
-                    best_boat5[2]
-                )
-
-                if (
-                    boat5_raw
-                    >= original_raw - 0.035
-                ):
-                    candidate_main = best_boat5
 
     axis = int(candidate_main[0][0])
 
@@ -305,12 +266,14 @@ def _select_main_counter(
             + float(bonus)
         )
 
-        adjusted.append({
-            "combo": combo,
-            "prob": float(probability),
-            "raw_score": float(raw_score),
-            "adjusted_score": adjusted_score,
-        })
+        adjusted.append(
+            {
+                "combo": combo,
+                "prob": float(probability),
+                "raw_score": float(raw_score),
+                "adjusted_score": adjusted_score,
+            }
+        )
 
     adjusted.sort(
         key=lambda item: (
@@ -325,8 +288,7 @@ def _select_main_counter(
     counter_candidates = [
         item
         for item in adjusted
-        if item["combo"]
-        != main_candidate["combo"]
+        if item["combo"] != main_candidate["combo"]
     ]
 
     if not counter_candidates:
@@ -400,10 +362,7 @@ def _venue_profile(stadium_no):
     )
 
 
-def _venue_axis_bonus(
-    stadium_no,
-    axis
-):
+def _venue_axis_bonus(stadium_no, axis):
     try:
         stadium_no = int(stadium_no)
         axis = int(axis)
@@ -414,23 +373,23 @@ def _venue_axis_bonus(
         1: {
             4: -0.008,
             5: -0.012,
-            6: -0.012,
+            6: -0.012
         },
         20: {
-            2: -0.012,
+            2: -0.012
         },
         7: {
-            1: 0.010,
+            1: 0.010
         },
         22: {
-            1: 0.010,
+            1: 0.010
         },
         21: {
-            1: 0.010,
+            1: 0.010
         },
         9: {
             2: -0.010,
-            5: -0.010,
+            5: -0.010
         },
     }
 
@@ -465,9 +424,11 @@ def _apply_venue_adjustment(
         elif axis in (3, 4, 5, 6):
             axis_bonus *= 0.85
 
-        venue_axis_bonus = _venue_axis_bonus(
-            stadium_no,
-            axis
+        venue_axis_bonus = (
+            _venue_axis_bonus(
+                stadium_no,
+                axis
+            )
         )
 
         adjusted_score = (
@@ -476,11 +437,13 @@ def _apply_venue_adjustment(
             + venue_axis_bonus
         )
 
-        adjusted.append((
-            combo,
-            probability,
-            adjusted_score
-        ))
+        adjusted.append(
+            (
+                combo,
+                probability,
+                adjusted_score
+            )
+        )
 
     adjusted.sort(
         key=lambda item: (
@@ -515,21 +478,15 @@ def _select_hole(
     if not candidates:
         return ranked[1]
 
-    main_axis = int(
-        main_combo[0]
-    )
+    main_axis = int(main_combo[0])
 
     candidate_rows = []
 
     for item in candidates:
         combo = item[0]
-
         raw_score = float(item[2])
 
-        alternative_axis = int(
-            combo[0]
-        )
-
+        alternative_axis = int(combo[0])
         second_boat = int(combo[1])
         third_boat = int(combo[2])
 
@@ -551,12 +508,15 @@ def _select_hole(
         if third_boat == 2:
             third_boat_bonus = 0.018
 
-        third_fit_bonus = 0.035 * float(
-            np.clip(
-                first_score[third_boat]
-                - first_score[second_boat],
-                -0.20,
-                0.20
+        third_fit_bonus = (
+            0.035
+            * float(
+                np.clip(
+                    first_score[third_boat]
+                    - first_score[second_boat],
+                    -0.20,
+                    0.20
+                )
             )
         )
 
@@ -573,10 +533,12 @@ def _select_hole(
             + third_strength_bonus
         )
 
-        candidate_rows.append((
-            float(hole_score),
-            item
-        ))
+        candidate_rows.append(
+            (
+                float(hole_score),
+                item
+            )
+        )
 
     candidate_rows.sort(
         key=lambda item: (
@@ -670,7 +632,10 @@ def predict(df, stadium_no=None):
         )
 
         combos.append(
-            ((a, b, c), score)
+            (
+                (a, b, c),
+                score
+            )
         )
 
     if not combos:
@@ -698,9 +663,10 @@ def predict(df, stadium_no=None):
                 float(probability),
                 float(score)
             )
-            for (combo, score),
-            probability
-            in zip(
+            for (
+                (combo, score),
+                probability
+            ) in zip(
                 combos,
                 probabilities
             )
@@ -757,7 +723,8 @@ def predict(df, stadium_no=None):
             hole
         ]:
             if item[0] not in [
-                u[0] for u in unique
+                u[0]
+                for u in unique
             ]:
                 unique.append(item)
 
@@ -766,7 +733,8 @@ def predict(df, stadium_no=None):
                 break
 
             if item[0] not in [
-                u[0] for u in unique
+                u[0]
+                for u in unique
             ]:
                 unique.append(item)
 
@@ -794,9 +762,7 @@ def predict(df, stadium_no=None):
         reverse=True
     )
 
-    axis = int(
-        main[0][0]
-    )
+    axis = int(main[0][0])
 
     axis_rank = [
         boat
@@ -874,4 +840,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-        }
+    }

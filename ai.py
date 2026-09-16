@@ -61,7 +61,7 @@ def _softmax(values,temperature=.075):
     return e/total if total>0 else np.ones(len(values))/len(values)
 
 def _combo_score(a,b,c,first_score,second_score,third_score):
-    s=1.00*first_score[a]+.72*second_score[b]+.52*third_score[c]
+    s=1.00*first_score[a]+.72*second_score[b]+.58*third_score[c]
     if a==1:s+=.055
     elif a==2:s+=.025
     if b==1:s+=.020
@@ -139,7 +139,7 @@ def _select_hole(ranked,main,counter,first_score,third_score):
         h+=.10*float(first_score[a])
         if c==2:h+=.018
         h+=.035*float(np.clip(first_score[c]-first_score[b],-.20,.20))
-        h+=.035*float(third_score[c])
+        h+=.035*float(third_score[c]) - (.015 if c==6 else 0.0)
         rows.append((h,item))
     rows.sort(key=lambda z:(z[0],float(z[1][2])),reverse=True)
     return rows[0][1]

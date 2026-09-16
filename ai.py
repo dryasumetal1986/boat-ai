@@ -61,7 +61,7 @@ def _softmax(values,temperature=.075):
     return e/total if total>0 else np.ones(len(values))/len(values)
 
 def _combo_score(a,b,c,first_score,second_score,third_score):
-    s=1.00*first_score[a]+.72*second_score[b]+.58*third_score[c]
+    s=1.00*first_score[a]+.72*second_score[b]+.52*third_score[c]
     if a==1:s+=.055
     elif a==2:s+=.025
     if b==1:s+=.020

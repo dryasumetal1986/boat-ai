@@ -52,9 +52,7 @@ def _prepare(df):
     valid_exhibition = exhibition[exhibition > 0]
 
     if len(valid_exhibition) > 0:
-        exhibition_median = float(
-            valid_exhibition.median()
-        )
+        exhibition_median = float(valid_exhibition.median())
     else:
         exhibition_median = 1.0
 
@@ -109,11 +107,11 @@ def _prepare(df):
         0.18 * x["top3_n"]
         + 0.14 * x["top3_l"]
         + 0.16 * x["motor3"]
-        + 0.08 * x["boat3"]
+        + 0.12 * x["boat3"]
         + 0.12 * x["top2_n"]
         + 0.10 * x["top2_l"]
-        + 0.07 * x["st"]
-        + 0.05 * x["exh"]
+        + 0.10 * x["st"]
+        + 0.08 * x["exh"]
     )
 
     return x
@@ -210,7 +208,7 @@ def _ordering_bonus(
 
     return (
         0.045 * strength_gap
-        + 0.015 * role
+        + 0.025 * role
     )
 
 
@@ -876,4 +874,4 @@ def predict(df, stadium_no=None):
         "axis_top3": axis_top3_probability,
         "all_combos": ranked,
         "df": x,
-    }
+        }

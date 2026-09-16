@@ -45,10 +45,10 @@ def _prepare(df):
         .14*x["motor2"]+.08*x["motor3"]+.10*x["boat2"]+.10*x["st"]
     )
 
-    # ★今回の実験はここだけ：third_score の national 2連対率 0.12 → 0.15
+    # 14.1% baseline
     x["third_score"]=(
         .18*x["top3_n"]+.14*x["top3_l"]+.16*x["motor3"]+.12*x["boat3"]+
-        .15*x["top2_n"]+.10*x["top2_l"]+.10*x["st"]+.08*x["exh"]
+        .12*x["top2_n"]+.10*x["top2_l"]+.10*x["st"]+.08*x["exh"]
     )
     return x
 
@@ -135,11 +135,12 @@ def _select_hole(ranked,main,counter,first_score,third_score):
     for item in cand:
         combo,raw=item[0],float(item[2]); a,b,c=map(int,combo)
         h=raw
-        if a!=ma:h+=.025
+        # ★今回の実験はここだけ：穴の別軸ボーナス .025 → .040
+        if a!=ma:h+=.040
         h+=.10*float(first_score[a])
         if c==2:h+=.018
         h+=.035*float(np.clip(first_score[c]-first_score[b],-.20,.20))
-        h+=.035*float(third_score[c]) - (.015 if c==6 else 0.0)
+        h+=.035*float(third_score[c])
         rows.append((h,item))
     rows.sort(key=lambda z:(z[0],float(z[1][2])),reverse=True)
     return rows[0][1]

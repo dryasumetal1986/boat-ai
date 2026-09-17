@@ -21,8 +21,8 @@ def _prepare(df):
     x["win_l"]=_norm_series(x["local_win_rate"])
     x["top2_n"]=_norm_series(x["national_top_2_percent"])
     x["top3_n"]=_norm_series(x["national_top_3_percent"])
-    x["top2_l"]=_norm_series(x["local_top_2_percent"])
-    x["top3_l"]=_norm_series(x["local_top_3_percent"])
+    x["top2_l"]=_norm_series(x["national_top_2_percent"])
+    x["top3_l"]=_norm_series(x["national_top_3_percent"])
     x["motor2"]=_norm_series(x["motor_top_2_percent"])
     x["motor3"]=_norm_series(x["motor_top_3_percent"])
     x["boat2"]=_norm_series(x["boat_top_2_percent"])
@@ -72,8 +72,7 @@ def _ordering_bonus(second_boat,third_boat,second_score,third_score):
     sr=float(np.clip(second_score[second_boat]-third_score[second_boat],-.30,.30))
     tr=float(np.clip(third_score[third_boat]-second_score[third_boat],-.30,.30))
     gap=float(np.clip(ss-ts,-.30,.30))
-    # ★今回の実験：対抗の role 係数 .025 → .030
-    return .045*gap+.030*((sr+tr)/2.0)
+    return .045*gap+.025*((sr+tr)/2.0)
 
 def _select_main_counter(ranked,first_score,second_score,third_score):
     if not ranked:raise ValueError("予想候補がありません。")

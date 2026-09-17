@@ -21,8 +21,8 @@ def _prepare(df):
     x["win_l"]=_norm_series(x["local_win_rate"])
     x["top2_n"]=_norm_series(x["national_top_2_percent"])
     x["top3_n"]=_norm_series(x["national_top_3_percent"])
-    x["top2_l"]=_norm_series(x["national_top_2_percent"])
-    x["top3_l"]=_norm_series(x["national_top_3_percent"])
+    x["top2_l"]=_norm_series(x["local_top_2_percent"])
+    x["top3_l"]=_norm_series(x["local_top_3_percent"])
     x["motor2"]=_norm_series(x["motor_top_2_percent"])
     x["motor3"]=_norm_series(x["motor_top_3_percent"])
     x["boat2"]=_norm_series(x["boat_top_2_percent"])
@@ -45,7 +45,6 @@ def _prepare(df):
         .14*x["motor2"]+.08*x["motor3"]+.10*x["boat2"]+.10*x["st"]
     )
 
-    # 14.1% baseline
     x["third_score"]=(
         .18*x["top3_n"]+.14*x["top3_l"]+.16*x["motor3"]+.12*x["boat3"]+
         .12*x["top2_n"]+.10*x["top2_l"]+.10*x["st"]+.08*x["exh"]

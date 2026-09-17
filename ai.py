@@ -72,7 +72,8 @@ def _ordering_bonus(second_boat,third_boat,second_score,third_score):
     sr=float(np.clip(second_score[second_boat]-third_score[second_boat],-.30,.30))
     tr=float(np.clip(third_score[third_boat]-second_score[third_boat],-.30,.30))
     gap=float(np.clip(ss-ts,-.30,.30))
-    return .045*gap+.025*((sr+tr)/2.0)
+    # ★今回の実験：対抗の role 係数 .025 → .030
+    return .045*gap+.030*((sr+tr)/2.0)
 
 def _select_main_counter(ranked,first_score,second_score,third_score):
     if not ranked:raise ValueError("予想候補がありません。")
@@ -135,8 +136,7 @@ def _select_hole(ranked,main,counter,first_score,third_score):
     for item in cand:
         combo,raw=item[0],float(item[2]); a,b,c=map(int,combo)
         h=raw
-        # ★今回の実験はここだけ：穴の別軸ボーナス .025 → .040
-        if a!=ma:h+=.040
+        if a!=ma:h+=.025
         h+=.10*float(first_score[a])
         if c==2:h+=.018
         h+=.035*float(np.clip(first_score[c]-first_score[b],-.20,.20))
